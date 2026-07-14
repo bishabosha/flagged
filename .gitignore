@@ -5,3 +5,8 @@ out/
 .metals/
 metals.sbt
 .vscode/
+.scala-build/
+.bsp/
+.metals/
+*.class
+*.jar
