@@ -95,4 +95,5 @@ object Reader:
     * values are matched by kebab-cased case name, case-insensitively.
     * Enables `enum Color derives Reader` and thus `--color red`.
     */
-  inline def derived[A]: Reader[A] = ${ internal.ParserMacros.deriveReader[A] }
+  inline def derived[A](using scala.deriving.Mirror.SumOf[A]): Reader[A] =
+    internal.Derive.enumReader[A]

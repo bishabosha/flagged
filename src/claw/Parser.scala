@@ -41,8 +41,12 @@ sealed trait Parser[A]:
 object Parser:
   /** Derivation entry point for `derives Parser` clauses; also usable directly:
     * `given Parser[Config] = Parser.derived`.
+    *
+    * Derivation is `Mirror`-based and compositional: fields whose types have a
+    * `Parser` (or `Reader`) given in scope use that instance instead of being
+    * re-derived structurally.
     */
-  inline def derived[A]: Parser[A] = ${ internal.ParserMacros.deriveParser[A] }
+  inline def derived[A](using scala.deriving.Mirror.Of[A]): Parser[A] = internal.Derive.of[A]
 
   /** Called by macro-generated code. Not intended for direct use. */
   def make[A](cmd: Command, prog: String): Parser[A] = new Parser[A]:

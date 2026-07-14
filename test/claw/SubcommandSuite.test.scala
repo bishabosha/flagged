@@ -136,3 +136,25 @@ class SubcommandSuite extends munit.FunSuite:
     assertEquals(Claw.parse[Op](Seq("add", "1", "2"))(using summon[Parser[Op]]), Ok(Op.Add(1, 2)))
     assertEquals(Claw.parse[Op](Seq("noop"))(using summon[Parser[Op]]), Ok(Op.Noop))
   }
+
+  test("derivation reuses a Parser given in scope for a subcommand field") {
+    // hand-modified parser for RemoteAction: every command name gets an "x-" prefix
+    val base = Parser.derived[RemoteAction].command
+    val renamed = base.sub.get.copy(cases = base.sub.get.cases.map(c => c.copy(name = s"x-${c.name}")))
+    given custom: Parser[RemoteAction] = Parser.make(base.copy(sub = Some(renamed)), "remote-action")
+
+    case class Wrap(action: RemoteAction) derives Parser
+    // the derived Wrap parser must embed the custom instance, not re-derive structurally
+    assertEquals(
+      ok(Claw.parse[Wrap](Seq("x-add", "origin", "https://x.git"))),
+      Wrap(RemoteAction.Add("origin", "https://x.git"))
+    )
+    val m = err(Claw.parse[Wrap](Seq("add", "origin", "https://x.git")))
+    assert(m.contains("unknown command 'add'"), m)
+  }
+
+  test("structural misconfiguration reported when the parser is constructed") {
+    case class Dup(@name("x") a: Int = 0, @name("x") b: Int = 0)
+    val e = intercept[IllegalArgumentException](Parser.derived[Dup])
+    assert(e.getMessage.contains("duplicate option name '--x'"), e.getMessage)
+  }

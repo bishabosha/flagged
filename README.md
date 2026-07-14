@@ -76,9 +76,10 @@ Fine-tune with annotations:
 | `@positional` | positional argument instead of named option |
 | `@subcommands` | force an all-parameterless enum field to be subcommands |
 
-Mistakes are caught while you compile, not when your users run the tool: duplicate
-names, a second `-h`, a required positional after an optional one, a field type
-nothing knows how to parse — all compile errors.
+A field type that has no `Reader` (and is not a command enum) is a compile error.
+Structural mistakes — duplicate names, a second `-h`, a required positional after an
+optional one — are reported with a descriptive `IllegalArgumentException` when the
+parser instance is constructed, before any arguments are parsed.
 
 ## Subcommands
 
@@ -134,6 +135,9 @@ Run 'gitto remote <command> --help' for more information on a command.
 
 Things to know:
 
+- Derivation is compositional: if a `Parser` (or `Reader`) given for a field's type is
+  already in scope, it is used as-is instead of being re-derived, so any level of the
+  command tree can be supplied or customized independently.
 - Put parent options before the subcommand name (`gitto -v clone ...`), as in git.
 - An `Option[E]`-typed command field makes the command optional; a field default
   (`action: Action = Action.List`) works too.
