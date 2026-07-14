@@ -2,6 +2,7 @@ package claw.internal
 
 import scala.quoted.*
 import claw.{Parser, Reader}
+import steps.result.Result
 
 /** Compile-time derivation of `Parser` and `Reader` instances. */
 object ParserMacros:
@@ -269,7 +270,7 @@ object ParserMacros:
         t: TypeRepr,
         fieldName: String,
         owner: String
-    ): (Expr[String => Either[String, Any]], Expr[String]) =
+    ): (Expr[String => Result[Any, String]], Expr[String]) =
       userReader(t) match
         case Some((r, mv)) => (r, mv)
         case None =>
@@ -286,11 +287,11 @@ object ParserMacros:
               s"No given claw.Reader[${t.show}] found for field '$fieldName' of $owner"
             )
 
-    private def userReader(t: TypeRepr): Option[(Expr[String => Either[String, Any]], Expr[String])] =
+    private def userReader(t: TypeRepr): Option[(Expr[String => Result[Any, String]], Expr[String])] =
       t.asType match
         case '[v] =>
           Expr.summon[Reader[v]].map { r =>
-            val fn = '{ (s: String) => $r.read(s): Either[String, Any] }
+            val fn = '{ (s: String) => $r.read(s): Result[Any, String] }
             (fn, '{ $r.typeName })
           }
 

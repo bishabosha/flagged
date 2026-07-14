@@ -1,6 +1,5 @@
 package claw
 
-import claw.Result.*
 import java.nio.file.Paths
 import scala.concurrent.duration.*
 
@@ -17,14 +16,14 @@ case class ReaderConfig(
 
 class ReaderSuite extends munit.FunSuite:
 
-  def ok[A](r: Result[A]): A = r match
-    case Ok(a)         => a
-    case other         => fail(s"expected success, got $other")
+  def ok[A](r: ParseResult[A]): A = r match
+    case Ok(a) => a
+    case other => fail(s"expected success, got $other")
 
   test("derived enum Reader parses by kebab-cased name") {
-    assertEquals(summon[Reader[LogLevel]].read("warn"), Right(LogLevel.Warn))
-    assertEquals(summon[Reader[LogLevel]].read("DEBUG"), Right(LogLevel.Debug))
-    assert(summon[Reader[LogLevel]].read("nope").isLeft)
+    assertEquals(summon[Reader[LogLevel]].read("warn"), Ok(LogLevel.Warn))
+    assertEquals(summon[Reader[LogLevel]].read("DEBUG"), Ok(LogLevel.Debug))
+    assert(summon[Reader[LogLevel]].read("nope").isErr)
     assertEquals(summon[Reader[LogLevel]].typeName, "debug|info|warn|error")
   }
 
@@ -50,7 +49,7 @@ class ReaderSuite extends munit.FunSuite:
 
   test("reader typeName appears as metavar in help") {
     Claw.parse[ReaderConfig](Seq("--help")) match
-      case Help(t) =>
+      case Err(ParseError.Help(t)) =>
         assert(t.contains("--path <path>"), t)
         assert(t.contains("--timeout <duration>"), t)
         assert(t.contains("--level <debug|info|warn|error>"), t)
@@ -59,17 +58,20 @@ class ReaderSuite extends munit.FunSuite:
 
   test("map/emap combinators") {
     given portReader: Reader[Int] = Reader.of[Int]("port")(s =>
-      s.toIntOption.toRight(s"'$s' is not a port").filterOrElse(p => p > 0 && p < 65536, s"'$s' out of range")
+      s.toIntOption match
+        case Some(p) if p > 0 && p < 65536 => Ok(p)
+        case Some(_)                       => Err(s"'$s' out of range")
+        case None                          => Err(s"'$s' is not a port")
     )
     case class Srv(port: Int = 80) derives Parser
     assertEquals(ok(Claw.parse[Srv](Seq("--port", "8080"))).port, 8080)
     Claw.parse[Srv](Seq("--port", "99999")) match
-      case Failure(m, _) => assert(m.contains("out of range"), m)
-      case other         => fail(s"expected failure, got $other")
+      case Err(ParseError.Failure(m, _)) => assert(m.contains("out of range"), m)
+      case other                         => fail(s"expected failure, got $other")
   }
 
   test("boolean reader accepts unix-y spellings") {
-    assertEquals(summon[Reader[Boolean]].read("on"), Right(true))
-    assertEquals(summon[Reader[Boolean]].read("0"), Right(false))
-    assert(summon[Reader[Boolean]].read("maybe").isLeft)
+    assertEquals(summon[Reader[Boolean]].read("on"), Ok(true))
+    assertEquals(summon[Reader[Boolean]].read("0"), Ok(false))
+    assert(summon[Reader[Boolean]].read("maybe").isErr)
   }

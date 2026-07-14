@@ -1,29 +1,31 @@
 package claw.internal
 
 import claw.Reader
+import steps.result.Result
+import steps.result.Result.{Ok, Err}
 
 /** Runtime helpers referenced by macro-generated code. Not intended for direct use. */
 object Runtime:
 
-  def parseBool(s: String): Either[String, Boolean] =
+  def parseBool(s: String): Result[Boolean, String] =
     s.trim.toLowerCase match
-      case "true" | "yes" | "on" | "1"   => Right(true)
-      case "false" | "no" | "off" | "0"  => Right(false)
-      case other                         => Left(s"'$other' is not a valid bool (expected true/false)")
+      case "true" | "yes" | "on" | "1"   => Ok(true)
+      case "false" | "no" | "off" | "0"  => Ok(false)
+      case other                         => Err(s"'$other' is not a valid bool (expected true/false)")
 
   /** Value reader for enums whose cases are all parameterless, matching kebab-cased names. */
-  def enumRead(pairs: Vector[(String, Any)]): String => Either[String, Any] =
+  def enumRead(pairs: Vector[(String, Any)]): String => Result[Any, String] =
     s =>
       pairs.collectFirst { case (n, v) if n.equalsIgnoreCase(s.trim) => v } match
-        case Some(v) => Right(v)
-        case None    => Left(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")
+        case Some(v) => Ok(v)
+        case None    => Err(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")
 
   def enumReader[A](name: String, pairs: Vector[(String, A)]): Reader[A] = new Reader[A]:
     def typeName = name
     def read(s: String) =
       pairs.collectFirst { case (n, v) if n.equalsIgnoreCase(s.trim) => v } match
-        case Some(v) => Right(v)
-        case None    => Left(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")
+        case Some(v) => Ok(v)
+        case None    => Err(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")
 
   private def levenshtein(a: String, b: String): Int =
     val d = Array.tabulate(a.length + 1, b.length + 1) { (i, j) =>

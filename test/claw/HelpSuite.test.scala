@@ -1,13 +1,11 @@
 package claw
 
-import claw.Result.*
-
 class HelpSuite extends munit.FunSuite:
 
   def helpText[A](args: Seq[String])(using Parser[A]): String =
     Claw.parse[A](args) match
-      case Help(t) => t
-      case other   => fail(s"expected help, got $other")
+      case Err(ParseError.Help(t)) => t
+      case other                   => fail(s"expected help, got $other")
 
   test("--help at top level") {
     val t = helpText[Git](Seq("--help"))
@@ -76,7 +74,7 @@ class HelpSuite extends munit.FunSuite:
 
   test("failure hints point at --help for the right level") {
     Claw.parse[Git](Seq("clone")) match
-      case Failure(m, hint) =>
+      case Err(ParseError.Failure(m, hint)) =>
         assert(m.contains("<repo>"), m)
         assert(hint.contains("git clone --help"), hint)
       case other => fail(s"expected failure, got $other")

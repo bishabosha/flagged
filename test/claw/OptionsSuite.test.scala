@@ -1,6 +1,5 @@
 package claw
 
-import claw.Result.*
 
 case class Basic(
     @short('v') @help("Increase verbosity") verbose: Boolean = false,
@@ -32,14 +31,14 @@ case class VarargPositionals(
 
 class OptionsSuite extends munit.FunSuite:
 
-  def ok[A](r: Result[A]): A = r match
-    case Ok(a)          => a
-    case Help(t)        => fail(s"expected success, got help:\n$t")
-    case Failure(m, h)  => fail(s"expected success, got failure: $m")
+  def ok[A](r: ParseResult[A]): A = r match
+    case Ok(a)                          => a
+    case Err(ParseError.Help(t))        => fail(s"expected success, got help:\n$t")
+    case Err(ParseError.Failure(m, _))  => fail(s"expected success, got failure: $m")
 
-  def err[A](r: Result[A]): String = r match
-    case Failure(m, _) => m
-    case other         => fail(s"expected failure, got $other")
+  def err[A](r: ParseResult[A]): String = r match
+    case Err(ParseError.Failure(m, _)) => m
+    case other                         => fail(s"expected failure, got $other")
 
   test("all defaults") {
     assertEquals(ok(Claw.parse[Basic](Nil)), Basic())

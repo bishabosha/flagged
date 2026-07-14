@@ -1,5 +1,7 @@
 package claw.internal
 
+import steps.result.Result
+
 /** Internal runtime model of a derived command. Public because macro-generated code
   * at user call sites must reference these types; not intended for direct use.
   */
@@ -10,10 +12,10 @@ enum Mode:
   /** Option taking one value. If `optional` the field is an `Option[_]` and the
     * parsed value is wrapped in `Some`.
     */
-  case Single(read: String => Either[String, Any], optional: Boolean)
+  case Single(read: String => Result[Any, String], optional: Boolean)
 
   /** Option that may appear multiple times; collected values are converted with `fromList`. */
-  case Repeated(read: String => Either[String, Any], fromList: List[Any] => Any)
+  case Repeated(read: String => Result[Any, String], fromList: List[Any] => Any)
 
 final case class OptSpec(
     long: String,

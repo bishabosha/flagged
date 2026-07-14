@@ -11,11 +11,11 @@ sealed trait Parser[A]:
   private[claw] def command: Command
   private[claw] def defaultProg: String
 
-  /** Parse `args`, reporting help/errors as values. */
-  final def parse(args: Seq[String]): Result[A] = parse(args, defaultProg)
+  /** Parse `args`, reporting help/errors as values on the `Err` channel. */
+  final def parse(args: Seq[String]): ParseResult[A] = parse(args, defaultProg)
 
-  final def parse(args: Seq[String], prog: String): Result[A] =
-    Engine.run(command, prog, Nil, args.toList).asInstanceOf[Result[A]]
+  final def parse(args: Seq[String], prog: String): ParseResult[A] =
+    Engine.run(command, prog, Nil, args.toList).asInstanceOf[ParseResult[A]]
 
   /** Parse `args`; on `--help` print the help screen and exit 0, on error print a
     * message to stderr and exit 2. Intended for `@main` methods and scripts.
@@ -24,11 +24,11 @@ sealed trait Parser[A]:
 
   final def parseOrExit(args: Seq[String], prog: String): A =
     parse(args, prog) match
-      case Result.Ok(a) => a
-      case Result.Help(text) =>
+      case Ok(a) => a
+      case Err(ParseError.Help(text)) =>
         println(text)
         sys.exit(0)
-      case Result.Failure(message, hint) =>
+      case Err(ParseError.Failure(message, hint)) =>
         System.err.println(s"$prog: $message")
         if hint.nonEmpty then System.err.println(hint)
         sys.exit(2)
@@ -57,8 +57,8 @@ object Parser:
   * }}}
   */
 object Claw:
-  def parse[A](args: Seq[String])(using p: Parser[A]): Result[A] = p.parse(args)
-  def parse[A](args: Seq[String], prog: String)(using p: Parser[A]): Result[A] = p.parse(args, prog)
+  def parse[A](args: Seq[String])(using p: Parser[A]): ParseResult[A] = p.parse(args)
+  def parse[A](args: Seq[String], prog: String)(using p: Parser[A]): ParseResult[A] = p.parse(args, prog)
   def parseOrExit[A](args: Seq[String])(using p: Parser[A]): A = p.parseOrExit(args)
   def parseOrExit[A](args: Seq[String], prog: String)(using p: Parser[A]): A = p.parseOrExit(args, prog)
   def help[A](using p: Parser[A]): String = p.help

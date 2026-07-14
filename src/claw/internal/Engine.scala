@@ -1,18 +1,20 @@
 package claw.internal
 
-import claw.Result
+import claw.{ParseError, ParseResult}
+import steps.result.Result
+import steps.result.Result.{Ok, Err, eval}
+import steps.result.Result.eval.ok
 import scala.collection.mutable
-import scala.util.boundary, boundary.break
 
 /** The token-stream parser. Interprets a `Command` tree against the argument list. */
 private[claw] object Engine:
 
-  def run(cmd: Command, prog: String, path: List[String], args: List[String]): Result[Any] =
-    boundary[Result[Any]]:
+  def run(cmd: Command, prog: String, path: List[String], args: List[String]): ParseResult[Any] =
+    Result:
       val full = (prog :: path).mkString(" ")
       def hint = s"Try '$full --help' for more information."
-      def fail(msg: String): Nothing = break(Result.Failure(msg, hint))
-      def helpNow(): Nothing = break(Result.Help(HelpFmt.render(cmd, prog, path)))
+      def fail(msg: String): Nothing = eval.raise(ParseError.Failure(msg, hint))
+      def helpNow(): Nothing = eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path)))
 
       val values = new Array[Any](cmd.arity)
       val isSet = new Array[Boolean](cmd.arity)
@@ -39,24 +41,23 @@ private[claw] object Engine:
           case _ =>
             fail(s"option '$display' requires a value")
 
+      def readOr(read: String => Result[Any, String], raw: String, display: String): Any =
+        read(raw) match
+          case Ok(v)    => v
+          case Err(msg) => fail(s"invalid value for '$display': $msg")
+
       def setParsed(spec: OptSpec, raw: String, display: String): Unit =
         spec.mode match
           case Mode.Flag =>
-            Runtime.parseBool(raw) match
-              case Left(err) => fail(s"invalid value for '$display': $err")
-              case Right(b)  => values(spec.index) = b; isSet(spec.index) = true
+            values(spec.index) = readOr(Runtime.parseBool(_), raw, display)
+            isSet(spec.index) = true
           case Mode.Single(read, optional) =>
-            read(raw) match
-              case Left(err) => fail(s"invalid value for '$display': $err")
-              case Right(v) =>
-                values(spec.index) = if optional then Some(v) else v
-                isSet(spec.index) = true
+            val v = readOr(read, raw, display)
+            values(spec.index) = if optional then Some(v) else v
+            isSet(spec.index) = true
           case Mode.Repeated(read, _) =>
-            read(raw) match
-              case Left(err) => fail(s"invalid value for '$display': $err")
-              case Right(v) =>
-                collected.getOrElseUpdate(spec.index, mutable.ListBuffer.empty) += v
-                isSet(spec.index) = true
+            collected.getOrElseUpdate(spec.index, mutable.ListBuffer.empty) += readOr(read, raw, display)
+            isSet(spec.index) = true
 
       def setFlag(spec: OptSpec): Unit =
         values(spec.index) = true
@@ -67,13 +68,11 @@ private[claw] object Engine:
           case Some(g) =>
             g.cases.find(_.name == tok) match
               case Some(sc) =>
-                run(sc.command, prog, path :+ sc.name, rest) match
-                  case Result.Ok(v) =>
-                    values(g.index) = if g.optional then Some(v) else v
-                    isSet(g.index) = true
-                    rest = Nil
-                  case other =>
-                    break(other)
+                // .ok propagates the subcommand's Help/Failure to our caller unchanged
+                val v = run(sc.command, prog, path :+ sc.name, rest).ok
+                values(g.index) = if g.optional then Some(v) else v
+                isSet(g.index) = true
+                rest = Nil
               case None =>
                 val sug = Runtime
                   .suggest(tok, g.cases.map(_.name))
@@ -85,18 +84,14 @@ private[claw] object Engine:
             val p = cmd.positionals(posIdx)
             p.mode match
               case Mode.Repeated(read, _) =>
-                read(tok) match
-                  case Left(err) => fail(s"invalid value for '<${p.name}>': $err")
-                  case Right(v) =>
-                    collected.getOrElseUpdate(p.index, mutable.ListBuffer.empty) += v
-                    isSet(p.index) = true
+                collected.getOrElseUpdate(p.index, mutable.ListBuffer.empty) +=
+                  readOr(read, tok, s"<${p.name}>")
+                isSet(p.index) = true
               case Mode.Single(read, optional) =>
-                read(tok) match
-                  case Left(err) => fail(s"invalid value for '<${p.name}>': $err")
-                  case Right(v) =>
-                    values(p.index) = if optional then Some(v) else v
-                    isSet(p.index) = true
-                    posIdx += 1
+                val v = readOr(read, tok, s"<${p.name}>")
+                values(p.index) = if optional then Some(v) else v
+                isSet(p.index) = true
+                posIdx += 1
               case Mode.Flag =>
                 fail(s"unexpected argument '$tok'") // positionals are never flags
 
@@ -201,4 +196,4 @@ private[claw] object Engine:
               fail(s"missing command (expected one of: ${g.cases.map(_.name).mkString(", ")})")
       }
 
-      Result.Ok(cmd.build(values))
+      cmd.build(values)

@@ -1,6 +1,5 @@
 package claw
 
-import claw.Result.*
 
 @help("A tiny git-like tool")
 enum Git derives Parser:
@@ -43,14 +42,14 @@ enum SimpleAction:
 
 class SubcommandSuite extends munit.FunSuite:
 
-  def ok[A](r: Result[A]): A = r match
-    case Ok(a)         => a
-    case Help(t)       => fail(s"expected success, got help:\n$t")
-    case Failure(m, _) => fail(s"expected success, got failure: $m")
+  def ok[A](r: ParseResult[A]): A = r match
+    case Ok(a)                          => a
+    case Err(ParseError.Help(t))        => fail(s"expected success, got help:\n$t")
+    case Err(ParseError.Failure(m, _))  => fail(s"expected success, got failure: $m")
 
-  def err[A](r: Result[A]): String = r match
-    case Failure(m, _) => m
-    case other         => fail(s"expected failure, got $other")
+  def err[A](r: ParseResult[A]): String = r match
+    case Err(ParseError.Failure(m, _)) => m
+    case other                         => fail(s"expected failure, got $other")
 
   test("parameterless subcommand") {
     assertEquals(ok(Claw.parse[Git](Seq("status"))), Git.Status)
