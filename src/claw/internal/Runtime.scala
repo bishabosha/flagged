@@ -1,0 +1,45 @@
+package claw.internal
+
+import claw.Reader
+import steps.result.Result
+import steps.result.Result.{Ok, Err}
+
+/** Runtime helpers referenced by macro-generated code. Not intended for direct use. */
+object Runtime:
+
+  def parseBool(s: String): Result[Boolean, String] =
+    s.trim.toLowerCase match
+      case "true" | "yes" | "on" | "1"   => Ok(true)
+      case "false" | "no" | "off" | "0"  => Ok(false)
+      case other                         => Err(s"'$other' is not a valid bool (expected true/false)")
+
+  /** Value reader for enums whose cases are all parameterless, matching kebab-cased names. */
+  def enumRead(pairs: Vector[(String, Any)]): String => Result[Any, String] =
+    s =>
+      pairs.collectFirst { case (n, v) if n.equalsIgnoreCase(s.trim) => v } match
+        case Some(v) => Ok(v)
+        case None    => Err(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")
+
+  def enumReader[A](name: String, pairs: Vector[(String, A)]): Reader[A] = new Reader[A]:
+    def typeName = name
+    def read(s: String) =
+      pairs.collectFirst { case (n, v) if n.equalsIgnoreCase(s.trim) => v } match
+        case Some(v) => Ok(v)
+        case None    => Err(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")
+
+  private def levenshtein(a: String, b: String): Int =
+    val d = Array.tabulate(a.length + 1, b.length + 1) { (i, j) =>
+      if i == 0 then j else if j == 0 then i else 0
+    }
+    for i <- 1 to a.length; j <- 1 to b.length do
+      val cost = if a(i - 1) == b(j - 1) then 0 else 1
+      d(i)(j) = math.min(math.min(d(i - 1)(j) + 1, d(i)(j - 1) + 1), d(i - 1)(j - 1) + cost)
+    d(a.length)(b.length)
+
+  /** Closest candidate within edit distance 2, for "did you mean" hints. */
+  def suggest(input: String, candidates: Iterable[String]): Option[String] =
+    candidates
+      .map(c => c -> levenshtein(input.toLowerCase, c.toLowerCase))
+      .filter((c, d) => d <= 2 && d < c.length)
+      .minByOption(_._2)
+      .map(_._1)
