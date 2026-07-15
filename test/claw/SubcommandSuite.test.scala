@@ -14,7 +14,7 @@ enum Git derives Parser:
   @help("Show status")
   case Status
 
-enum RemoteAction:
+enum RemoteAction derives Parser:
   @help("Add a remote")
   case Add(@positional name: String, @positional url: String)
   @help("Remove a remote")
@@ -36,9 +36,14 @@ case class Tool(
     action: Option[SimpleAction] = None
 ) derives Parser
 
-enum SimpleAction:
+enum SimpleAction derives Parser:
   case Run(@short('j') jobs: Int = 1)
   case Clean
+
+// deliberately has no Parser instance: used to check the compile error
+enum NoDerive:
+  case Go(@positional x: Int)
+  case Halt
 
 class SubcommandSuite extends munit.FunSuite:
 
@@ -151,6 +156,12 @@ class SubcommandSuite extends munit.FunSuite:
     )
     val m = err(Claw.parse[Wrap](Seq("add", "origin", "https://x.git")))
     assert(m.contains("unknown command 'add'"), m)
+  }
+
+  test("a nested subcommand enum without its own Parser instance is a compile error") {
+    val errors = compileErrors("case class Root(action: NoDerive) derives Parser")
+    assert(errors.contains("No given Parser[claw.NoDerive] found"), errors)
+    assert(errors.contains("derives Parser"), errors)
   }
 
   test("structural misconfiguration reported when the parser is constructed") {

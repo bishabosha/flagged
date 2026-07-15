@@ -91,8 +91,9 @@ object Derive:
       case _ => valueOrSub[E].asOptional
 
   /** Value semantics when a `Reader` exists or every case of the enum is a singleton;
-    * subcommand semantics otherwise. A parser for the field type is captured lazily
-    * where possible so `@subcommands` can force command semantics at assembly time.
+    * subcommand semantics otherwise. Subcommand fields require the field's own enum to
+    * provide a `Parser` instance (typically via `derives Parser` on that enum) — the
+    * derivation of the parent does not stretch across enum boundaries.
     */
   inline def valueOrSub[F]: Shape =
     summonFrom:
@@ -101,7 +102,7 @@ object Derive:
       case s: Mirror.SumOf[F] =>
         inline if allSingletons[s.MirroredElemTypes] then
           Shape.Value(enumFieldReader[F](using s), lazySub[F], false)
-        else Shape.Sub(subThunk[F](using s), false)
+        else Shape.Sub(() => summonInline[Parser[F]], false)
       case _ =>
         Shape.Value(summonInline[Reader[F]], None, false)
 
@@ -121,16 +122,14 @@ object Derive:
       sumAnnots[E].perCase
     )
 
+  /** A `Parser` for the field's type if one is in scope, for `@subcommands` forcing.
+    * Never derives: a value-shaped enum field only gains command semantics when the
+    * enum provides its own instance.
+    */
   inline def lazySub[F]: Option[() => Parser[?]] =
     summonFrom:
-      case p: Parser[F]       => Some(() => p)
-      case s: Mirror.SumOf[F] => Some(() => sum[F](using s))
-      case _                  => None
-
-  inline def subThunk[F](using s: Mirror.SumOf[F]): () => Parser[?] =
-    summonFrom:
-      case p: Parser[F] => () => p
-      case _            => () => sum[F](using s)
+      case p: Parser[F] => Some(() => p)
+      case _            => None
 
   // ---- sums -----------------------------------------------------------------
 
@@ -145,12 +144,16 @@ object Derive:
       case _: NonEmptyTuple =>
         entryOf[Tuple.Head[T & NonEmptyTuple]] :: entriesOf[Tuple.Tail[T & NonEmptyTuple]]
 
+  /** One case of the sum being derived. Singleton and product cases belong to the
+    * sum's own declaration and are handled in place; a case that is itself a sum is a
+    * separate hierarchy and must provide its own `Parser` instance.
+    */
   inline def entryOf[H]: SubEntry =
     summonFrom:
       case v: ValueOf[H]          => SubEntry.Leaf(v.value)
       case p: Parser[H]           => SubEntry.Node(() => p)
       case m: Mirror.ProductOf[H] => SubEntry.Node(() => product[H](using m))
-      case m: Mirror.SumOf[H]     => SubEntry.Node(() => sum[H](using m))
+      case _                      => SubEntry.Node(() => summonInline[Parser[H]])
 
   // ---- singleton helpers ------------------------------------------------------
 

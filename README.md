@@ -102,7 +102,7 @@ enum Gitto derives Parser:
   @help("Show the working tree status")
   case Status(@short('s') short: Boolean = false)
 
-enum RemoteAction:
+enum RemoteAction derives Parser:
   case Add(@positional name: String, @positional url: String)
   case Remove(@positional name: String)
 
@@ -135,9 +135,11 @@ Run 'gitto remote <command> --help' for more information on a command.
 
 Things to know:
 
-- Derivation is compositional: if a `Parser` (or `Reader`) given for a field's type is
-  already in scope, it is used as-is instead of being re-derived, so any level of the
-  command tree can be supplied or customized independently.
+- Derivation is compositional and stops at enum boundaries: each enum in the command
+  tree derives its own `Parser` (note `derives Parser` on `RemoteAction` above), and
+  the parent embeds that instance. Forgetting one is a compile error that says which
+  enum needs it. This also means any level can be supplied or customized
+  independently — a hand-built `Parser` given for a nested enum is used as-is.
 - Put parent options before the subcommand name (`gitto -v clone ...`), as in git.
 - An `Option[E]`-typed command field makes the command optional; a field default
   (`action: Action = Action.List`) works too.

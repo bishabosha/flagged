@@ -18,7 +18,7 @@ enum Gitto derives Parser:
   @help("Show the working tree status")
   case Status(@short('s') @help("Give output in short format") short: Boolean = false)
 
-enum RemoteAction:
+enum RemoteAction derives Parser:
   @help("Add a remote named <name> for the repository at <url>")
   case Add(
       @positional name: String,

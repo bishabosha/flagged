@@ -7,6 +7,9 @@ import claw.internal.{Command, Engine, HelpFmt}
   * Obtain one with `derives Parser` on a case class / enum, or explicitly with
   * `Parser.derived[A]`.
   */
+@scala.annotation.implicitNotFound(
+  "No given Parser[${A}] found.\nFor a nested subcommand enum, add `derives Parser` to its definition."
+)
 sealed trait Parser[A]:
   private[claw] def command: Command
   private[claw] def defaultProg: String
