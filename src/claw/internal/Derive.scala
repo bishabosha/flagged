@@ -7,9 +7,31 @@ import claw.{Parser, Reader}
 /** `Mirror`-based derivation. Structure and construction come from `Mirror`; nested
   * `Parser` and `Reader` instances are summoned before falling back to derivation, so
   * user-supplied instances for any level of the command tree are respected. The only
-  * macro-backed pieces are [[Defaults]] and [[Annots]].
+  * macro-backed pieces are [[Defaults]] (term-level: default values are arbitrary
+  * expressions) and [[AnnotMirror]] (type-level: annotations reduced to singleton
+  * types, materialised here via [[productAnnots]]/[[sumAnnots]]).
   */
 object Derive:
+
+  /** Materialise the [[AnnotMirror]] of a product into the runtime [[Annots]] carrier. */
+  inline def productAnnots[A]: Annots[A] =
+    summonFrom:
+      case am: AnnotMirror.Product[A] =>
+        new Annots[A](
+          AnnotMirror.materialize[am.MirroredAnnotations],
+          AnnotMirror.materializeEach[am.MirroredFieldAnnotations],
+          Nil
+        )
+
+  /** Materialise the [[AnnotMirror]] of a sum into the runtime [[Annots]] carrier. */
+  inline def sumAnnots[A]: Annots[A] =
+    summonFrom:
+      case am: AnnotMirror.Sum[A] =>
+        new Annots[A](
+          AnnotMirror.materialize[am.MirroredAnnotations],
+          Nil,
+          AnnotMirror.materializeEach[am.MirroredCaseAnnotations]
+        )
 
   inline def of[A](using m: Mirror.Of[A]): Parser[A] =
     inline m match
@@ -17,7 +39,7 @@ object Derive:
       case s: Mirror.SumOf[A]     => sum[A](using s)
 
   inline def product[A](using m: Mirror.ProductOf[A]): Parser[A] =
-    val annots = Annots.of[A]
+    val annots = productAnnots[A]
     val cmd = Assemble.product(
       labelsOf[m.MirroredElemLabels],
       shapesOf[m.MirroredElemTypes],
@@ -28,7 +50,7 @@ object Derive:
     Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
   inline def sum[A](using m: Mirror.SumOf[A]): Parser[A] =
-    val annots = Annots.of[A]
+    val annots = sumAnnots[A]
     val cmd = Assemble.sum(labelsOf[m.MirroredElemLabels], annots, entriesOf[m.MirroredElemTypes])
     Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
@@ -39,7 +61,7 @@ object Derive:
         constValue[m.MirroredLabel],
         labelsOf[m.MirroredElemLabels],
         singletonValues[m.MirroredElemTypes],
-        Annots.of[A].perCase
+        sumAnnots[A].perCase
       )
       .asInstanceOf[Reader[A]]
 
@@ -96,7 +118,7 @@ object Derive:
       constValue[s.MirroredLabel],
       labelsOf[s.MirroredElemLabels],
       singletonValues[s.MirroredElemTypes],
-      Annots.of[E].perCase
+      sumAnnots[E].perCase
     )
 
   inline def lazySub[F]: Option[() => Parser[?]] =

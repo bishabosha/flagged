@@ -11,8 +11,9 @@ object Defaults:
   /** The one thing `Mirror` cannot see: default argument getters. */
   inline def of[A]: Defaults[A] = ${ MetaMacros.defaults[A] }
 
-/** The claw annotations present on a type, its constructor fields, and its cases.
-  * Lists are empty where not applicable.
+/** Runtime carrier for materialised annotations on a type, its constructor fields,
+  * and its cases; built by `Derive.annotsOf` from an [[AnnotMirror]]. Lists are empty
+  * where not applicable.
   */
 final class Annots[A](
     val onType: List[Any],
@@ -20,12 +21,8 @@ final class Annots[A](
     val perCase: List[List[Any]]
 )
 
-object Annots:
-  /** The other thing `Mirror` cannot see: annotations. */
-  inline def of[A]: Annots[A] = ${ MetaMacros.annots[A] }
-
-/** The two residual macros backing [[Defaults]] and [[Annots]]. Everything else in
-  * claw's derivation is `Mirror` + `inline`.
+/** The two residual macros backing [[Defaults]] and [[AnnotMirror]]. Everything else
+  * in claw's derivation is `Mirror` + `inline`.
   */
 object MetaMacros:
 
@@ -52,30 +49,78 @@ object MetaMacros:
       else Nil
     '{ new Defaults[A](${ Expr.ofList(entries) }) }
 
-  def annots[A: Type](using Quotes): Expr[Annots[A]] =
-    import quotes.reflect.*
-    val sym = TypeRepr.of[A].typeSymbol
+  def annotMirrorProduct[A: Type](using Quotes): Expr[AnnotMirror.Product[A]] =
+    new AnnotHelper().product[A]
 
-    def clawAnnots(s: Symbol): Expr[List[Any]] =
-      val terms = s.annotations
-        .filter(_.tpe.typeSymbol.fullName.startsWith("claw."))
-        .map(_.asExprOf[Any])
-      Expr.ofList(terms)
+  def annotMirrorSum[A: Type](using Quotes): Expr[AnnotMirror.Sum[A]] =
+    new AnnotHelper().sum[A]
 
-    val onType = clawAnnots(sym)
+  /** Synthesizes refined `AnnotMirror` types. Only *types* are computed — no
+    * annotation values are constructed. Mirrored: case-class `StaticAnnotation`s
+    * applied with exactly one argument list of literal constants. Curried annotation
+    * constructors (secondary argument lists) are rejected as not generic — their
+    * shape cannot be rebuilt through `Mirror.ProductOf`.
+    */
+  private class AnnotHelper(using val q: Quotes):
+    import q.reflect.*
 
-    val perField: Expr[List[List[Any]]] =
-      if sym.isClassDef && sym.flags.is(Flags.Case) && !sym.flags.is(Flags.Module) then
-        val params = sym.primaryConstructor.paramSymss.flatten.filter(_.isTerm)
-        Expr.ofList(sym.caseFields.zipWithIndex.map { (f, i) =>
-          val fromParam = params.lift(i).map(clawAnnots).getOrElse('{ Nil })
-          '{ $fromParam ++ ${ clawAnnots(f) } }
-        })
-      else '{ Nil }
+    private def tupleType(ts: List[TypeRepr]): TypeRepr =
+      ts.foldRight(TypeRepr.of[EmptyTuple])((h, acc) => TypeRepr.of[*:].appliedTo(List(h, acc)))
 
-    val perCase: Expr[List[List[Any]]] =
-      val children = sym.children
-      if children.nonEmpty then Expr.ofList(children.map(clawAnnots))
-      else '{ Nil }
+    private def constArg(t: Term): Option[TypeRepr] = t match
+      case NamedArg(_, v) => constArg(v)
+      case Literal(c)     => Some(ConstantType(c))
+      case _              => None
 
-    '{ new Annots[A]($onType, $perField, $perCase) }
+    /** `Ann[a, args]` for one annotation occurrence, if it is mirrorable. */
+    private def annType(a: Term): Option[TypeRepr] =
+      val tpe = a.tpe
+      val ok = tpe <:< TypeRepr.of[scala.annotation.StaticAnnotation] &&
+        tpe.typeSymbol.flags.is(Flags.Case)
+      a match
+        case Apply(Select(New(_), _), args) if ok =>
+          args
+            .foldRight(Option(List.empty[TypeRepr])) { (arg, acc) =>
+              for tail <- acc; c <- constArg(arg) yield c :: tail
+            }
+            .map(argTypes => TypeRepr.of[Ann].appliedTo(List(tpe, tupleType(argTypes))))
+        case _ => None
+
+    private def slot(s: Symbol): TypeRepr = tupleType(s.annotations.reverse.flatMap(annType))
+
+    private def slotOf(annotTerms: List[Term]): TypeRepr = tupleType(annotTerms.flatMap(annType))
+
+    private def alias(t: TypeRepr): TypeBounds = TypeBounds(t, t)
+
+    def product[A: Type]: Expr[AnnotMirror.Product[A]] =
+      val sym = TypeRepr.of[A].typeSymbol
+      if !(sym.isClassDef && sym.flags.is(Flags.Case) && !sym.flags.is(Flags.Module)) then
+        report.errorAndAbort(s"No product AnnotMirror for ${TypeRepr.of[A].show}: not a case class")
+      val params = sym.primaryConstructor.paramSymss.flatten.filter(_.isTerm)
+      val perField = sym.caseFields.zipWithIndex.map { (f, i) =>
+        val merged = params.lift(i).map(_.annotations.reverse).getOrElse(Nil) ++ f.annotations.reverse
+        slotOf(merged)
+      }
+      val refined =
+        Refinement(
+          Refinement(TypeRepr.of[AnnotMirror.Product[A]], "MirroredAnnotations", alias(slot(sym))),
+          "MirroredFieldAnnotations",
+          alias(tupleType(perField))
+        )
+      refined.asType match
+        case '[t] =>
+          '{ (new AnnotMirror.Product[A] {}).asInstanceOf[t & AnnotMirror.Product[A]] }
+
+    def sum[A: Type]: Expr[AnnotMirror.Sum[A]] =
+      val sym = TypeRepr.of[A].typeSymbol
+      if sym.children.isEmpty then
+        report.errorAndAbort(s"No sum AnnotMirror for ${TypeRepr.of[A].show}: no cases found")
+      val refined =
+        Refinement(
+          Refinement(TypeRepr.of[AnnotMirror.Sum[A]], "MirroredAnnotations", alias(slot(sym))),
+          "MirroredCaseAnnotations",
+          alias(tupleType(sym.children.map(slot)))
+        )
+      refined.asType match
+        case '[t] =>
+          '{ (new AnnotMirror.Sum[A] {}).asInstanceOf[t & AnnotMirror.Sum[A]] }
