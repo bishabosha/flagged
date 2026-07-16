@@ -19,9 +19,3 @@ final case class help(value: String) extends StaticAnnotation
 
 /** Mark a field as a positional argument instead of a named option. */
 final case class positional() extends StaticAnnotation
-
-/** Force a field whose type is an enum / sealed trait to be treated as a group of
-  * subcommands even when all of its cases are parameterless (which would otherwise
-  * be parsed as a plain value, e.g. `--color red`).
-  */
-final case class subcommands() extends StaticAnnotation

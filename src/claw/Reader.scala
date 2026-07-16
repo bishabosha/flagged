@@ -7,36 +7,72 @@ import java.time.format.DateTimeParseException
 import java.util.UUID
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
-/** Parses a single command-line token into a value of type `A`, using
-  * [[steps.result.Result]] as the error channel (`Err` carries the message
-  * shown to the user).
-  *
-  * `typeName` is used as the value placeholder in help output, e.g. `--depth <int>`.
+/** Describes how command-line tokens become an `A`. The underlying [[Reader.Schema]]
+  * encodes the *shape*: a `Value` reader parses one token per occurrence; a `Repeated`
+  * reader accumulates every occurrence with an element reader and combines them, which
+  * is how collection types (and anything else that wants repetition) opt in.
   */
+@scala.annotation.implicitNotFound(
+  "No given Reader[${A}] found.\n" +
+    "Provide one with Reader.of / Reader.repeated, or add `derives Reader` to a parameterless enum.\n" +
+    "If this field should be nested subcommands instead, add `derives Parser` to its type."
+)
 trait Reader[A]:
   self =>
-  def typeName: String
-  def read(s: String): Result[A, String]
+  def schema: Reader.Schema[A]
 
-  final def map[B](f: A => B): Reader[B] = new Reader[B]:
-    def typeName = self.typeName
-    def read(s: String) = self.read(s).map(f)
+  /** The help metavar: the value's type name, or the element's for repeated readers. */
+  final def typeName: String = schema match
+    case Reader.Schema.Value(name, _)        => name
+    case Reader.Schema.Repeated(element, _)  => element.typeName
 
-  final def emap[B](f: A => Result[B, String]): Reader[B] = new Reader[B]:
-    def typeName = self.typeName
-    def read(s: String) = self.read(s).flatMap(f)
+  /** Parse a single occurrence (for repeated readers: one element, then combine). */
+  final def read(s: String): Result[A, String] = schema match
+    case Reader.Schema.Value(_, parse)       => parse(s)
+    case Reader.Schema.Repeated(element, build) => element.read(s).flatMap(e => build(List(e)))
 
-  final def withTypeName(name: String): Reader[A] = new Reader[A]:
-    def typeName = name
-    def read(s: String) = self.read(s)
+  final def map[B](f: A => B): Reader[B] = emap(a => Ok(f(a)))
+
+  final def emap[B](f: A => Result[B, String]): Reader[B] = Reader.fromSchema:
+    schema match
+      case Reader.Schema.Value(name, parse)       => Reader.Schema.Value(name, s => parse(s).flatMap(f))
+      case Reader.Schema.Repeated(element, build) => Reader.Schema.Repeated(element, l => build(l).flatMap(f))
+
+  final def withTypeName(name: String): Reader[A] = Reader.fromSchema:
+    schema match
+      case Reader.Schema.Value(_, parse)          => Reader.Schema.Value(name, parse)
+      case Reader.Schema.Repeated(element, build) => Reader.Schema.Repeated(element.withTypeName(name), build)
 
 object Reader:
   def apply[A](using r: Reader[A]): Reader[A] = r
 
-  /** Build a reader from a name and a parse function. */
-  def of[A](name: String)(f: String => Result[A, String]): Reader[A] = new Reader[A]:
-    def typeName = name
-    def read(s: String) = f(s)
+  /** The shape of a reader. */
+  enum Schema[A]:
+    /** One token per occurrence. */
+    case Value[T](typeName: String, parse: String => Result[T, String]) extends Schema[T]
+
+    /** Any number of occurrences, each parsed by `element`, combined with `build`
+      * (also invoked with `Nil` when the argument is absent — return `Err` to require
+      * at least one occurrence).
+      */
+    case Repeated[E, T](element: Reader[E], build: List[E] => Result[T, String]) extends Schema[T]
+
+  def fromSchema[A](s: Schema[A]): Reader[A] = new Reader[A]:
+    def schema = s
+
+  /** Build a single-value reader from a name and a parse function. */
+  def of[A](name: String)(f: String => Result[A, String]): Reader[A] =
+    fromSchema(Schema.Value(name, f))
+
+  /** Opt `A` into repeated shape: each occurrence is parsed with the element's reader,
+    * and the collected elements are combined with `build`.
+    */
+  def repeated[E, A](build: List[E] => Result[A, String])(using element: Reader[E]): Reader[A] =
+    fromSchema(Schema.Repeated(element, build))
+
+  given [A](using Reader[A]): Reader[List[A]] = repeated[A, List[A]](l => Ok(l))
+  given [A](using Reader[A]): Reader[Vector[A]] = repeated[A, Vector[A]](l => Ok(l.toVector))
+  given [A](using Reader[A]): Reader[Seq[A]] = repeated[A, Seq[A]](l => Ok(l))
 
   private def numeric[A](name: String)(f: String => A): Reader[A] =
     of(name)(s =>

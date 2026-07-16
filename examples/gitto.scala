@@ -14,7 +14,7 @@ enum Gitto derives Parser:
       @short('q') @help("Operate quietly") quiet: Boolean = false
   )
   @help("Manage the set of tracked repositories")
-  case Remote(@subcommands action: RemoteAction)
+  case Remote(action: RemoteAction)
   @help("Show the working tree status")
   case Status(@short('s') @help("Give output in short format") short: Boolean = false)
 

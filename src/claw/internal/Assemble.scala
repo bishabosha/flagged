@@ -1,7 +1,8 @@
 package claw.internal
 
 import claw.{Parser, Reader}
-import steps.result.Result
+import steps.result.{Result}
+import steps.result.Result.{Ok, Err}
 import scala.collection.mutable
 
 /** Per-field derivation result, produced by inline code from the field's type shape.
@@ -11,21 +12,16 @@ enum Shape:
   /** `Boolean` field. */
   case Flag
 
-  /** Single-valued field. `subFallback` is a parser for the field's type when it is an
-    * enum/sealed trait, so `@subcommands` can switch the field to command semantics.
-    */
-  case Value(reader: Reader[?], subFallback: Option[() => Parser[?]], optional: Boolean)
+  /** Field parsed by a `Reader`; the reader's schema decides single vs repeated. */
+  case Value(reader: Reader[?], optional: Boolean)
 
-  /** Enum/sealed-trait field parsed as nested subcommands. */
+  /** Field with its own `Parser`: nested subcommands. */
   case Sub(parser: () => Parser[?], optional: Boolean)
 
-  /** Collection field; `fromList` converts the accumulated values. */
-  case Repeated(reader: Reader[?], fromList: List[Any] => Any)
-
   def asOptional: Shape = this match
-    case Value(r, s, _) => Value(r, s, true)
-    case Sub(p, _)      => Sub(p, true)
-    case other          => other
+    case Value(r, _) => Value(r, true)
+    case Sub(p, _)   => Sub(p, true)
+    case Flag        => Flag
 
 /** One case of a derived sum: either a singleton value or a nested command. */
 enum SubEntry:
@@ -47,17 +43,8 @@ object Assemble:
     }
     b.result()
 
-  private def nameOf(annots: List[Any], label: String): String =
-    annots.collectFirst { case n: claw.name => n.value }.getOrElse(kebab(label))
-
-  private def helpOf(annots: List[Any]): String =
-    annots.collectFirst { case h: claw.help => h.value }.getOrElse("")
-
-  private def shortOf(annots: List[Any]): Option[Char] =
-    annots.collectFirst { case s: claw.short => s.value }
-
-  def progName(label: String, onType: List[Any]): String =
-    onType.collectFirst { case n: claw.name => n.value }.getOrElse(kebab(label))
+  def progName(label: String, onType: TargetAnnots): String =
+    onType.name.map(_.value).getOrElse(kebab(label))
 
   private def commandOf(p: Parser[?]): Command = p.command
 
@@ -72,24 +59,26 @@ object Assemble:
       typeLabel: String,
       caseLabels: List[String],
       values: List[Any],
-      perCase: List[List[Any]]
+      perCase: List[TargetAnnots]
   ): Reader[Any] =
-    val names = caseLabels.zipWithIndex.map((l, i) => nameOf(perCase.lift(i).getOrElse(Nil), l))
+    val names = caseLabels.zipWithIndex.map { (l, i) =>
+      perCase.lift(i).flatMap(_.name).map(_.value).getOrElse(kebab(l))
+    }
     val joined = names.mkString("|")
     val typeName = if joined.length <= 40 then joined else kebab(typeLabel)
     Runtime.enumReader(typeName, names.zip(values).toVector)
 
   def sum(caseLabels: List[String], annots: Annots.Sum[?], entries: List[SubEntry]): Command =
     val cases = entries.zipWithIndex.map { (e, i) =>
-      val anns = annots.perCase.lift(i).getOrElse(Nil)
-      val help = helpOf(anns)
+      val anns = annots.perCase.lift(i).getOrElse(TargetAnnots.empty)
+      val help = anns.help.map(_.value).getOrElse("")
       val cmd = e match
-        case SubEntry.Leaf(v)  => Command.leaf(v, help)
-        case SubEntry.Node(p)  => commandOf(p())
-      SubCase(nameOf(anns, caseLabels(i)), help, cmd)
+        case SubEntry.Leaf(v) => Command.leaf(v, help)
+        case SubEntry.Node(p) => commandOf(p())
+      SubCase(anns.name.map(_.value).getOrElse(kebab(caseLabels(i))), help, cmd)
     }
     Command(
-      helpOf(annots.onType),
+      annots.onType.help.map(_.value).getOrElse(""),
       Vector.empty,
       Vector.empty,
       Some(SubGroup(0, false, None, cases.toVector)),
@@ -115,25 +104,12 @@ object Assemble:
     val posKinds = mutable.ListBuffer.empty[(String, String)]
 
     for i <- 0 until n do
-      val anns = annots.perField.lift(i).getOrElse(Nil)
+      val anns = annots.perField.lift(i).getOrElse(FieldAnnots.empty)
       val label = labels(i)
-      val long = nameOf(anns, label)
-      val help = helpOf(anns)
-      val short = shortOf(anns)
-      val isPositional = anns.exists(_.isInstanceOf[claw.positional])
-      val forceSub = anns.exists(_.isInstanceOf[claw.subcommands])
+      val long = anns.name.map(_.value).getOrElse(kebab(label))
+      val help = anns.help.map(_.value).getOrElse("")
+      val short = anns.short.map(_.value)
       val default = defs(i)
-      val shape = shapes(i)
-
-      val subThunk = shape match
-        case Shape.Sub(p, _)        => Some(p)
-        case Shape.Value(_, s, _)   => s
-        case _                      => None
-
-      if forceSub && subThunk.isEmpty then
-        invalid(s"@subcommands on field '$label' requires an enum or sealed trait type")
-
-      val isSub = shape.isInstanceOf[Shape.Sub] || (forceSub && subThunk.nonEmpty)
 
       def addOpt(metavar: String, mode: Mode): Unit =
         if long == "help" then invalid(s"field '$label': option name 'help' is reserved")
@@ -147,35 +123,40 @@ object Assemble:
         posKinds += ((long, kind))
         poss += PosSpec(long, help, metavar, i, mode, default)
 
-      if isSub then
-        if isPositional then invalid(s"field '$label': @positional cannot be combined with a subcommand field")
-        if subGroup.nonEmpty then invalid("only one subcommand field is supported per command")
-        val optional = shape match
-          case Shape.Sub(_, o)      => o
-          case Shape.Value(_, _, o) => o
-          case _                    => false
-        val inner = commandOf(subThunk.get())
-        val cases = inner.sub
-          .getOrElse(invalid(s"field '$label' does not resolve to a set of commands"))
-          .cases
-        subGroup = Some(SubGroup(i, optional, default, cases))
-      else
-        shape match
-          case Shape.Flag =>
-            if isPositional then
-              val kind = if default.nonEmpty then "optional" else "required"
-              addPos("bool", Mode.Single(Runtime.parseBool(_), false), kind)
-            else addOpt("bool", Mode.Flag)
-          case Shape.Value(r, _, optional) =>
-            val mode = Mode.Single(readFn(r), optional)
-            if isPositional then
-              addPos(r.typeName, mode, if optional || default.nonEmpty then "optional" else "required")
-            else addOpt(r.typeName, mode)
-          case Shape.Repeated(r, fromList) =>
-            val mode = Mode.Repeated(readFn(r), fromList)
-            if isPositional then addPos(r.typeName, mode, "repeated")
-            else addOpt(r.typeName, mode)
-          case _: Shape.Sub => () // handled above
+      shapes(i) match
+        case Shape.Sub(parser, optional) =>
+          if anns.positional then
+            invalid(s"field '$label': @positional cannot be combined with a subcommand field")
+          if subGroup.nonEmpty then invalid("only one subcommand field is supported per command")
+          val cases = commandOf(parser()).sub
+            .getOrElse(invalid(s"field '$label' does not resolve to a set of commands"))
+            .cases
+          subGroup = Some(SubGroup(i, optional, default, cases))
+
+        case Shape.Flag =>
+          if anns.positional then
+            val kind = if default.nonEmpty then "optional" else "required"
+            addPos("bool", Mode.Single(Runtime.parseBool(_), false), kind)
+          else addOpt("bool", Mode.Flag)
+
+        case Shape.Value(r, optional) =>
+          r.schema match
+            case Reader.Schema.Value(typeName, _) =>
+              val mode = Mode.Single(readFn(r), optional)
+              if anns.positional then
+                addPos(typeName, mode, if optional || default.nonEmpty then "optional" else "required")
+              else addOpt(typeName, mode)
+            case Reader.Schema.Repeated(element, buildList) =>
+              if optional then
+                invalid(s"field '$label': Option of a repeated Reader is not supported")
+              element.schema match
+                case _: Reader.Schema.Repeated[?, ?] =>
+                  invalid(s"field '$label': nested repeated Readers are not supported")
+                case _ => ()
+              val fromList = buildList.asInstanceOf[List[Any] => Result[Any, String]]
+              val mode = Mode.Repeated(readFn(element), fromList)
+              if anns.positional then addPos(element.typeName, mode, "repeated")
+              else addOpt(element.typeName, mode)
     end for
 
     val kinds = posKinds.toList
@@ -188,4 +169,4 @@ object Assemble:
     if subGroup.nonEmpty && kinds.nonEmpty then
       invalid("mixing positional fields with a subcommand field is ambiguous and not supported")
 
-    Command(helpOf(annots.onType), opts.result(), poss.result(), subGroup, build, n)
+    Command(annots.onType.help.map(_.value).getOrElse(""), opts.result(), poss.result(), subGroup, build, n)

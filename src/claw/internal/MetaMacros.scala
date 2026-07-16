@@ -11,18 +11,37 @@ object Defaults:
   /** The one thing `Mirror` cannot see: default argument getters. */
   inline def of[A]: Defaults[A] = ${ MetaMacros.defaults[A] }
 
-/** Runtime carrier for materialised annotations, built from an [[AnnotMirror]] by
-  * `Derive.productAnnots` / `Derive.sumAnnots`. Shaped like the type they describe:
-  * products carry per-field slots, sums per-case slots.
+/** claw's annotations on a type or an enum case, extracted at compile time from an
+  * [[AnnotMirror]] — fully typed, no `Any` and no runtime type tests.
+  */
+final case class TargetAnnots(name: Option[claw.name], help: Option[claw.help])
+
+object TargetAnnots:
+  val empty: TargetAnnots = TargetAnnots(None, None)
+
+/** claw's annotations on one constructor field, extracted at compile time. */
+final case class FieldAnnots(
+    name: Option[claw.name],
+    short: Option[claw.short],
+    help: Option[claw.help],
+    positional: Boolean
+)
+
+object FieldAnnots:
+  val empty: FieldAnnots = FieldAnnots(None, None, None, false)
+
+/** Runtime carrier for extracted annotations, built by `Derive.productAnnots` /
+  * `Derive.sumAnnots`. Shaped like the type they describe: products carry per-field
+  * slots, sums per-case slots.
   */
 enum Annots[A]:
   /** Annotations of a case class: on the type itself and per constructor field. */
-  case Product[T](onType: List[Any], perField: List[List[Any]]) extends Annots[T]
+  case Product[T](onType: TargetAnnots, perField: List[FieldAnnots]) extends Annots[T]
 
   /** Annotations of an enum / sealed trait: on the type itself and per case. */
-  case Sum[T](onType: List[Any], perCase: List[List[Any]]) extends Annots[T]
+  case Sum[T](onType: TargetAnnots, perCase: List[TargetAnnots]) extends Annots[T]
 
-  def onType: List[Any]
+  def onType: TargetAnnots
 
 /** The two residual macros backing [[Defaults]] and [[AnnotMirror]]. Everything else
   * in claw's derivation is `Mirror` + `inline`.

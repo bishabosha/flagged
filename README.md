@@ -55,16 +55,19 @@ vendor the `src/claw` directory.
 ## Declaring options
 
 Each case class field becomes a named option, `--kebab-cased` after the field name.
-The field's *shape* decides the behavior:
+Semantics are instance-driven: a field whose type has a `Parser` given becomes nested
+subcommands; otherwise its `Reader` given parses it as a value, and the reader's
+*schema* decides whether the option takes one value or repeats:
 
 | Field shape | Meaning |
 |---|---|
 | `x: Boolean` | flag `--x` (also `--x=false`); always optional |
-| `x: A` | required option `--x <a>` |
+| `x: A` (value-schema `Reader[A]`) | required option `--x <a>` |
 | `x: A = default` | optional, default shown in help |
 | `x: Option[A]` | optional, `None` when absent |
-| `x: List[A]` / `Seq[A]` / `Vector[A]` | repeatable, empty when absent |
-| `@positional x: A` | positional argument (same `Option`/default/collection rules) |
+| `x: A` (repeated-schema `Reader[A]`, e.g. `List`/`Seq`/`Vector`) | repeatable |
+| `x: E` (`E derives Parser`) | nested subcommands |
+| `@positional x: A` | positional argument (same rules) |
 
 Fine-tune with annotations:
 
@@ -74,9 +77,8 @@ Fine-tune with annotations:
 | `@short('o')` | add a short alias |
 | `@help("...")` | help text for fields, cases, and top-level types |
 | `@positional` | positional argument instead of named option |
-| `@subcommands` | force an all-parameterless enum field to be subcommands |
 
-A field type that has no `Reader` (and is not a command enum) is a compile error.
+A field type with neither a `Parser` nor a `Reader` given is a compile error.
 Structural mistakes — duplicate names, a second `-h`, a required positional after an
 optional one — are reported with a descriptive `IllegalArgumentException` when the
 parser instance is constructed, before any arguments are parsed.
@@ -98,7 +100,7 @@ enum Gitto derives Parser:
       @short('d') depth: Option[Int] = None
   )
   @help("Manage remotes")
-  case Remote(@subcommands action: RemoteAction)
+  case Remote(action: RemoteAction)
   @help("Show the working tree status")
   case Status(@short('s') short: Boolean = false)
 
@@ -143,9 +145,9 @@ Things to know:
 - Put parent options before the subcommand name (`gitto -v clone ...`), as in git.
 - An `Option[E]`-typed command field makes the command optional; a field default
   (`action: Action = Action.List`) works too.
-- An enum whose cases are all parameterless is read as a plain *value* when used as a
-  field (`--color red`). Annotate the field `@subcommands` if you want commands
-  instead.
+- An enum field is commands or a value depending on which instance its type provides:
+  `derives Parser` → subcommands, `derives Reader` (parameterless enums only) → a
+  value matched by case name (`--color red`).
 
 ## Scripts and other entry points
 
@@ -202,6 +204,21 @@ given Reader[Port] = Reader.of[Port]("port")(s =>
   s.toIntOption.filter(p => p > 0 && p < 65536) match
     case Some(p) => Ok(Port(p))
     case None    => Err(s"'$s' is not a valid port"))
+```
+
+A reader's underlying `Reader.Schema` encodes its *shape*. `Reader.of` builds
+single-value readers; `Reader.repeated` builds readers whose argument may appear any
+number of times, each occurrence parsed by an element reader and the collected
+elements combined by a function of your choice. The provided `List`/`Seq`/`Vector`
+instances are ordinary `Reader.repeated` definitions, and any type can opt in the
+same way — including with constraints, since the combining function may fail (it also
+receives `Nil` when the argument is absent):
+
+```scala
+given Reader[Set[String]] = Reader.repeated[String, Set[String]](l => Ok(l.toSet))
+
+given Reader[NonEmpty] = Reader.repeated[Int, NonEmpty](l =>
+  if l.isEmpty then Err("expected at least one occurrence") else Ok(NonEmpty(l)))
 ```
 
 Enums with parameterless cases can derive a by-name reader:

@@ -48,6 +48,18 @@ object AnnotMirror:
   transparent inline given ofSum[T]: AnnotMirror.Sum[T] =
     ${ MetaMacros.annotMirrorSum[T] }
 
+  /** The first annotation of type `A` in slot `Anns`, materialised — fully resolved
+    * at compile time, so consumers get a typed `Option[A]` with no runtime type test.
+    * `A` is matched directly in the head pattern: it is concrete at expansion and
+    * `Ann` is invariant, so each head either is an `Ann[A, _]` or provably is not.
+    */
+  inline def find[A <: Annotation, Anns]: Option[A] =
+    inline erasedValue[Anns] match
+      case _: EmptyTuple => None
+      case _: (Ann[A, args] *: _) =>
+        Some(summonInline[Mirror.ProductOf[A]].fromProduct(constValueTuple[args]))
+      case _: (_ *: t) => find[A, t]
+
   /** Materialise one slot: rebuild each annotation value from its mirrored
     * constructor-argument singleton types via the annotation's own `Mirror`.
     * Plain binders are safe here: annotation arguments are literal constant types,

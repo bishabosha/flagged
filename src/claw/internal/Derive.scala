@@ -4,32 +4,58 @@ import scala.compiletime.*
 import scala.deriving.Mirror
 import claw.{Parser, Reader}
 
-/** `Mirror`-based derivation. Structure and construction come from `Mirror`; nested
-  * `Parser` and `Reader` instances are summoned before falling back to derivation, so
-  * user-supplied instances for any level of the command tree are respected. The only
-  * macro-backed pieces are [[Defaults]] (term-level: default values are arbitrary
-  * expressions) and [[AnnotMirror]] (type-level: annotations reduced to singleton
-  * types, materialised here via [[productAnnots]]/[[sumAnnots]]).
+/** `Mirror`-based derivation. Structure and construction come from `Mirror`; field
+  * semantics are instance-driven: a `Parser` given for the field's type makes it a
+  * group of subcommands, otherwise a `Reader` given parses it as a value (the reader's
+  * schema decides whether it is single or repeated). Nothing is derived across type
+  * boundaries — each enum in a command tree provides its own instances.
+  *
+  * The only macro-backed pieces are [[Defaults]] (term-level: default values are
+  * arbitrary expressions) and [[AnnotMirror]] (type-level: annotations reduced to
+  * singleton types, extracted here via [[AnnotMirror.find]] into typed [[Annots]]).
   */
 object Derive:
 
-  /** Materialise the [[AnnotMirror]] of a product into the runtime [[Annots]] carrier. */
+  /** Extract claw's annotations for a product into typed records. */
   inline def productAnnots[A]: Annots.Product[A] =
     summonFrom:
       case am: AnnotMirror.Product[A] =>
         Annots.Product[A](
-          AnnotMirror.materialize[am.MirroredAnnotations],
-          AnnotMirror.materializeEach[am.MirroredFieldAnnotations]
+          targetAnnotsOf[am.MirroredAnnotations],
+          fieldAnnotsEach[am.MirroredFieldAnnotations]
         )
 
-  /** Materialise the [[AnnotMirror]] of a sum into the runtime [[Annots]] carrier. */
+  /** Extract claw's annotations for a sum into typed records. */
   inline def sumAnnots[A]: Annots.Sum[A] =
     summonFrom:
       case am: AnnotMirror.Sum[A] =>
         Annots.Sum[A](
-          AnnotMirror.materialize[am.MirroredAnnotations],
-          AnnotMirror.materializeEach[am.MirroredCaseAnnotations]
+          targetAnnotsOf[am.MirroredAnnotations],
+          targetAnnotsEach[am.MirroredCaseAnnotations]
         )
+
+  inline def targetAnnotsOf[Anns]: TargetAnnots =
+    TargetAnnots(AnnotMirror.find[claw.name, Anns], AnnotMirror.find[claw.help, Anns])
+
+  inline def fieldAnnotsOf[Anns]: FieldAnnots =
+    FieldAnnots(
+      AnnotMirror.find[claw.name, Anns],
+      AnnotMirror.find[claw.short, Anns],
+      AnnotMirror.find[claw.help, Anns],
+      AnnotMirror.find[claw.positional, Anns].isDefined
+    )
+
+  inline def fieldAnnotsEach[Slots]: List[FieldAnnots] =
+    inline erasedValue[Slots] match
+      case _: EmptyTuple => Nil
+      case _: (h *: t)   => fieldAnnotsOf[h] :: fieldAnnotsEach[t]
+
+  inline def targetAnnotsEach[Slots]: List[TargetAnnots] =
+    inline erasedValue[Slots] match
+      case _: EmptyTuple => Nil
+      case _: (h *: t)   => targetAnnotsOf[h] :: targetAnnotsEach[t]
+
+  // ---- parsers ----------------------------------------------------------------
 
   inline def of[A](using m: Mirror.Of[A]): Parser[A] =
     inline m match
@@ -76,58 +102,18 @@ object Derive:
   inline def shapeOf[F]: Shape =
     inline erasedValue[F] match
       case _: Boolean   => Shape.Flag
-      case _: Option[e] => optionShapeOf[e]
-      case _: List[e]   => Shape.Repeated(readerFor[e], l => l)
-      case _: Vector[e] => Shape.Repeated(readerFor[e], _.toVector)
-      case _: Seq[e]    => Shape.Repeated(readerFor[e], l => l)
-      case _            => valueOrSub[F]
+      case _: Option[e] => fieldShape[e].asOptional
+      case _            => fieldShape[F]
 
-  inline def optionShapeOf[E]: Shape =
-    inline erasedValue[E] match
-      case _: Seq[?] =>
-        error("Option of a collection is not supported; use a plain collection (empty when absent)")
-      case _ => valueOrSub[E].asOptional
-
-  /** Value semantics when a `Reader` exists or every case of the enum is a singleton;
-    * subcommand semantics otherwise. Subcommand fields require the field's own enum to
-    * provide a `Parser` instance (typically via `derives Parser` on that enum) — the
-    * derivation of the parent does not stretch across enum boundaries.
+  /** The single field rule: a `Parser` instance makes the field a subparser; otherwise
+    * a `Reader` instance parses it as a value, with the reader's schema encoding
+    * whether occurrences repeat. Neither in scope is a compile error.
     */
-  inline def valueOrSub[F]: Shape =
+  inline def fieldShape[F]: Shape =
     summonFrom:
-      case r: Reader[F] =>
-        Shape.Value(r, lazySub[F], false)
-      case s: Mirror.SumOf[F] =>
-        inline if allSingletons[s.MirroredElemTypes] then
-          Shape.Value(enumFieldReader[F](using s), lazySub[F], false)
-        else Shape.Sub(() => summonInline[Parser[F]], false)
-      case _ =>
-        Shape.Value(summonInline[Reader[F]], None, false)
-
-  inline def readerFor[E]: Reader[?] =
-    summonFrom:
-      case r: Reader[E] => r
-      case s: Mirror.SumOf[E] =>
-        inline if allSingletons[s.MirroredElemTypes] then enumFieldReader[E](using s)
-        else summonInline[Reader[E]]
-      case _ => summonInline[Reader[E]]
-
-  inline def enumFieldReader[E](using s: Mirror.SumOf[E]): Reader[?] =
-    Assemble.enumValueReader(
-      constValue[s.MirroredLabel],
-      labelsOf[s.MirroredElemLabels],
-      singletonValues[s.MirroredElemTypes],
-      sumAnnots[E].perCase
-    )
-
-  /** A `Parser` for the field's type if one is in scope, for `@subcommands` forcing.
-    * Never derives: a value-shaped enum field only gains command semantics when the
-    * enum provides its own instance.
-    */
-  inline def lazySub[F]: Option[() => Parser[?]] =
-    summonFrom:
-      case p: Parser[F] => Some(() => p)
-      case _            => None
+      case p: Parser[F] => Shape.Sub(() => p, false)
+      case r: Reader[F] => Shape.Value(r, false)
+      case _            => Shape.Value(summonInline[Reader[F]], false)
 
   // ---- sums -----------------------------------------------------------------
 
@@ -154,14 +140,6 @@ object Derive:
       case _                      => SubEntry.Node(() => summonInline[Parser[H]])
 
   // ---- singleton helpers ------------------------------------------------------
-
-  inline def allSingletons[T <: Tuple]: Boolean =
-    inline erasedValue[T] match
-      case _: EmptyTuple    => true
-      case _: NonEmptyTuple =>
-        summonFrom:
-          case _: ValueOf[Tuple.Head[T & NonEmptyTuple]] => allSingletons[Tuple.Tail[T & NonEmptyTuple]]
-          case _                                         => false
 
   inline def singletonValues[T <: Tuple]: List[Any] =
     inline erasedValue[T] match

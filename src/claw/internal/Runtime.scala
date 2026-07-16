@@ -14,18 +14,12 @@ object Runtime:
       case other                         => Err(s"'$other' is not a valid bool (expected true/false)")
 
   /** Value reader for enums whose cases are all parameterless, matching kebab-cased names. */
-  def enumRead(pairs: Vector[(String, Any)]): String => Result[Any, String] =
-    s =>
+  def enumReader[A](name: String, pairs: Vector[(String, A)]): Reader[A] =
+    Reader.of[A](name)(s =>
       pairs.collectFirst { case (n, v) if n.equalsIgnoreCase(s.trim) => v } match
         case Some(v) => Ok(v)
         case None    => Err(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")
-
-  def enumReader[A](name: String, pairs: Vector[(String, A)]): Reader[A] = new Reader[A]:
-    def typeName = name
-    def read(s: String) =
-      pairs.collectFirst { case (n, v) if n.equalsIgnoreCase(s.trim) => v } match
-        case Some(v) => Ok(v)
-        case None    => Err(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")
+    )
 
   private def levenshtein(a: String, b: String): Int =
     val d = Array.tabulate(a.length + 1, b.length + 1) { (i, j) =>

@@ -14,8 +14,11 @@ enum Mode:
     */
   case Single(read: String => Result[Any, String], optional: Boolean)
 
-  /** Option that may appear multiple times; collected values are converted with `fromList`. */
-  case Repeated(read: String => Result[Any, String], fromList: List[Any] => Any)
+  /** Option that may appear multiple times; collected values are combined with
+    * `fromList` (also invoked with `Nil` when absent; may fail, e.g. to require at
+    * least one occurrence).
+    */
+  case Repeated(read: String => Result[Any, String], fromList: List[Any] => Result[Any, String])
 
 final case class OptSpec(
     long: String,

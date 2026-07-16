@@ -150,13 +150,22 @@ private[claw] object Engine:
                     setParsed(spec, raw, s"-$c")
                     consumedValue = true
 
+      def combineRepeated(display: String, fromList: List[Any] => Result[Any, String], elems: List[Any]): Any =
+        fromList(elems) match
+          case Ok(v)    => v
+          case Err(msg) => fail(s"invalid value for '$display': $msg")
+
       // materialize repeated values
       collected.foreach { (idx, buf) =>
-        val fromList =
-          cmd.opts.find(_.index == idx).map(_.mode).orElse(cmd.positionals.find(_.index == idx).map(_.mode)) match
-            case Some(Mode.Repeated(_, f)) => f
-            case _                         => identity[List[Any]]
-        values(idx) = fromList(buf.toList)
+        val entry = cmd.opts
+          .find(_.index == idx)
+          .map(o => (s"--${o.long}", o.mode))
+          .orElse(cmd.positionals.find(_.index == idx).map(p => (s"<${p.name}>", p.mode)))
+        entry match
+          case Some((display, Mode.Repeated(_, fromList))) =>
+            values(idx) = combineRepeated(display, fromList, buf.toList)
+          case _ =>
+            values(idx) = buf.toList
       }
 
       // apply defaults, collect missing
@@ -170,7 +179,7 @@ private[claw] object Engine:
                 case Mode.Flag                  => values(o.index) = false
                 case Mode.Single(_, true)       => values(o.index) = None
                 case Mode.Single(_, false)      => missing += s"--${o.long}"
-                case Mode.Repeated(_, fromList) => values(o.index) = fromList(Nil)
+                case Mode.Repeated(_, fromList) => values(o.index) = combineRepeated(s"--${o.long}", fromList, Nil)
       }
       cmd.positionals.foreach { p =>
         if !isSet(p.index) then
@@ -180,7 +189,7 @@ private[claw] object Engine:
               p.mode match
                 case Mode.Single(_, true)       => values(p.index) = None
                 case Mode.Single(_, false)      => missing += s"<${p.name}>"
-                case Mode.Repeated(_, fromList) => values(p.index) = fromList(Nil)
+                case Mode.Repeated(_, fromList) => values(p.index) = combineRepeated(s"<${p.name}>", fromList, Nil)
                 case Mode.Flag                  => values(p.index) = false
       }
       if missing.nonEmpty then

@@ -75,3 +75,39 @@ class ReaderSuite extends munit.FunSuite:
     assertEquals(summon[Reader[Boolean]].read("0"), Ok(false))
     assert(summon[Reader[Boolean]].read("maybe").isErr)
   }
+
+  test("any type can opt into repeated shape via Reader.repeated") {
+    given Reader[Set[String]] = Reader.repeated[String, Set[String]](l => Ok(l.toSet))
+    case class Tags(tag: Set[String] = Set.empty) derives Parser
+    assertEquals(
+      ok(Claw.parse[Tags](Seq("--tag", "a", "--tag", "b", "--tag", "a"))),
+      Tags(Set("a", "b"))
+    )
+    assertEquals(ok(Claw.parse[Tags](Nil)), Tags(Set.empty))
+  }
+
+  test("a repeated reader can require at least one occurrence") {
+    case class AtLeastOne(xs: List[Int])
+    given Reader[AtLeastOne] = Reader.repeated[Int, AtLeastOne](l =>
+      if l.isEmpty then Err("expected at least one occurrence") else Ok(AtLeastOne(l))
+    )
+    case class Cfg(num: AtLeastOne) derives Parser
+    assertEquals(ok(Claw.parse[Cfg](Seq("--num", "1", "--num", "2"))), Cfg(AtLeastOne(List(1, 2))))
+    Claw.parse[Cfg](Nil) match
+      case Err(ParseError.Failure(m, _)) =>
+        assert(m.contains("--num") && m.contains("expected at least one"), m)
+      case other => fail(s"expected failure, got $other")
+  }
+
+  test("emap composes over a repeated reader") {
+    given Reader[Int] = Reader.of[Int]("int")(s => s.toIntOption.fold(Err(s"'$s' not an int"))(Ok(_)))
+    given Reader[List[Int]] =
+      Reader[List[Int]](using Reader.repeated[Int, List[Int]](l => Ok(l))).emap(l =>
+        if l.sum > 10 then Err("sum too large") else Ok(l)
+      )
+    case class Sums(n: List[Int] = Nil) derives Parser
+    assertEquals(ok(Claw.parse[Sums](Seq("--n", "1", "--n", "2"))), Sums(List(1, 2)))
+    Claw.parse[Sums](Seq("--n", "9", "--n", "9")) match
+      case Err(ParseError.Failure(m, _)) => assert(m.contains("sum too large"), m)
+      case other                         => fail(s"expected failure, got $other")
+  }
