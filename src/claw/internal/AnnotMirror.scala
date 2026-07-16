@@ -61,8 +61,12 @@ object AnnotMirror:
     * at compile time, so consumers get a typed `Option[A]` with no runtime type test.
     * `A` is matched directly in the head pattern: it is concrete at expansion and
     * `Ann` is invariant, so each head either is an `Ann[A, _, _]` or provably is not.
+    *
+    * The annotation's [[Defaults]] mirror is a context parameter: pin one in the
+    * annotation's companion to share a single instance across all `find` sites
+    * (otherwise the fallback `Defaults.of` given synthesizes one per summon).
     */
-  inline def find[A <: Annotation: Mirror.ProductOf as m, Anns]: Option[A] =
+  inline def find[A <: Annotation: {Mirror.ProductOf as m, Defaults as d}, Anns]: Option[A] =
     inline erasedValue[Anns] match
       case _: EmptyTuple => None
       case _: (Ann[A, args, defaulted] *: _) =>
@@ -70,28 +74,16 @@ object AnnotMirror:
       case _: (_ *: t) => find[A, t]
 
   /** The constructor-argument tuple for one mirrored annotation: provided constants
-    * are materialised directly; defaulted positions require the annotation's
-    * [[Defaults]] mirror, which is only consulted (and only synthesized) when
-    * `Defaulted` actually contains a `true`.
+    * are materialised directly; defaulted positions are looked up through the
+    * annotation's [[Defaults]] mirror.
     */
-  inline def argsOf[A, Args, Defaulted]: Tuple =
-    inline if anyDefaulted[Defaulted] then
-      val defaults = Defaults.of[A].values
-      resolve[Args, Defaulted](i =>
-        defaults
-          .lift(i)
-          .flatten
-          .fold(throw new IllegalStateException(s"no default for annotation parameter $i"))(_())
-      )
-    else resolve[Args, Defaulted](i => throw new IllegalStateException(s"no default for annotation parameter $i"))
-
-  inline def anyDefaulted[D]: Boolean =
-    inline erasedValue[D] match
-      case _: EmptyTuple => false
-      case _: (dh *: dt) =>
-        inline erasedValue[dh] match
-          case _: true  => true
-          case _: false => anyDefaulted[dt]
+  inline def argsOf[A, Args, Defaulted](using d: Defaults[A]): Tuple =
+    resolve[Args, Defaulted](i =>
+      d.values
+        .lift(i)
+        .flatten
+        .fold(throw new IllegalStateException(s"no default for annotation parameter $i"))(_())
+    )
 
   inline def resolve[Args, D](lookup: Int => Any): Tuple =
     inline erasedValue[Args] match
