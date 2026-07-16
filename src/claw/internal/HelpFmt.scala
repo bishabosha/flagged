@@ -68,7 +68,13 @@ private[claw] object HelpFmt:
     s"$short--${o.long}$value"
 
   private def optExtras(o: OptSpec): List[String] =
-    val dflt = o.default.map(d => d()) match
+    val default = o.default.map(d => d()).filterNot { v =>
+      // a flag default equal to the absent-value (fromCount(0)) conveys nothing
+      o.mode match
+        case Mode.Flag(fromCount, _) => fromCount(0).toOption.contains(v)
+        case _                       => false
+    }
+    val dflt = default match
       case Some(v) => fmtDefault(v).map(s => s"default: $s")
       case None    => None
     val required = o.mode match
