@@ -4,11 +4,6 @@ import claw.internal.{Ann, AnnotMirror, Derive, FieldAnnots, TargetAnnots}
 
 class MetaSuite extends munit.FunSuite:
 
-  test("materialize rebuilds annotation values from their mirrored types") {
-    val anns = AnnotMirror.materialize[Ann[short, 'v' *: EmptyTuple] *: Ann[help, "text" *: EmptyTuple] *: EmptyTuple]
-    assertEquals(anns, List(short('v'), help("text")))
-  }
-
   test("find extracts a typed annotation from a mirrored slot at compile time") {
     type Slot = Ann[short, 'v' *: EmptyTuple] *: Ann[help, "text" *: EmptyTuple] *: EmptyTuple
     val s: Option[short] = AnnotMirror.find[short, Slot]

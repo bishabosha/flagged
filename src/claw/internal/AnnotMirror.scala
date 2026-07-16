@@ -60,13 +60,3 @@ object AnnotMirror:
         Some(summonInline[Mirror.ProductOf[A]].fromProduct(constValueTuple[args]))
       case _: (_ *: t) => find[A, t]
 
-  /** Materialise one slot: rebuild each annotation value from its mirrored
-    * constructor-argument singleton types via the annotation's own `Mirror`.
-    * Plain binders are safe here: annotation arguments are literal constant types,
-    * which — unlike term singletons — survive inline-match binders.
-    */
-  inline def materialize[Anns]: List[Any] =
-    inline erasedValue[Anns] match
-      case _: EmptyTuple => Nil
-      case _: (Ann[a, args] *: t) =>
-        summonInline[Mirror.ProductOf[a]].fromProduct(constValueTuple[args]) :: materialize[t]
