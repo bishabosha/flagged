@@ -114,6 +114,14 @@ object MetaMacros:
 
     private def alias(t: TypeRepr): TypeBounds = TypeBounds(t, t)
 
+    /** Refine an `AnnotMirror` kind with the self and per-member annotation slots. */
+    private def refine(base: TypeRepr, self: TypeRepr, members: List[TypeRepr]): TypeRepr =
+      Refinement(
+        Refinement(base, "MirroredSelfAnnotations", alias(self)),
+        "MirroredAnnotations",
+        alias(tupleType(members))
+      )
+
     def product[A: Type]: Expr[AnnotMirror.Product[A]] =
       val sym = TypeRepr.of[A].typeSymbol
       if !(sym.isClassDef && sym.flags.is(Flags.Case) && !sym.flags.is(Flags.Module)) then
@@ -123,13 +131,7 @@ object MetaMacros:
         val merged = params.lift(i).map(_.annotations.reverse).getOrElse(Nil) ++ f.annotations.reverse
         slotOf(merged)
       }
-      val refined =
-        Refinement(
-          Refinement(TypeRepr.of[AnnotMirror.Product[A]], "MirroredAnnotations", alias(slot(sym))),
-          "MirroredFieldAnnotations",
-          alias(tupleType(perField))
-        )
-      refined.asType match
+      refine(TypeRepr.of[AnnotMirror.Product[A]], slot(sym), perField).asType match
         case '[t] =>
           '{ (new AnnotMirror.Product[A] {}).asInstanceOf[t & AnnotMirror.Product[A]] }
 
@@ -137,12 +139,6 @@ object MetaMacros:
       val sym = TypeRepr.of[A].typeSymbol
       if sym.children.isEmpty then
         report.errorAndAbort(s"No sum AnnotMirror for ${TypeRepr.of[A].show}: no cases found")
-      val refined =
-        Refinement(
-          Refinement(TypeRepr.of[AnnotMirror.Sum[A]], "MirroredAnnotations", alias(slot(sym))),
-          "MirroredCaseAnnotations",
-          alias(tupleType(sym.children.map(slot)))
-        )
-      refined.asType match
+      refine(TypeRepr.of[AnnotMirror.Sum[A]], slot(sym), sym.children.map(slot)).asType match
         case '[t] =>
           '{ (new AnnotMirror.Sum[A] {}).asInstanceOf[t & AnnotMirror.Sum[A]] }

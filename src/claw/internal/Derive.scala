@@ -21,8 +21,8 @@ object Derive:
     summonFrom:
       case am: AnnotMirror.Product[A] =>
         Annots.Product[A](
-          targetAnnotsOf[am.MirroredAnnotations],
-          fieldAnnotsEach[am.MirroredFieldAnnotations]
+          targetAnnotsOf[am.MirroredSelfAnnotations],
+          fieldAnnotsEach[am.MirroredAnnotations]
         )
 
   /** Extract claw's annotations for a sum into typed records. */
@@ -30,8 +30,8 @@ object Derive:
     summonFrom:
       case am: AnnotMirror.Sum[A] =>
         Annots.Sum[A](
-          targetAnnotsOf[am.MirroredAnnotations],
-          targetAnnotsEach[am.MirroredCaseAnnotations]
+          targetAnnotsOf[am.MirroredSelfAnnotations],
+          targetAnnotsEach[am.MirroredAnnotations]
         )
 
   inline def targetAnnotsOf[Anns]: TargetAnnots =

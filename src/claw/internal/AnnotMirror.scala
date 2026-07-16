@@ -13,9 +13,10 @@ sealed trait Ann[A <: Annotation, Args <: Tuple]
 
 /** `Mirror`-style witness describing how `T` is annotated. Like `Mirror`, all
   * information lives in type members, so a compiler-intrinsic version of this would
-  * synthesize only types. Two kinds: [[AnnotMirror.Product]] for classes (annotations
-  * on the class itself plus one slot per constructor field) and [[AnnotMirror.Sum]]
-  * for enums / sealed traits (one slot per case).
+  * synthesize only types. The kind — [[AnnotMirror.Product]] for classes,
+  * [[AnnotMirror.Sum]] for enums / sealed traits — determines how
+  * `MirroredAnnotations` is interpreted: one slot per constructor field, or one slot
+  * per case.
   *
   * Only annotations that are case classes extending `StaticAnnotation` and applied
   * with compile-time-constant arguments are mirrored — the same restriction a
@@ -24,17 +25,18 @@ sealed trait Ann[A <: Annotation, Args <: Tuple]
   */
 sealed trait AnnotMirror[T]:
   /** Tuple of [[Ann]] types: the annotations on `T` itself. */
+  type MirroredSelfAnnotations <: Tuple
+
+  /** Tuple with one element per member — constructor fields for products, cases for
+    * sums; each element is a tuple of [[Ann]] types.
+    */
   type MirroredAnnotations <: Tuple
 
 object AnnotMirror:
 
-  trait Product[T] extends AnnotMirror[T]:
-    /** Tuple with one element per constructor field; each element is a tuple of [[Ann]] types. */
-    type MirroredFieldAnnotations <: Tuple
+  trait Product[T] extends AnnotMirror[T]
 
-  trait Sum[T] extends AnnotMirror[T]:
-    /** Tuple with one element per case; each element is a tuple of [[Ann]] types. */
-    type MirroredCaseAnnotations <: Tuple
+  trait Sum[T] extends AnnotMirror[T]
 
   /** Synthesize the annotation mirror for a class (macro-backed; the intrinsic
     * candidate). Given as `transparent inline` so the refined type members reach the
@@ -53,10 +55,10 @@ object AnnotMirror:
     * `A` is matched directly in the head pattern: it is concrete at expansion and
     * `Ann` is invariant, so each head either is an `Ann[A, _]` or provably is not.
     */
-  inline def find[A <: Annotation, Anns]: Option[A] =
+  inline def find[A <: Annotation: Mirror.ProductOf as m, Anns]: Option[A] =
     inline erasedValue[Anns] match
       case _: EmptyTuple => None
       case _: (Ann[A, args] *: _) =>
-        Some(summonInline[Mirror.ProductOf[A]].fromProduct(constValueTuple[args]))
+        Some(m.fromProduct(constValueTuple[args]))
       case _: (_ *: t) => find[A, t]
 
