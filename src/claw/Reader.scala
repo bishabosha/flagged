@@ -98,7 +98,7 @@ object Reader:
 
   given Reader[Path] = of("path")(s =>
     try Ok(Paths.get(s))
-    catch case e: InvalidPathException => Err(s"'$s' is not a valid path")
+    catch case _: InvalidPathException => Err(s"'$s' is not a valid path")
   )
 
   given Reader[File] = of("file")(s => Ok(new File(s)))

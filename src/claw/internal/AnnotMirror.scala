@@ -1,6 +1,6 @@
 package claw.internal
 
-import scala.annotation.{Annotation, StaticAnnotation}
+import scala.annotation.Annotation
 import scala.compiletime.*
 import scala.deriving.Mirror
 
@@ -70,9 +70,3 @@ object AnnotMirror:
       case _: EmptyTuple => Nil
       case _: (Ann[a, args] *: t) =>
         summonInline[Mirror.ProductOf[a]].fromProduct(constValueTuple[args]) :: materialize[t]
-
-  /** Materialise a tuple of slots (per-field or per-case). */
-  inline def materializeEach[Slots]: List[List[Any]] =
-    inline erasedValue[Slots] match
-      case _: EmptyTuple => Nil
-      case _: (h *: t)   => materialize[h] :: materializeEach[t]

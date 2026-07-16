@@ -1,8 +1,7 @@
 package claw.internal
 
 import claw.{Parser, Reader}
-import steps.result.{Result}
-import steps.result.Result.{Ok, Err}
+import steps.result.Result
 import scala.collection.mutable
 
 /** Per-field derivation result, produced by inline code from the field's type shape.
