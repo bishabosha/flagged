@@ -9,11 +9,19 @@ final case class tagged(label: String = "none", level: Int = 1)
 class MetaSuite extends munit.FunSuite:
 
   test("find extracts a typed annotation from a mirrored slot at compile time") {
-    type Slot = Ann[short, 'v' *: EmptyTuple] *: Ann[help, "text" *: EmptyTuple] *: EmptyTuple
+    type Slot =
+      Ann[short, 'v' *: EmptyTuple, false *: EmptyTuple] *:
+        Ann[help, "text" *: EmptyTuple, false *: EmptyTuple] *: EmptyTuple
     val s: Option[short] = AnnotMirror.find[short, Slot]
     val n: Option[name] = AnnotMirror.find[name, Slot]
     assertEquals(s, Some(short('v')))
     assertEquals(n, None)
+  }
+
+  test("defaulted positions are looked up through the Defaults mirror") {
+    // hand-written mirror type: label defaulted (index 0), level provided
+    type Slot = Ann[tagged, (0, 7), (true, false)] *: EmptyTuple
+    assertEquals(AnnotMirror.find[tagged, Slot], Some(tagged("none", 7)))
   }
 
   test("annotation mirror resolves named arguments and fills constant defaults") {

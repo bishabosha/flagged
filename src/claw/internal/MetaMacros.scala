@@ -95,39 +95,22 @@ object MetaMacros:
       case Typed(inner, _) => constArg(inner)
       case _               => None
 
-    /** The constant default of constructor parameter `i` (0-based), read from the
-      * companion's default getter tree; `None` when the default is not a literal.
-      */
-    private def defaultConst(sym: Symbol, i: Int): Option[TypeRepr] =
-      val comp = sym.companionModule
-      val getter = comp
-        .methodMember(s"$$lessinit$$greater$$default$$${i + 1}")
-        .headOption
-        .orElse(comp.methodMember(s"apply$$default$$${i + 1}").headOption)
-      getter.flatMap { g =>
-        scala.util.Try(g.tree).toOption.flatMap {
-          case dd: DefDef => dd.rhs.flatMap(constArg)
-          case _          => None
-        }
-      }
-
-    /** Recognize a typer-inserted default-getter reference and resolve its constant. */
-    private def defaultGetterConst(sym: Symbol, t: Term): Option[TypeRepr] =
+    /** Recognize a typer-inserted default-getter reference. */
+    private def isDefaultGetterRef(t: Term): Boolean =
       val name = t match
         case Select(_, n) => Some(n)
         case Ident(n)     => Some(n)
         case _            => None
-      name
-        .filter(_.contains("$default$"))
-        .flatMap(n => n.split("\\$default\\$").lift(1))
-        .flatMap(_.toIntOption)
-        .flatMap(n => defaultConst(sym, n - 1))
+      name.exists(_.contains("$default$"))
 
-    /** Resolve the constructor arguments to constant types in declaration order:
-      * positional args first, named args by parameter name, remaining parameters
-      * from their (constant) defaults.
+    /** Resolve the constructor arguments in declaration order: positional args by
+      * index, named args by parameter name. A provided argument yields its constant
+      * type paired with `false`; an omitted argument (or a typer-inserted default
+      * getter) yields the parameter's *index* paired with `true` — the constant is
+      * never read from trees; materialisation looks it up via the annotation's
+      * `Defaults` mirror.
       */
-    private def resolveArgs(sym: Symbol, args: List[Term]): Option[List[TypeRepr]] =
+    private def resolveArgs(sym: Symbol, args: List[Term]): Option[(List[TypeRepr], List[TypeRepr])] =
       val params = sym.primaryConstructor.paramSymss.flatten.filter(_.isTerm)
       val named = args.collect { case NamedArg(n, v) => n -> v }.toMap
       // note: isInstanceOf[NamedArg] would erase to the reflect type's bound (Term)
@@ -136,21 +119,29 @@ object MetaMacros:
         case NamedArg(_, _) => false
         case _              => true
       }
+      def defaulted(p: Symbol, i: Int): Option[(TypeRepr, Boolean)] =
+        Option.when(p.flags.is(Flags.HasDefault))((ConstantType(IntConstant(i)), true))
       val resolved = params.zipWithIndex.map { (p, i) =>
         named.get(p.name).orElse(positional.lift(i)) match
-          case Some(t) => constArg(t).orElse(defaultGetterConst(sym, t))
-          case None    => defaultConst(sym, i)
+          case Some(t) if isDefaultGetterRef(t) => defaulted(p, i)
+          case Some(t)                          => constArg(t).map((_, false))
+          case None                             => defaulted(p, i)
       }
-      if resolved.forall(_.isDefined) then Some(resolved.flatten) else None
+      if resolved.forall(_.isDefined) then
+        val pairs = resolved.flatten
+        Some((pairs.map(_._1), pairs.map(p => ConstantType(BooleanConstant(p._2)))))
+      else None
 
-    /** `Ann[a, args]` for one annotation occurrence, if it is mirrorable. */
+    /** `Ann[a, args, defaulted]` for one annotation occurrence, if it is mirrorable. */
     private def annType(a: Term): Option[TypeRepr] =
       val tpe = a.tpe
       val sym = tpe.typeSymbol
       val ok = tpe <:< TypeRepr.of[scala.annotation.StaticAnnotation] && sym.flags.is(Flags.Case)
       a match
         case Apply(Select(New(_), _), args) if ok =>
-          resolveArgs(sym, args).map(argTypes => TypeRepr.of[Ann].appliedTo(List(tpe, tupleType(argTypes))))
+          resolveArgs(sym, args).map { (argTypes, defaultedFlags) =>
+            TypeRepr.of[Ann].appliedTo(List(tpe, tupleType(argTypes), tupleType(defaultedFlags)))
+          }
         case _ => None
 
     private def slot(s: Symbol): TypeRepr = tupleType(s.annotations.reverse.flatMap(annType))

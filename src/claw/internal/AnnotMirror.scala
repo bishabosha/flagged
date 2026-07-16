@@ -5,11 +5,18 @@ import scala.compiletime.*
 import scala.deriving.Mirror
 
 /** Type-level description of a single annotation occurrence: the monomorphic
-  * annotation type `A` and the singleton types of its constructor arguments `Args`
-  * (e.g. `Ann[claw.short, 'v' *: EmptyTuple]`). Purely a phantom type — never
-  * instantiated; subsequent code materialises the singleton types into a real value.
+  * annotation type `A`, the singleton types of its constructor arguments `Args`, and
+  * a parallel tuple `Defaulted` of boolean literal types. Where `Defaulted` is
+  * `false`, the `Args` element is the provided argument's constant type; where it is
+  * `true`, the argument was omitted (or a typer-inserted default) and the `Args`
+  * element is the parameter's index, to be looked up through the annotation's
+  * [[Defaults]] mirror at materialisation. E.g. `@tagged(level = 3)` with
+  * `tagged(label: String = "none", level: Int)` mirrors as
+  * `Ann[tagged, (0, 3), (true, false)]`.
+  *
+  * Purely a phantom type — never instantiated.
   */
-sealed trait Ann[A <: Annotation, Args <: Tuple]
+sealed trait Ann[A <: Annotation, Args <: Tuple, Defaulted <: Tuple]
 
 /** `Mirror`-style witness describing how `T` is annotated. Like `Mirror`, all
   * information lives in type members, so a compiler-intrinsic version of this would
@@ -53,12 +60,46 @@ object AnnotMirror:
   /** The first annotation of type `A` in slot `Anns`, materialised — fully resolved
     * at compile time, so consumers get a typed `Option[A]` with no runtime type test.
     * `A` is matched directly in the head pattern: it is concrete at expansion and
-    * `Ann` is invariant, so each head either is an `Ann[A, _]` or provably is not.
+    * `Ann` is invariant, so each head either is an `Ann[A, _, _]` or provably is not.
     */
   inline def find[A <: Annotation: Mirror.ProductOf as m, Anns]: Option[A] =
     inline erasedValue[Anns] match
       case _: EmptyTuple => None
-      case _: (Ann[A, args] *: _) =>
-        Some(m.fromProduct(constValueTuple[args]))
+      case _: (Ann[A, args, defaulted] *: _) =>
+        Some(m.fromProduct(argsOf[A, args, defaulted]))
       case _: (_ *: t) => find[A, t]
 
+  /** The constructor-argument tuple for one mirrored annotation: provided constants
+    * are materialised directly; defaulted positions require the annotation's
+    * [[Defaults]] mirror, which is only consulted (and only synthesized) when
+    * `Defaulted` actually contains a `true`.
+    */
+  inline def argsOf[A, Args, Defaulted]: Tuple =
+    inline if anyDefaulted[Defaulted] then
+      val defaults = Defaults.of[A].values
+      resolve[Args, Defaulted](i =>
+        defaults
+          .lift(i)
+          .flatten
+          .fold(throw new IllegalStateException(s"no default for annotation parameter $i"))(_())
+      )
+    else resolve[Args, Defaulted](i => throw new IllegalStateException(s"no default for annotation parameter $i"))
+
+  inline def anyDefaulted[D]: Boolean =
+    inline erasedValue[D] match
+      case _: EmptyTuple => false
+      case _: (dh *: dt) =>
+        inline erasedValue[dh] match
+          case _: true  => true
+          case _: false => anyDefaulted[dt]
+
+  inline def resolve[Args, D](lookup: Int => Any): Tuple =
+    inline erasedValue[Args] match
+      case _: EmptyTuple => EmptyTuple
+      case _: (ah *: at) =>
+        inline erasedValue[D] match
+          case _: (dh *: dt) =>
+            val head: Any = inline erasedValue[dh] match
+              case _: false => constValue[ah]
+              case _: true  => lookup(constValue[ah].asInstanceOf[Int])
+            head *: resolve[at, dt](lookup)
