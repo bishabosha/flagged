@@ -62,11 +62,13 @@ subcommands; otherwise its `Reader` given parses it as a value, and the reader's
 | Field shape | Meaning |
 |---|---|
 | `x: Boolean` | flag `--x` (also `--x=false`); always optional |
+| `x: Count` (or any flag-schema `Reader[A]`) | counting flag: `-vvv` → `Count(3)` |
 | `x: A` (value-schema `Reader[A]`) | required option `--x <a>` |
 | `x: A = default` | optional, default shown in help |
 | `x: Option[A]` | optional, `None` when absent |
 | `x: A` (repeated-schema `Reader[A]`, e.g. `List`/`Seq`/`Vector`) | repeatable |
-| `x: E` (`E derives Parser`) | nested subcommands |
+| `x: E` (enum `E derives Parser`) | nested subcommands |
+| `x: P` (case class `P derives Parser`) | options group spliced into this command |
 | `@positional x: A` | positional argument (same rules) |
 
 Fine-tune with annotations:
@@ -220,6 +222,35 @@ given Reader[Set[String]] = Reader.repeated[String, Set[String]](l => Ok(l.toSet
 given Reader[NonEmpty] = Reader.repeated[Int, NonEmpty](l =>
   if l.isEmpty then Err("expected at least one occurrence") else Ok(NonEmpty(l)))
 ```
+
+Flag shape is pluggable the same way: `Reader.flag` builds the value from the number
+of occurrences (with an optional parser for the explicit `--flag=value` form).
+`Boolean`'s reader is defined exactly like this, the bundled `Count` type gives
+counting flags (`-vvv` → `Count(3)`), and `fromCount` may fail, so occurrence bounds
+are expressible:
+
+```scala
+given Reader[Verbosity] = Reader.flag(n =>
+  if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)"))
+```
+
+## Sharing option groups
+
+A field whose type is a *case class* with a `Parser` splices that group's options
+directly into the surrounding command — the flattened options parse as if declared
+inline, and the group is reconstructed as a value:
+
+```scala
+case class LogOpts(@short('q') quiet: Boolean = false, logLevel: String = "info") derives Parser
+
+case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser
+// serve --port 9000 -q --log-level debug
+```
+
+Groups nest, and work inside subcommand cases, so common options can be shared across
+a whole command tree. A name collision between a command and a spliced group (or two
+groups) is reported at parser construction; use `@name`/`@short` on either side to
+disambiguate. Spliced groups cannot contain positional fields and cannot be `Option`al.
 
 Enums with parameterless cases can derive a by-name reader:
 

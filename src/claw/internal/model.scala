@@ -50,16 +50,29 @@ final case class SubGroup(
     cases: Vector[SubCase]
 )
 
+/** An options group spliced into a parent command: the child command's option specs
+  * live re-indexed in the parent (at `offset ..< offset + command.arity` of the
+  * parent's value storage), and the built child value lands in parent slot `slot`.
+  */
+final case class Splice(slot: Int, offset: Int, command: Command)
+
 final case class Command(
     description: String,
     opts: Vector[OptSpec],
     positionals: Vector[PosSpec],
     sub: Option[SubGroup],
+    splices: List[Splice],
     build: Array[Any] => Any,
-    arity: Int
-)
+    arity: Int // value-storage size: own fields plus spliced children's storage
+):
+  /** Build spliced children from their storage slices, then build this command's value. */
+  def finish(values: Array[Any]): Any =
+    splices.foreach { s =>
+      values(s.slot) = s.command.finish(values.slice(s.offset, s.offset + s.command.arity))
+    }
+    build(values)
 
 object Command:
   /** A command with no parameters that always produces `value` (parameterless enum case / case object). */
   def leaf(value: Any, description: String): Command =
-    Command(description, Vector.empty, Vector.empty, None, _ => value, 0)
+    Command(description, Vector.empty, Vector.empty, None, Nil, _ => value, 0)

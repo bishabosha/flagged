@@ -77,6 +77,7 @@ object Assemble:
       Vector.empty,
       Vector.empty,
       Some(SubGroup(0, false, None, cases.toVector)),
+      Nil,
       arr => arr(0),
       1
     )
@@ -93,6 +94,8 @@ object Assemble:
     val opts = Vector.newBuilder[OptSpec]
     val poss = Vector.newBuilder[PosSpec]
     var subGroup: Option[SubGroup] = None
+    val splices = List.newBuilder[Splice]
+    var storage = n // spliced children's specs live past the parent's own slots
     val longSeen = mutable.Set.empty[String]
     val shortSeen = mutable.Set.empty[Char]
     // (name, kind) where kind is "required" | "optional" | "repeated"
@@ -121,12 +124,30 @@ object Assemble:
       shapes(i) match
         case Shape.Sub(parser, optional) =>
           if anns.positional then
-            invalid(s"field '$label': @positional cannot be combined with a subcommand field")
-          if subGroup.nonEmpty then invalid("only one subcommand field is supported per command")
-          val cases = commandOf(parser()).sub
-            .getOrElse(invalid(s"field '$label' does not resolve to a set of commands"))
-            .cases
-          subGroup = Some(SubGroup(i, optional, default, cases))
+            invalid(s"field '$label': @positional cannot be combined with a Parser field")
+          val inner = commandOf(parser())
+          inner.sub match
+            case Some(group) =>
+              // sum-shaped: nested subcommands
+              if subGroup.nonEmpty then invalid("only one subcommand field is supported per command")
+              subGroup = Some(SubGroup(i, optional, default, group.cases))
+            case None =>
+              // product-shaped: splice the group's options into this command
+              if optional then
+                invalid(s"field '$label': Option of a spliced options group is not supported")
+              if inner.positionals.nonEmpty then
+                invalid(s"field '$label': a spliced options group cannot contain positional fields")
+              inner.opts.foreach { o =>
+                if !longSeen.add(o.long) then
+                  invalid(s"duplicate option name '--${o.long}' (from options group '$label')")
+                o.short.foreach { c =>
+                  if !shortSeen.add(c) then
+                    invalid(s"duplicate short option '-$c' (from options group '$label')")
+                }
+                opts += o.copy(index = storage + o.index)
+              }
+              splices += Splice(i, storage, inner)
+              storage += inner.arity
 
         case Shape.Value(r, optional) =>
           r.schema match
@@ -173,4 +194,16 @@ object Assemble:
     if subGroup.nonEmpty && kinds.nonEmpty then
       invalid("mixing positional fields with a subcommand field is ambiguous and not supported")
 
-    Command(annots.onType.help.map(_.value).getOrElse(""), opts.result(), poss.result(), subGroup, build, n)
+    val allSplices = splices.result()
+    // `build` expects exactly the parent's own field slots
+    val fullBuild: Array[Any] => Any =
+      if allSplices.isEmpty then build else arr => build(arr.take(n))
+    Command(
+      annots.onType.help.map(_.value).getOrElse(""),
+      opts.result(),
+      poss.result(),
+      subGroup,
+      allSplices,
+      fullBuild,
+      storage
+    )

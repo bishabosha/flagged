@@ -221,4 +221,4 @@ private[claw] object Engine:
               fail(s"missing command (expected one of: ${g.cases.map(_.name).mkString(", ")})")
       }
 
-      cmd.build(values)
+      cmd.finish(values)
