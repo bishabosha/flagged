@@ -8,12 +8,12 @@ import scala.quoted.*
 final class Defaults[A](val values: List[Option[() => Any]])
 
 object Defaults:
-  /** The one thing `Mirror` cannot see: default argument getters. Available as a
-    * given so consumers (e.g. `AnnotMirror.find`) can require it as a context
-    * parameter; pin an instance in a type's companion (`given Defaults[T] =
-    * Defaults.of[T]`) to derive it once instead of at every summoning site.
+  /** The one thing `Mirror` cannot see: default argument getters. Consumers (e.g.
+    * `AnnotMirror.find`) require `Defaults[A]` as a context parameter; add a
+    * `derives Defaults` clause to the type (annotations in particular) so the
+    * instance is derived once, in its companion.
     */
-  inline given of[A]: Defaults[A] = ${ MetaMacros.defaults[A] }
+  inline def derived[A]: Defaults[A] = ${ MetaMacros.defaults[A] }
 
 /** claw's annotations on a type or an enum case, extracted at compile time from an
   * [[AnnotMirror]] — fully typed, no `Any` and no runtime type tests.

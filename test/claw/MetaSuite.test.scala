@@ -4,7 +4,7 @@ import claw.internal.{Ann, AnnotMirror, Derive, FieldAnnots, TargetAnnots}
 
 // test annotation with default arguments, for the named-args/defaults tests
 final case class tagged(label: String = "none", level: Int = 1)
-    extends scala.annotation.StaticAnnotation
+    extends scala.annotation.StaticAnnotation derives internal.Defaults
 
 class MetaSuite extends munit.FunSuite:
 

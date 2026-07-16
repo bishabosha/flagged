@@ -62,9 +62,9 @@ object AnnotMirror:
     * `A` is matched directly in the head pattern: it is concrete at expansion and
     * `Ann` is invariant, so each head either is an `Ann[A, _, _]` or provably is not.
     *
-    * The annotation's [[Defaults]] mirror is a context parameter: pin one in the
-    * annotation's companion to share a single instance across all `find` sites
-    * (otherwise the fallback `Defaults.of` given synthesizes one per summon).
+    * The annotation's [[Defaults]] mirror is a context parameter: add a
+    * `derives Defaults` clause to the annotation so a single instance, derived in
+    * its companion, is shared across all `find` sites.
     */
   inline def find[A <: Annotation: {Mirror.ProductOf as m, Defaults as d}, Anns]: Option[A] =
     inline erasedValue[Anns] match

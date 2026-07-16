@@ -67,7 +67,7 @@ object Derive:
     val cmd = Assemble.product(
       labelsOf[m.MirroredElemLabels],
       shapesOf[m.MirroredElemTypes],
-      Defaults.of[A].values,
+      Defaults.derived[A].values,
       annots,
       arr => m.fromProduct(Tuple.fromArray(arr))
     )
