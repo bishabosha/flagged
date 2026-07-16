@@ -79,7 +79,7 @@ object Assemble:
     val typeName = if joined.length <= 40 then joined else kebab(typeLabel)
     Runtime.enumReader(typeName, names.zip(values).toVector)
 
-  def sum(caseLabels: List[String], annots: Annots[?], entries: List[SubEntry]): Command =
+  def sum(caseLabels: List[String], annots: Annots.Sum[?], entries: List[SubEntry]): Command =
     val cases = entries.zipWithIndex.map { (e, i) =>
       val anns = annots.perCase.lift(i).getOrElse(Nil)
       val help = helpOf(anns)
@@ -101,7 +101,7 @@ object Assemble:
       labels: List[String],
       shapes: List[Shape],
       defaults: List[Option[() => Any]],
-      annots: Annots[?],
+      annots: Annots.Product[?],
       build: Array[Any] => Any
   ): Command =
     val n = labels.length

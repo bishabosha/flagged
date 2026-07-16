@@ -11,15 +11,18 @@ object Defaults:
   /** The one thing `Mirror` cannot see: default argument getters. */
   inline def of[A]: Defaults[A] = ${ MetaMacros.defaults[A] }
 
-/** Runtime carrier for materialised annotations on a type, its constructor fields,
-  * and its cases; built by `Derive.annotsOf` from an [[AnnotMirror]]. Lists are empty
-  * where not applicable.
+/** Runtime carrier for materialised annotations, built from an [[AnnotMirror]] by
+  * `Derive.productAnnots` / `Derive.sumAnnots`. Shaped like the type they describe:
+  * products carry per-field slots, sums per-case slots.
   */
-final class Annots[A](
-    val onType: List[Any],
-    val perField: List[List[Any]],
-    val perCase: List[List[Any]]
-)
+enum Annots[A]:
+  /** Annotations of a case class: on the type itself and per constructor field. */
+  case Product[T](onType: List[Any], perField: List[List[Any]]) extends Annots[T]
+
+  /** Annotations of an enum / sealed trait: on the type itself and per case. */
+  case Sum[T](onType: List[Any], perCase: List[List[Any]]) extends Annots[T]
+
+  def onType: List[Any]
 
 /** The two residual macros backing [[Defaults]] and [[AnnotMirror]]. Everything else
   * in claw's derivation is `Mirror` + `inline`.

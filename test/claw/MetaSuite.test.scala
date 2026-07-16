@@ -16,7 +16,6 @@ class MetaSuite extends munit.FunSuite:
     val a = Derive.productAnnots[G]
     assertEquals(a.onType, List[Any](help("a greeter")))
     assertEquals(a.perField, List(List[Any](short('n'), help("who")), Nil))
-    assertEquals(a.perCase, Nil)
   }
 
   test("annotation mirror of an enum captures per-case annotations") {

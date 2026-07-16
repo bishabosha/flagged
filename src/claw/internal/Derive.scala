@@ -14,22 +14,20 @@ import claw.{Parser, Reader}
 object Derive:
 
   /** Materialise the [[AnnotMirror]] of a product into the runtime [[Annots]] carrier. */
-  inline def productAnnots[A]: Annots[A] =
+  inline def productAnnots[A]: Annots.Product[A] =
     summonFrom:
       case am: AnnotMirror.Product[A] =>
-        new Annots[A](
+        Annots.Product[A](
           AnnotMirror.materialize[am.MirroredAnnotations],
-          AnnotMirror.materializeEach[am.MirroredFieldAnnotations],
-          Nil
+          AnnotMirror.materializeEach[am.MirroredFieldAnnotations]
         )
 
   /** Materialise the [[AnnotMirror]] of a sum into the runtime [[Annots]] carrier. */
-  inline def sumAnnots[A]: Annots[A] =
+  inline def sumAnnots[A]: Annots.Sum[A] =
     summonFrom:
       case am: AnnotMirror.Sum[A] =>
-        new Annots[A](
+        Annots.Sum[A](
           AnnotMirror.materialize[am.MirroredAnnotations],
-          Nil,
           AnnotMirror.materializeEach[am.MirroredCaseAnnotations]
         )
 
