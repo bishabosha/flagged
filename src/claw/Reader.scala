@@ -7,10 +7,18 @@ import java.time.format.DateTimeParseException
 import java.util.UUID
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
+/** A counting flag: `-vvv` parses as `Count(3)`, absent as `Count(0)`. */
+final case class Count(value: Int)
+
+object Count:
+  given Reader[Count] = Reader.flag(n => Ok(Count(n)))
+
 /** Describes how command-line tokens become an `A`. The underlying [[Reader.Schema]]
-  * encodes the *shape*: a `Value` reader parses one token per occurrence; a `Repeated`
-  * reader accumulates every occurrence with an element reader and combines them, which
-  * is how collection types (and anything else that wants repetition) opt in.
+  * encodes the *shape*: a `Value` reader parses one token per occurrence; a `Flag`
+  * reader takes no token and is built from its occurrence count (booleans, counters);
+  * a `Repeated` reader accumulates every occurrence with an element reader and
+  * combines them, which is how collection types (and anything else that wants
+  * repetition) opt in.
   */
 @scala.annotation.implicitNotFound(
   "No given Reader[${A}] found.\n" +
@@ -24,11 +32,16 @@ trait Reader[A]:
   /** The help metavar: the value's type name, or the element's for repeated readers. */
   final def typeName: String = schema match
     case Reader.Schema.Value(name, _)        => name
+    case Reader.Schema.Flag(_, _)            => "flag"
     case Reader.Schema.Repeated(element, _)  => element.typeName
 
-  /** Parse a single occurrence (for repeated readers: one element, then combine). */
+  /** Parse a single occurrence (for repeated readers: one element, then combine;
+    * for flags: the explicit `--flag=value` form, if supported).
+    */
   final def read(s: String): Result[A, String] = schema match
-    case Reader.Schema.Value(_, parse)       => parse(s)
+    case Reader.Schema.Value(_, parse)          => parse(s)
+    case Reader.Schema.Flag(_, fromValue)       =>
+      fromValue.fold(Err(s"'$s': this flag does not take a value"))(f => f(s))
     case Reader.Schema.Repeated(element, build) => element.read(s).flatMap(e => build(List(e)))
 
   final def map[B](f: A => B): Reader[B] = emap(a => Ok(f(a)))
@@ -36,11 +49,14 @@ trait Reader[A]:
   final def emap[B](f: A => Result[B, String]): Reader[B] = Reader.fromSchema:
     schema match
       case Reader.Schema.Value(name, parse)       => Reader.Schema.Value(name, s => parse(s).flatMap(f))
+      case Reader.Schema.Flag(fromCount, fromValue) =>
+        Reader.Schema.Flag(n => fromCount(n).flatMap(f), fromValue.map(g => s => g(s).flatMap(f)))
       case Reader.Schema.Repeated(element, build) => Reader.Schema.Repeated(element, l => build(l).flatMap(f))
 
   final def withTypeName(name: String): Reader[A] = Reader.fromSchema:
     schema match
       case Reader.Schema.Value(_, parse)          => Reader.Schema.Value(name, parse)
+      case flag: Reader.Schema.Flag[A]            => flag
       case Reader.Schema.Repeated(element, build) => Reader.Schema.Repeated(element.withTypeName(name), build)
 
 object Reader:
@@ -50,6 +66,13 @@ object Reader:
   enum Schema[A]:
     /** One token per occurrence. */
     case Value[T](typeName: String, parse: String => Result[T, String]) extends Schema[T]
+
+    /** A flag: takes no token; the value is built from the number of occurrences
+      * (`-vvv` → 3, absent → 0). `fromValue` optionally supports the explicit
+      * `--flag=value` form.
+      */
+    case Flag[T](fromCount: Int => Result[T, String], fromValue: Option[String => Result[T, String]])
+        extends Schema[T]
 
     /** Any number of occurrences, each parsed by `element`, combined with `build`
       * (also invoked with `Nil` when the argument is absent — return `Err` to require
@@ -63,6 +86,18 @@ object Reader:
   /** Build a single-value reader from a name and a parse function. */
   def of[A](name: String)(f: String => Result[A, String]): Reader[A] =
     fromSchema(Schema.Value(name, f))
+
+  /** Opt `A` into flag shape: the field takes no value and is built from the number
+    * of occurrences on the command line.
+    */
+  def flag[A](fromCount: Int => Result[A, String]): Reader[A] =
+    fromSchema(Schema.Flag(fromCount, None))
+
+  /** A flag that additionally accepts the explicit `--flag=value` form (which also
+    * makes it usable positionally and inside `Option`).
+    */
+  def flag[A](fromCount: Int => Result[A, String], fromValue: String => Result[A, String]): Reader[A] =
+    fromSchema(Schema.Flag(fromCount, Some(fromValue)))
 
   /** Opt `A` into repeated shape: each occurrence is parsed with the element's reader,
     * and the collected elements are combined with `build`.
@@ -90,7 +125,7 @@ object Reader:
   given Reader[BigInt]     = numeric("integer")(BigInt(_))
   given Reader[BigDecimal] = numeric("decimal")(BigDecimal(_))
 
-  given Reader[Boolean] = of("bool")(internal.Runtime.parseBool)
+  given Reader[Boolean] = flag(n => Ok(n > 0), internal.Runtime.parseBool)
 
   given Reader[Char] = of("char")(s =>
     if s.length == 1 then Ok(s.charAt(0)) else Err(s"'$s' is not a single character")

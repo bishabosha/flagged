@@ -6,8 +6,10 @@ import steps.result.Result
   * at user call sites must reference these types; not intended for direct use.
   */
 enum Mode:
-  /** Boolean option: present → true; also accepts `--flag=false`. */
-  case Flag
+  /** Flag: takes no token; built from the occurrence count. `fromValue`, when
+    * available, handles the explicit `--flag=value` form.
+    */
+  case Flag(fromCount: Int => Result[Any, String], fromValue: Option[String => Result[Any, String]])
 
   /** Option taking one value. If `optional` the field is an `Option[_]` and the
     * parsed value is wrapped in `Some`.

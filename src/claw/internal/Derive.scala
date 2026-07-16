@@ -101,7 +101,6 @@ object Derive:
 
   inline def shapeOf[F]: Shape =
     inline erasedValue[F] match
-      case _: Boolean   => Shape.Flag
       case _: Option[e] => fieldShape[e].asOptional
       case _            => fieldShape[F]
 

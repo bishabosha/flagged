@@ -62,7 +62,7 @@ private[claw] object HelpFmt:
   private def optLeft(o: OptSpec): String =
     val short = o.short.map(c => s"-$c, ").getOrElse("    ")
     val value = o.mode match
-      case Mode.Flag            => ""
+      case Mode.Flag(_, _)      => ""
       case Mode.Single(_, _)    => s" <${o.metavar}>"
       case Mode.Repeated(_, _)  => s" <${o.metavar}>"
     s"$short--${o.long}$value"

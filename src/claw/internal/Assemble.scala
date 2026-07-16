@@ -8,10 +8,7 @@ import scala.collection.mutable
   * Runtime data: the summoned `Reader`/`Parser` instances travel inside it.
   */
 enum Shape:
-  /** `Boolean` field. */
-  case Flag
-
-  /** Field parsed by a `Reader`; the reader's schema decides single vs repeated. */
+  /** Field parsed by a `Reader`; the reader's schema decides flag, single, or repeated. */
   case Value(reader: Reader[?], optional: Boolean)
 
   /** Field with its own `Parser`: nested subcommands. */
@@ -20,7 +17,6 @@ enum Shape:
   def asOptional: Shape = this match
     case Value(r, _) => Value(r, true)
     case Sub(p, _)   => Sub(p, true)
-    case Flag        => Flag
 
 /** One case of a derived sum: either a singleton value or a nested command. */
 enum SubEntry:
@@ -132,12 +128,6 @@ object Assemble:
             .cases
           subGroup = Some(SubGroup(i, optional, default, cases))
 
-        case Shape.Flag =>
-          if anns.positional then
-            val kind = if default.nonEmpty then "optional" else "required"
-            addPos("bool", Mode.Single(Runtime.parseBool(_), false), kind)
-          else addOpt("bool", Mode.Flag)
-
         case Shape.Value(r, optional) =>
           r.schema match
             case Reader.Schema.Value(typeName, _) =>
@@ -145,13 +135,28 @@ object Assemble:
               if anns.positional then
                 addPos(typeName, mode, if optional || default.nonEmpty then "optional" else "required")
               else addOpt(typeName, mode)
+            case Reader.Schema.Flag(fromCount, fromValue) =>
+              val fc = fromCount.asInstanceOf[Int => Result[Any, String]]
+              val fv = fromValue.map(_.asInstanceOf[String => Result[Any, String]])
+              if anns.positional || optional then
+                // no occurrence-count semantics here; fall back to explicit values
+                fv match
+                  case Some(f) =>
+                    val mode = Mode.Single(f, optional)
+                    if anns.positional then
+                      addPos("value", mode, if optional || default.nonEmpty then "optional" else "required")
+                    else addOpt("value", mode)
+                  case None =>
+                    val where = if optional then "inside Option" else "positionally"
+                    invalid(s"field '$label': a flag Reader without a value parser cannot be used $where")
+              else addOpt("", Mode.Flag(fc, fv))
             case Reader.Schema.Repeated(element, buildList) =>
               if optional then
                 invalid(s"field '$label': Option of a repeated Reader is not supported")
               element.schema match
-                case _: Reader.Schema.Repeated[?, ?] =>
-                  invalid(s"field '$label': nested repeated Readers are not supported")
-                case _ => ()
+                case _: Reader.Schema.Value[?] => ()
+                case _ =>
+                  invalid(s"field '$label': repeated Readers require a single-value element Reader")
               val fromList = buildList.asInstanceOf[List[Any] => Result[Any, String]]
               val mode = Mode.Repeated(readFn(element), fromList)
               if anns.positional then addPos(element.typeName, mode, "repeated")

@@ -19,6 +19,7 @@ private[claw] object Engine:
       val values = new Array[Any](cmd.arity)
       val isSet = new Array[Boolean](cmd.arity)
       val collected = mutable.LinkedHashMap.empty[Int, mutable.ListBuffer[Any]]
+      val flagCounts = mutable.Map.empty[Int, Int].withDefaultValue(0)
       var rest = args
       var posIdx = 0
       var noMoreOpts = false
@@ -48,9 +49,12 @@ private[claw] object Engine:
 
       def setParsed(spec: OptSpec, raw: String, display: String): Unit =
         spec.mode match
-          case Mode.Flag =>
-            values(spec.index) = readOr(Runtime.parseBool(_), raw, display)
-            isSet(spec.index) = true
+          case Mode.Flag(_, fromValue) =>
+            fromValue match
+              case None    => fail(s"flag '$display' does not take a value")
+              case Some(f) =>
+                values(spec.index) = readOr(f, raw, display)
+                isSet(spec.index) = true
           case Mode.Single(read, optional) =>
             val v = readOr(read, raw, display)
             values(spec.index) = if optional then Some(v) else v
@@ -60,8 +64,7 @@ private[claw] object Engine:
             isSet(spec.index) = true
 
       def setFlag(spec: OptSpec): Unit =
-        values(spec.index) = true
-        isSet(spec.index) = true
+        flagCounts(spec.index) += 1
 
       def handleFree(tok: String): Unit =
         cmd.sub match
@@ -92,7 +95,7 @@ private[claw] object Engine:
                 values(p.index) = if optional then Some(v) else v
                 isSet(p.index) = true
                 posIdx += 1
-              case Mode.Flag =>
+              case Mode.Flag(_, _) =>
                 fail(s"unexpected argument '$tok'") // positionals are never flags
 
       while rest.nonEmpty do
@@ -119,7 +122,7 @@ private[claw] object Engine:
               fail(s"unknown option '--$nm'$sug")
             case Some(spec) =>
               spec.mode match
-                case Mode.Flag =>
+                case Mode.Flag(_, _) =>
                   inlineValue match
                     case None    => setFlag(spec)
                     case Some(v) => setParsed(spec, v, s"--$nm")
@@ -138,7 +141,7 @@ private[claw] object Engine:
                 fail(s"unknown option '-$c'")
               case Some(spec) =>
                 spec.mode match
-                  case Mode.Flag =>
+                  case Mode.Flag(_, _) =>
                     setFlag(spec)
                     i += 1
                   case _ =>
@@ -168,18 +171,31 @@ private[claw] object Engine:
             values(idx) = buf.toList
       }
 
+      def countedFlag(display: String, fromCount: Int => Result[Any, String], n: Int): Any =
+        fromCount(n) match
+          case Ok(v)    => v
+          case Err(msg) => fail(s"invalid value for '$display': $msg")
+
       // apply defaults, collect missing
       val missing = mutable.ListBuffer.empty[String]
       cmd.opts.foreach { o =>
         if !isSet(o.index) then
-          o.default match
-            case Some(d) => values(o.index) = d()
-            case None =>
-              o.mode match
-                case Mode.Flag                  => values(o.index) = false
-                case Mode.Single(_, true)       => values(o.index) = None
-                case Mode.Single(_, false)      => missing += s"--${o.long}"
-                case Mode.Repeated(_, fromList) => values(o.index) = combineRepeated(s"--${o.long}", fromList, Nil)
+          o.mode match
+            case Mode.Flag(fromCount, _) =>
+              // occurrences beat the field default; absent means count 0
+              val n = flagCounts(o.index)
+              values(o.index) =
+                if n > 0 then countedFlag(s"--${o.long}", fromCount, n)
+                else o.default.map(_()).getOrElse(countedFlag(s"--${o.long}", fromCount, 0))
+            case _ =>
+              o.default match
+                case Some(d) => values(o.index) = d()
+                case None =>
+                  o.mode match
+                    case Mode.Single(_, true)       => values(o.index) = None
+                    case Mode.Single(_, false)      => missing += s"--${o.long}"
+                    case Mode.Repeated(_, fromList) => values(o.index) = combineRepeated(s"--${o.long}", fromList, Nil)
+                    case Mode.Flag(_, _)            => () // handled above
       }
       cmd.positionals.foreach { p =>
         if !isSet(p.index) then
@@ -190,7 +206,7 @@ private[claw] object Engine:
                 case Mode.Single(_, true)       => values(p.index) = None
                 case Mode.Single(_, false)      => missing += s"<${p.name}>"
                 case Mode.Repeated(_, fromList) => values(p.index) = combineRepeated(s"<${p.name}>", fromList, Nil)
-                case Mode.Flag                  => values(p.index) = false
+                case Mode.Flag(fromCount, _)    => values(p.index) = countedFlag(s"<${p.name}>", fromCount, 0)
       }
       if missing.nonEmpty then
         val what = if missing.sizeIs == 1 then "argument" else "arguments"

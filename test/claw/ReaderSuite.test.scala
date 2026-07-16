@@ -76,6 +76,38 @@ class ReaderSuite extends munit.FunSuite:
     assert(summon[Reader[Boolean]].read("maybe").isErr)
   }
 
+  test("flags can accumulate occurrences (counter)") {
+    case class Verb(@short('v') verbose: Count = Count(0)) derives Parser
+    assertEquals(ok(Claw.parse[Verb](Seq("-vvv"))).verbose, Count(3))
+    assertEquals(ok(Claw.parse[Verb](Seq("--verbose", "--verbose"))).verbose, Count(2))
+    assertEquals(ok(Claw.parse[Verb](Nil)).verbose, Count(0))
+  }
+
+  test("flag shape is pluggable via Reader.flag") {
+    enum Volume:
+      case Quiet, Loud
+    given Reader[Volume] = Reader.flag(n => Ok(if n > 0 then Volume.Loud else Volume.Quiet))
+    case class Player(@short('l') loud: Volume = Volume.Quiet) derives Parser
+    assertEquals(ok(Claw.parse[Player](Seq("-l"))).loud, Volume.Loud)
+    assertEquals(ok(Claw.parse[Player](Nil)).loud, Volume.Quiet)
+    // no value parser: --loud=x is rejected
+    Claw.parse[Player](Seq("--loud=x")) match
+      case Err(ParseError.Failure(m, _)) => assert(m.contains("does not take a value"), m)
+      case other                         => fail(s"expected failure, got $other")
+  }
+
+  test("a flag reader can bound the occurrence count") {
+    case class Verbosity(n: Int)
+    given Reader[Verbosity] = Reader.flag(n =>
+      if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)")
+    )
+    case class C(@short('v') verbose: Verbosity = Verbosity(0)) derives Parser
+    assertEquals(ok(Claw.parse[C](Seq("-vv"))).verbose, Verbosity(2))
+    Claw.parse[C](Seq("-vvvv")) match
+      case Err(ParseError.Failure(m, _)) => assert(m.contains("at most 3"), m)
+      case other                         => fail(s"expected failure, got $other")
+  }
+
   test("any type can opt into repeated shape via Reader.repeated") {
     given Reader[Set[String]] = Reader.repeated[String, Set[String]](l => Ok(l.toSet))
     case class Tags(tag: Set[String] = Set.empty) derives Parser
