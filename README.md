@@ -149,7 +149,7 @@ Things to know:
 - An `Option[E]`-typed command field makes the command optional; a field default
   (`action: Action = Action.List`) works too.
 - An enum field is commands or a value depending on which instance its type provides:
-  `derives Parser` → subcommands, `derives Parser.ByName` (parameterless enums
+  `derives Parser` → subcommands, `derives Parser.Enumerated` (parameterless enums
   only) → a value matched by case name (`--color red`).
 
 ## Scripts and other entry points
@@ -258,7 +258,7 @@ disambiguate. Spliced groups cannot contain positional fields and cannot be `Opt
 Enums with parameterless cases can derive a by-name value parser:
 
 ```scala
-enum LogLevel derives Parser.ByName:
+enum LogLevel derives Parser.Enumerated:
   case Debug, Info, Warn, Error
 ```
 

@@ -78,7 +78,7 @@ object Derive:
     val cmd = Assemble.sum(labelsOf[m.MirroredElemLabels], annots, entriesOf[m.MirroredElemTypes])
     Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
-  /** Value parser for an enum whose cases are all parameterless, for `Parser.byName`. */
+  /** Value parser for an enum whose cases are all parameterless, for `Parser.Enumerated`. */
   inline def enumParser[A](using m: Mirror.SumOf[A]): Parser[A] =
     Assemble
       .enumValueParser(
@@ -141,4 +141,4 @@ object Derive:
           case v: ValueOf[Tuple.Head[T & NonEmptyTuple]] =>
             v.value :: singletonValues[Tuple.Tail[T & NonEmptyTuple]]
           case _ =>
-            error("Parser.byName requires an enum (or sealed trait) whose cases are all parameterless")
+            error("Parser.Enumerated requires an enum (or sealed trait) whose cases are all parameterless")

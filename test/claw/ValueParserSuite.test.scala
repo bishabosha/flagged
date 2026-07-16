@@ -3,7 +3,7 @@ package claw
 import java.nio.file.Paths
 import scala.concurrent.duration.*
 
-enum LogLevel derives Parser.ByName:
+enum LogLevel derives Parser.Enumerated:
   case Debug, Info, Warn, Error
 
 case class ValueConfig(

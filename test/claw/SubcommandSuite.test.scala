@@ -24,8 +24,8 @@ enum SimpleCmd derives Parser:
   case Start
   case Stop
 
-// enum used as an option *value*: opts in explicitly via derives Parser.ByName
-enum Color derives Parser.ByName:
+// enum used as an option *value*: opts in explicitly via derives Parser.Enumerated
+enum Color derives Parser.Enumerated:
   case Red, Green, DeepBlue
 
 case class Paint(color: Color = Color.Red, @positional what: String = "wall") derives Parser

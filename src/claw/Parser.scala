@@ -32,7 +32,7 @@ object Count:
 @scala.annotation.implicitNotFound(
   "No given Parser[${A}] found.\n" +
     "For a subcommand enum or a spliceable options group, add `derives Parser` to its definition;\n" +
-    "for an enum parsed by case name, add `derives Parser.ByName`;\n" +
+    "for an enum parsed by case name, add `derives Parser.Enumerated`;\n" +
     "for other value types provide one with Parser.of / Parser.flag / Parser.repeated."
 )
 sealed trait Parser[A]:
@@ -179,19 +179,20 @@ object Parser:
   inline def derived[A](using Mirror.Of[A]): Parser[A] = internal.Derive.of[A]
 
   /** A parser for an enum whose cases are all parameterless, matched by kebab-cased
-    * case name, case-insensitively. Usable directly or via `derives Parser.ByName`.
+    * case name, case-insensitively. Usable directly or via `derives Parser.Enumerated`.
     */
-  inline def byName[A](using Mirror.SumOf[A]): Parser[A] = internal.Derive.enumParser[A]
+  inline def enumerated[A](using Mirror.SumOf[A]): Parser[A] = internal.Derive.enumParser[A]
 
-  /** Derivation-flavor witness enabling `enum Color derives Parser.ByName`: the
+  /** Derivation-flavor witness enabling `enum Color derives Parser.Enumerated`: the
     * enum's parser parses *values* by case name instead of becoming subcommands.
     */
-  final class ByName[A](val parser: Parser[A])
+  final class Enumerated[A](val parser: Parser[A])
 
-  object ByName:
-    inline def derived[A](using Mirror.SumOf[A]): ByName[A] = ByName(byName[A])
+  object Enumerated:
+    inline def derived[A](using Mirror.SumOf[A]): Parser.Enumerated[A] =
+      Parser.Enumerated(enumerated[A])
 
-  given fromByName[A](using bn: ByName[A]): Parser[A] = bn.parser
+  given fromEnum[A](using e: Parser.Enumerated[A]): Parser[A] = e.parser
 
   given [A](using Parser[A]): Parser[List[A]] = repeated[A, List[A]](l => Ok(l))
   given [A](using Parser[A]): Parser[Vector[A]] = repeated[A, Vector[A]](l => Ok(l.toVector))
