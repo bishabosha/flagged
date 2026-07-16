@@ -2,6 +2,10 @@ package claw
 
 import claw.internal.{Ann, AnnotMirror, Derive, FieldAnnots, TargetAnnots}
 
+// test annotation with default arguments, for the named-args/defaults tests
+final case class tagged(label: String = "none", level: Int = 1)
+    extends scala.annotation.StaticAnnotation
+
 class MetaSuite extends munit.FunSuite:
 
   test("find extracts a typed annotation from a mirrored slot at compile time") {
@@ -10,6 +14,20 @@ class MetaSuite extends munit.FunSuite:
     val n: Option[name] = AnnotMirror.find[name, Slot]
     assertEquals(s, Some(short('v')))
     assertEquals(n, None)
+  }
+
+  test("annotation mirror resolves named arguments and fills constant defaults") {
+    @tagged(level = 3) case class ByName(x: Int = 0)
+    val am = AnnotMirror.ofProduct[ByName]
+    assertEquals(AnnotMirror.find[tagged, am.MirroredSelfAnnotations], Some(tagged("none", 3)))
+
+    @tagged(level = 5, label = "hi") case class Permuted(x: Int = 0)
+    val am2 = AnnotMirror.ofProduct[Permuted]
+    assertEquals(AnnotMirror.find[tagged, am2.MirroredSelfAnnotations], Some(tagged("hi", 5)))
+
+    @tagged() case class AllDefaults(x: Int = 0)
+    val am3 = AnnotMirror.ofProduct[AllDefaults]
+    assertEquals(AnnotMirror.find[tagged, am3.MirroredSelfAnnotations], Some(tagged("none", 1)))
   }
 
   test("annotation extraction for a case class is fully typed") {
