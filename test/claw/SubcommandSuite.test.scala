@@ -24,8 +24,8 @@ enum SimpleCmd derives Parser:
   case Start
   case Stop
 
-// enum used as an option *value*: opts in explicitly via derives Reader
-enum Color derives Reader:
+// enum used as an option *value*: opts in explicitly via derives Parser.ByName
+enum Color derives Parser.ByName:
   case Red, Green, DeepBlue
 
 case class Paint(color: Color = Color.Red, @positional what: String = "wall") derives Parser
@@ -101,7 +101,7 @@ class SubcommandSuite extends munit.FunSuite:
     assertEquals(ok(Claw.parse[SimpleCmd](Seq("stop"))), SimpleCmd.Stop)
   }
 
-  test("an enum field with a derived Reader parses as a value") {
+  test("an enum field with a by-name Parser parses as a value") {
     assertEquals(ok(Claw.parse[Paint](Seq("--color", "green"))), Paint(Color.Green))
     assertEquals(ok(Claw.parse[Paint](Seq("--color", "deep-blue", "fence"))), Paint(Color.DeepBlue, "fence"))
   }
@@ -160,7 +160,7 @@ class SubcommandSuite extends munit.FunSuite:
 
   test("a nested subcommand enum without its own Parser instance is a compile error") {
     val errors = compileErrors("case class Root(action: NoDerive) derives Parser")
-    assert(errors.contains("No given Reader[claw.NoDerive] found"), errors)
+    assert(errors.contains("No given Parser[claw.NoDerive] found"), errors)
     assert(errors.contains("derives Parser"), errors)
   }
 

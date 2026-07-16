@@ -56,17 +56,18 @@ vendor the `src/claw` directory.
 
 Each case class field becomes a named option, `--kebab-cased` after the field name.
 Semantics are instance-driven: a field whose type has a `Parser` given becomes nested
-subcommands; otherwise its `Reader` given parses it as a value, and the reader's
-*schema* decides whether the option takes one value or repeats:
+subcommands or a spliced options group; value shapes parse as option values, with
+the parser's *schema* deciding whether the option is a flag, takes one value, or
+repeats:
 
 | Field shape | Meaning |
 |---|---|
 | `x: Boolean` | flag `--x` (also `--x=false`); always optional |
-| `x: Count` (or any flag-schema `Reader[A]`) | counting flag: `-vvv` → `Count(3)` |
-| `x: A` (value-schema `Reader[A]`) | required option `--x <a>` |
+| `x: Count` (or any flag-schema `Parser[A]`) | counting flag: `-vvv` → `Count(3)` |
+| `x: A` (value-schema `Parser[A]`) | required option `--x <a>` |
 | `x: A = default` | optional, default shown in help |
 | `x: Option[A]` | optional, `None` when absent |
-| `x: A` (repeated-schema `Reader[A]`, e.g. `List`/`Seq`/`Vector`) | repeatable |
+| `x: A` (repeated-schema `Parser[A]`, e.g. `List`/`Seq`/`Vector`) | repeatable |
 | `x: E` (enum `E derives Parser`) | nested subcommands |
 | `x: P` (case class `P derives Parser`) | options group spliced into this command |
 | `@positional x: A` | positional argument (same rules) |
@@ -80,7 +81,7 @@ Fine-tune with annotations:
 | `@help("...")` | help text for fields, cases, and top-level types |
 | `@positional` | positional argument instead of named option |
 
-A field type with neither a `Parser` nor a `Reader` given is a compile error.
+A field type without a `Parser` given is a compile error.
 Structural mistakes — duplicate names, a second `-h`, a required positional after an
 optional one — are reported with a descriptive `IllegalArgumentException` when the
 parser instance is constructed, before any arguments are parsed.
@@ -148,8 +149,8 @@ Things to know:
 - An `Option[E]`-typed command field makes the command optional; a field default
   (`action: Action = Action.List`) works too.
 - An enum field is commands or a value depending on which instance its type provides:
-  `derives Parser` → subcommands, `derives Reader` (parameterless enums only) → a
-  value matched by case name (`--color red`).
+  `derives Parser` → subcommands, `derives Parser.ByName` (parameterless enums
+  only) → a value matched by case name (`--color red`).
 
 ## Scripts and other entry points
 
@@ -193,44 +194,46 @@ results. `Claw.help[Greet]` gives you the help text without parsing anything.
 
 ## Parsing your own value types
 
-Option and positional values are parsed by the `Reader[A]` typeclass. Readers for
+Option and positional values use the same `Parser[A]` typeclass as commands, in its
+value shapes. Instances for
 `String`, `Char`, `Boolean`, the numeric types, `BigInt`/`BigDecimal`,
 `java.nio.file.Path`, `java.io.File`, `UUID`, the common `java.time` types, and
 `FiniteDuration` (`"30s"`, `"5.minutes"`) are built in.
 
-A custom reader is a one-liner, and its type name becomes the `<metavar>` in help
+A custom value parser is a one-liner, and its type name becomes the `<metavar>` in help
 output:
 
 ```scala
-given Reader[Port] = Reader.of[Port]("port")(s =>
+given Parser[Port] = Parser.of[Port]("port")(s =>
   s.toIntOption.filter(p => p > 0 && p < 65536) match
     case Some(p) => Ok(Port(p))
     case None    => Err(s"'$s' is not a valid port"))
 ```
 
-A reader's underlying `Reader.Schema` encodes its *shape*. `Reader.of` builds
-single-value readers; `Reader.repeated` builds readers whose argument may appear any
-number of times, each occurrence parsed by an element reader and the collected
-elements combined by a function of your choice. The provided `List`/`Seq`/`Vector`
-instances are ordinary `Reader.repeated` definitions, and any type can opt in the
-same way — including with constraints, since the combining function may fail (it also
-receives `Nil` when the argument is absent):
+A parser's underlying `Parser.Schema` encodes its *shape* — `Value`, `Flag`,
+`Repeated`, or `Command` (the shape derivation produces for case classes and enums).
+`Parser.of` builds single-value parsers; `Parser.repeated` builds parsers whose
+argument may appear any number of times, each occurrence parsed by an element parser
+and the collected elements combined by a function of your choice. The provided
+`List`/`Seq`/`Vector` instances are ordinary `Parser.repeated` definitions, and any
+type can opt in the same way — including with constraints, since the combining
+function may fail (it also receives `Nil` when the argument is absent):
 
 ```scala
-given Reader[Set[String]] = Reader.repeated[String, Set[String]](l => Ok(l.toSet))
+given Parser[Set[String]] = Parser.repeated[String, Set[String]](l => Ok(l.toSet))
 
-given Reader[NonEmpty] = Reader.repeated[Int, NonEmpty](l =>
+given Parser[NonEmpty] = Parser.repeated[Int, NonEmpty](l =>
   if l.isEmpty then Err("expected at least one occurrence") else Ok(NonEmpty(l)))
 ```
 
-Flag shape is pluggable the same way: `Reader.flag` builds the value from the number
+Flag shape is pluggable the same way: `Parser.flag` builds the value from the number
 of occurrences (with an optional parser for the explicit `--flag=value` form).
-`Boolean`'s reader is defined exactly like this, the bundled `Count` type gives
+`Boolean`'s parser is defined exactly like this, the bundled `Count` type gives
 counting flags (`-vvv` → `Count(3)`), and `fromCount` may fail, so occurrence bounds
 are expressible:
 
 ```scala
-given Reader[Verbosity] = Reader.flag(n =>
+given Parser[Verbosity] = Parser.flag(n =>
   if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)"))
 ```
 
@@ -252,10 +255,10 @@ a whole command tree. A name collision between a command and a spliced group (or
 groups) is reported at parser construction; use `@name`/`@short` on either side to
 disambiguate. Spliced groups cannot contain positional fields and cannot be `Option`al.
 
-Enums with parameterless cases can derive a by-name reader:
+Enums with parameterless cases can derive a by-name value parser:
 
 ```scala
-enum LogLevel derives Reader:
+enum LogLevel derives Parser.ByName:
   case Debug, Info, Warn, Error
 ```
 

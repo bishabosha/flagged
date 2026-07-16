@@ -1,29 +1,16 @@
 package claw.internal
 
-import claw.{Parser, Reader}
+import claw.Parser
 import steps.result.Result
 import scala.collection.mutable
-
-/** Per-field derivation result, produced by inline code from the field's type shape.
-  * Runtime data: the summoned `Reader`/`Parser` instances travel inside it.
-  */
-enum Shape:
-  /** Field parsed by a `Reader`; the reader's schema decides flag, single, or repeated. */
-  case Value(reader: Reader[?], optional: Boolean)
-
-  /** Field with its own `Parser`: nested subcommands. */
-  case Sub(parser: () => Parser[?], optional: Boolean)
-
-  def asOptional: Shape = this match
-    case Value(r, _) => Value(r, true)
-    case Sub(p, _)   => Sub(p, true)
 
 /** One case of a derived sum: either a singleton value or a nested command. */
 enum SubEntry:
   case Leaf(value: Any)
   case Node(parser: () => Parser[?])
 
-/** Builds the runtime `Command` model from what inline derivation collected.
+/** Builds the runtime `Command` model from what inline derivation collected — one
+  * `(Parser, optional)` pair per field, dispatched on the parser's schema.
   * Structural validation happens here, when the `Parser` instance is constructed.
   */
 object Assemble:
@@ -41,27 +28,40 @@ object Assemble:
   def progName(label: String, onType: TargetAnnots): String =
     onType.name.map(_.value).getOrElse(kebab(label))
 
-  private def commandOf(p: Parser[?]): Command = p.command
-
-  private def readFn(r: Reader[?]): String => Result[Any, String] =
-    s => r.asInstanceOf[Reader[Any]].read(s)
+  private def readFn(p: Parser[?]): String => Result[Any, String] =
+    s => p.asInstanceOf[Parser[Any]].read(s)
 
   private def invalid(msg: String): Nothing =
     throw new IllegalArgumentException(s"claw: invalid CLI definition: $msg")
 
-  /** By-name reader for an all-singleton enum, honoring `@name` on cases. */
-  def enumValueReader(
+  /** By-name parser for an all-singleton enum, honoring `@name` on cases. */
+  def enumValueParser(
       typeLabel: String,
       caseLabels: List[String],
       values: List[Any],
       perCase: List[TargetAnnots]
-  ): Reader[Any] =
+  ): Parser[Any] =
     val names = caseLabels.zipWithIndex.map { (l, i) =>
       perCase.lift(i).flatMap(_.name).map(_.value).getOrElse(kebab(l))
     }
     val joined = names.mkString("|")
     val typeName = if joined.length <= 40 then joined else kebab(typeLabel)
-    Runtime.enumReader(typeName, names.zip(values).toVector)
+    Runtime.enumParser(typeName, names.zip(values).toVector)
+
+  /** The command view of a value-shaped parser: one positional argument. */
+  def singleValueCommand(p: Parser[?]): Command =
+    val mode = p.schema match
+      case Parser.Schema.Value(_, _) =>
+        Mode.Single(readFn(p), false)
+      case Parser.Schema.Flag(_, fromValue) =>
+        fromValue match
+          case Some(f) => Mode.Single(f.asInstanceOf[String => Result[Any, String]], false)
+          case None    => invalid("a flag parser without a value parser cannot be run standalone")
+      case Parser.Schema.Repeated(element, build) =>
+        Mode.Repeated(readFn(element), build.asInstanceOf[List[Any] => Result[Any, String]])
+      case Parser.Schema.Command(impl, _) =>
+        return impl
+    Command("", Vector.empty, Vector(PosSpec("value", "", p.typeName, 0, mode, None)), None, Nil, arr => arr(0), 1)
 
   def sum(caseLabels: List[String], annots: Annots.Sum[?], entries: List[SubEntry]): Command =
     val cases = entries.zipWithIndex.map { (e, i) =>
@@ -69,7 +69,7 @@ object Assemble:
       val help = anns.help.map(_.value).getOrElse("")
       val cmd = e match
         case SubEntry.Leaf(v) => Command.leaf(v, help)
-        case SubEntry.Node(p) => commandOf(p())
+        case SubEntry.Node(p) => p().command
       SubCase(anns.name.map(_.value).getOrElse(kebab(caseLabels(i))), help, cmd)
     }
     Command(
@@ -84,7 +84,7 @@ object Assemble:
 
   def product(
       labels: List[String],
-      shapes: List[Shape],
+      fields: List[(Parser[?], Boolean)],
       defaults: List[Option[() => Any]],
       annots: Annots.Product[?],
       build: Array[Any] => Any
@@ -108,6 +108,7 @@ object Assemble:
       val help = anns.help.map(_.value).getOrElse("")
       val short = anns.short.map(_.value)
       val default = defs(i)
+      val (fieldParser, optional) = fields(i)
 
       def addOpt(metavar: String, mode: Mode): Unit =
         if long == "help" then invalid(s"field '$label': option name 'help' is reserved")
@@ -121,11 +122,10 @@ object Assemble:
         posKinds += ((long, kind))
         poss += PosSpec(long, help, metavar, i, mode, default)
 
-      shapes(i) match
-        case Shape.Sub(parser, optional) =>
+      fieldParser.schema match
+        case Parser.Schema.Command(inner, _) =>
           if anns.positional then
-            invalid(s"field '$label': @positional cannot be combined with a Parser field")
-          val inner = commandOf(parser())
+            invalid(s"field '$label': @positional cannot be combined with a command-shaped Parser")
           inner.sub match
             case Some(group) =>
               // sum-shaped: nested subcommands
@@ -149,39 +149,39 @@ object Assemble:
               splices += Splice(i, storage, inner)
               storage += inner.arity
 
-        case Shape.Value(r, optional) =>
-          r.schema match
-            case Reader.Schema.Value(typeName, _) =>
-              val mode = Mode.Single(readFn(r), optional)
-              if anns.positional then
-                addPos(typeName, mode, if optional || default.nonEmpty then "optional" else "required")
-              else addOpt(typeName, mode)
-            case Reader.Schema.Flag(fromCount, fromValue) =>
-              val fc = fromCount.asInstanceOf[Int => Result[Any, String]]
-              val fv = fromValue.map(_.asInstanceOf[String => Result[Any, String]])
-              if anns.positional || optional then
-                // no occurrence-count semantics here; fall back to explicit values
-                fv match
-                  case Some(f) =>
-                    val mode = Mode.Single(f, optional)
-                    if anns.positional then
-                      addPos("value", mode, if optional || default.nonEmpty then "optional" else "required")
-                    else addOpt("value", mode)
-                  case None =>
-                    val where = if optional then "inside Option" else "positionally"
-                    invalid(s"field '$label': a flag Reader without a value parser cannot be used $where")
-              else addOpt("", Mode.Flag(fc, fv))
-            case Reader.Schema.Repeated(element, buildList) =>
-              if optional then
-                invalid(s"field '$label': Option of a repeated Reader is not supported")
-              element.schema match
-                case _: Reader.Schema.Value[?] => ()
-                case _ =>
-                  invalid(s"field '$label': repeated Readers require a single-value element Reader")
-              val fromList = buildList.asInstanceOf[List[Any] => Result[Any, String]]
-              val mode = Mode.Repeated(readFn(element), fromList)
-              if anns.positional then addPos(element.typeName, mode, "repeated")
-              else addOpt(element.typeName, mode)
+        case Parser.Schema.Value(typeName, _) =>
+          val mode = Mode.Single(readFn(fieldParser), optional)
+          if anns.positional then
+            addPos(typeName, mode, if optional || default.nonEmpty then "optional" else "required")
+          else addOpt(typeName, mode)
+
+        case Parser.Schema.Flag(fromCount, fromValue) =>
+          val fc = fromCount.asInstanceOf[Int => Result[Any, String]]
+          val fv = fromValue.map(_.asInstanceOf[String => Result[Any, String]])
+          if anns.positional || optional then
+            // no occurrence-count semantics here; fall back to explicit values
+            fv match
+              case Some(f) =>
+                val mode = Mode.Single(f, optional)
+                if anns.positional then
+                  addPos("value", mode, if optional || default.nonEmpty then "optional" else "required")
+                else addOpt("value", mode)
+              case None =>
+                val where = if optional then "inside Option" else "positionally"
+                invalid(s"field '$label': a flag Parser without a value parser cannot be used $where")
+          else addOpt("", Mode.Flag(fc, fv))
+
+        case Parser.Schema.Repeated(element, buildList) =>
+          if optional then
+            invalid(s"field '$label': Option of a repeated Parser is not supported")
+          element.schema match
+            case _: Parser.Schema.Value[?] => ()
+            case _ =>
+              invalid(s"field '$label': repeated Parsers require a single-value element Parser")
+          val fromList = buildList.asInstanceOf[List[Any] => Result[Any, String]]
+          val mode = Mode.Repeated(readFn(element), fromList)
+          if anns.positional then addPos(element.typeName, mode, "repeated")
+          else addOpt(element.typeName, mode)
     end for
 
     val kinds = posKinds.toList

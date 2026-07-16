@@ -1,10 +1,10 @@
 package claw.internal
 
-import claw.Reader
+import claw.Parser
 import steps.result.Result
 import steps.result.Result.{Ok, Err}
 
-/** Runtime helpers referenced by macro-generated code. Not intended for direct use. */
+/** Runtime helpers referenced by derivation. Not intended for direct use. */
 object Runtime:
 
   def parseBool(s: String): Result[Boolean, String] =
@@ -13,9 +13,9 @@ object Runtime:
       case "false" | "no" | "off" | "0"  => Ok(false)
       case other                         => Err(s"'$other' is not a valid bool (expected true/false)")
 
-  /** Value reader for enums whose cases are all parameterless, matching kebab-cased names. */
-  def enumReader[A](name: String, pairs: Vector[(String, A)]): Reader[A] =
-    Reader.of[A](name)(s =>
+  /** Value parser for enums whose cases are all parameterless, matching kebab-cased names. */
+  def enumParser[A](name: String, pairs: Vector[(String, A)]): Parser[A] =
+    Parser.of[A](name)(s =>
       pairs.collectFirst { case (n, v) if n.equalsIgnoreCase(s.trim) => v } match
         case Some(v) => Ok(v)
         case None    => Err(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")

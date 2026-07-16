@@ -2,13 +2,13 @@ package claw.internal
 
 import scala.compiletime.*
 import scala.deriving.Mirror
-import claw.{Parser, Reader}
+import claw.Parser
 
 /** `Mirror`-based derivation. Structure and construction come from `Mirror`; field
-  * semantics are instance-driven: a `Parser` given for the field's type makes it a
-  * group of subcommands, otherwise a `Reader` given parses it as a value (the reader's
-  * schema decides whether it is single or repeated). Nothing is derived across type
-  * boundaries — each enum in a command tree provides its own instances.
+  * semantics are the field parser's schema: command-shaped instances become nested
+  * subcommands (sums) or spliced option groups (products), value shapes parse as
+  * option or positional values. Nothing is derived across type boundaries — each
+  * enum or options group in a command tree provides its own instance.
   *
   * The only macro-backed pieces are [[Defaults]] (term-level: default values are
   * arbitrary expressions) and [[AnnotMirror]] (type-level: annotations reduced to
@@ -66,7 +66,7 @@ object Derive:
     val annots = productAnnots[A]
     val cmd = Assemble.product(
       labelsOf[m.MirroredElemLabels],
-      shapesOf[m.MirroredElemTypes],
+      fieldsOf[m.MirroredElemTypes],
       Defaults.derived[A].values,
       annots,
       arr => m.fromProduct(Tuple.fromArray(arr))
@@ -78,41 +78,34 @@ object Derive:
     val cmd = Assemble.sum(labelsOf[m.MirroredElemLabels], annots, entriesOf[m.MirroredElemTypes])
     Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
-  /** Reader for an enum whose cases are all parameterless, for `Reader.derived`. */
-  inline def enumReader[A](using m: Mirror.SumOf[A]): Reader[A] =
+  /** Value parser for an enum whose cases are all parameterless, for `Parser.byName`. */
+  inline def enumParser[A](using m: Mirror.SumOf[A]): Parser[A] =
     Assemble
-      .enumValueReader(
+      .enumValueParser(
         constValue[m.MirroredLabel],
         labelsOf[m.MirroredElemLabels],
         singletonValues[m.MirroredElemTypes],
         sumAnnots[A].perCase
       )
-      .asInstanceOf[Reader[A]]
+      .asInstanceOf[Parser[A]]
 
   // ---- fields ---------------------------------------------------------------
 
   inline def labelsOf[L <: Tuple]: List[String] =
     constValueTuple[L].toList.asInstanceOf[List[String]]
 
-  inline def shapesOf[T <: Tuple]: List[Shape] =
+  /** The single field rule: summon the field type's `Parser`; `Option[_]` marks it
+    * optional. The parser's schema decides everything else at assembly.
+    */
+  inline def fieldsOf[T <: Tuple]: List[(Parser[?], Boolean)] =
     inline erasedValue[T] match
       case _: EmptyTuple => Nil
-      case _: (h *: t)   => shapeOf[h] :: shapesOf[t]
+      case _: (h *: t)   => fieldOf[h] :: fieldsOf[t]
 
-  inline def shapeOf[F]: Shape =
+  inline def fieldOf[F]: (Parser[?], Boolean) =
     inline erasedValue[F] match
-      case _: Option[e] => fieldShape[e].asOptional
-      case _            => fieldShape[F]
-
-  /** The single field rule: a `Parser` instance makes the field a subparser; otherwise
-    * a `Reader` instance parses it as a value, with the reader's schema encoding
-    * whether occurrences repeat. Neither in scope is a compile error.
-    */
-  inline def fieldShape[F]: Shape =
-    summonFrom:
-      case p: Parser[F] => Shape.Sub(() => p, false)
-      case r: Reader[F] => Shape.Value(r, false)
-      case _            => Shape.Value(summonInline[Reader[F]], false)
+      case _: Option[e] => (summonInline[Parser[e]], true)
+      case _            => (summonInline[Parser[F]], false)
 
   // ---- sums -----------------------------------------------------------------
 
@@ -148,4 +141,4 @@ object Derive:
           case v: ValueOf[Tuple.Head[T & NonEmptyTuple]] =>
             v.value :: singletonValues[Tuple.Tail[T & NonEmptyTuple]]
           case _ =>
-            error("Reader can only be derived for enums (or sealed traits) whose cases are all parameterless")
+            error("Parser.byName requires an enum (or sealed trait) whose cases are all parameterless")

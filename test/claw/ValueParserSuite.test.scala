@@ -3,10 +3,10 @@ package claw
 import java.nio.file.Paths
 import scala.concurrent.duration.*
 
-enum LogLevel derives Reader:
+enum LogLevel derives Parser.ByName:
   case Debug, Info, Warn, Error
 
-case class ReaderConfig(
+case class ValueConfig(
     level: LogLevel = LogLevel.Info,
     path: java.nio.file.Path = Paths.get("."),
     timeout: FiniteDuration = 30.seconds,
@@ -14,22 +14,22 @@ case class ReaderConfig(
     id: Option[java.util.UUID] = None
 ) derives Parser
 
-class ReaderSuite extends munit.FunSuite:
+class ValueParserSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
     case Ok(a) => a
     case other => fail(s"expected success, got $other")
 
-  test("derived enum Reader parses by kebab-cased name") {
-    assertEquals(summon[Reader[LogLevel]].read("warn"), Ok(LogLevel.Warn))
-    assertEquals(summon[Reader[LogLevel]].read("DEBUG"), Ok(LogLevel.Debug))
-    assert(summon[Reader[LogLevel]].read("nope").isErr)
-    assertEquals(summon[Reader[LogLevel]].typeName, "debug|info|warn|error")
+  test("by-name enum Parser parses by kebab-cased name") {
+    assertEquals(summon[Parser[LogLevel]].read("warn"), Ok(LogLevel.Warn))
+    assertEquals(summon[Parser[LogLevel]].read("DEBUG"), Ok(LogLevel.Debug))
+    assert(summon[Parser[LogLevel]].read("nope").isErr)
+    assertEquals(summon[Parser[LogLevel]].typeName, "debug|info|warn|error")
   }
 
-  test("a user-provided Reader beats subcommand interpretation for enum fields") {
+  test("a by-name Parser given makes an enum field a value") {
     assertEquals(
-      ok(Claw.parse[ReaderConfig](Seq("--level", "error"))).level,
+      ok(Claw.parse[ValueConfig](Seq("--level", "error"))).level,
       LogLevel.Error
     )
   }
@@ -37,7 +37,7 @@ class ReaderSuite extends munit.FunSuite:
   test("built-in readers: path, duration, double, uuid") {
     val id = java.util.UUID.randomUUID()
     val cfg = ok(
-      Claw.parse[ReaderConfig](
+      Claw.parse[ValueConfig](
         Seq("--path", "/tmp/x", "--timeout", "5s", "--ratio", "0.25", "--id", id.toString)
       )
     )
@@ -48,7 +48,7 @@ class ReaderSuite extends munit.FunSuite:
   }
 
   test("reader typeName appears as metavar in help") {
-    Claw.parse[ReaderConfig](Seq("--help")) match
+    Claw.parse[ValueConfig](Seq("--help")) match
       case Err(ParseError.Help(t)) =>
         assert(t.contains("--path <path>"), t)
         assert(t.contains("--timeout <duration>"), t)
@@ -57,7 +57,7 @@ class ReaderSuite extends munit.FunSuite:
   }
 
   test("map/emap combinators") {
-    given portReader: Reader[Int] = Reader.of[Int]("port")(s =>
+    given portParser: Parser[Int] = Parser.of[Int]("port")(s =>
       s.toIntOption match
         case Some(p) if p > 0 && p < 65536 => Ok(p)
         case Some(_)                       => Err(s"'$s' out of range")
@@ -71,9 +71,9 @@ class ReaderSuite extends munit.FunSuite:
   }
 
   test("boolean reader accepts unix-y spellings") {
-    assertEquals(summon[Reader[Boolean]].read("on"), Ok(true))
-    assertEquals(summon[Reader[Boolean]].read("0"), Ok(false))
-    assert(summon[Reader[Boolean]].read("maybe").isErr)
+    assertEquals(summon[Parser[Boolean]].read("on"), Ok(true))
+    assertEquals(summon[Parser[Boolean]].read("0"), Ok(false))
+    assert(summon[Parser[Boolean]].read("maybe").isErr)
   }
 
   test("flags can accumulate occurrences (counter)") {
@@ -83,10 +83,10 @@ class ReaderSuite extends munit.FunSuite:
     assertEquals(ok(Claw.parse[Verb](Nil)).verbose, Count(0))
   }
 
-  test("flag shape is pluggable via Reader.flag") {
+  test("flag shape is pluggable via Parser.flag") {
     enum Volume:
       case Quiet, Loud
-    given Reader[Volume] = Reader.flag(n => Ok(if n > 0 then Volume.Loud else Volume.Quiet))
+    given Parser[Volume] = Parser.flag(n => Ok(if n > 0 then Volume.Loud else Volume.Quiet))
     case class Player(@short('l') loud: Volume = Volume.Quiet) derives Parser
     assertEquals(ok(Claw.parse[Player](Seq("-l"))).loud, Volume.Loud)
     assertEquals(ok(Claw.parse[Player](Nil)).loud, Volume.Quiet)
@@ -98,7 +98,7 @@ class ReaderSuite extends munit.FunSuite:
 
   test("a flag reader can bound the occurrence count") {
     case class Verbosity(n: Int)
-    given Reader[Verbosity] = Reader.flag(n =>
+    given Parser[Verbosity] = Parser.flag(n =>
       if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)")
     )
     case class C(@short('v') verbose: Verbosity = Verbosity(0)) derives Parser
@@ -108,8 +108,8 @@ class ReaderSuite extends munit.FunSuite:
       case other                         => fail(s"expected failure, got $other")
   }
 
-  test("any type can opt into repeated shape via Reader.repeated") {
-    given Reader[Set[String]] = Reader.repeated[String, Set[String]](l => Ok(l.toSet))
+  test("any type can opt into repeated shape via Parser.repeated") {
+    given Parser[Set[String]] = Parser.repeated[String, Set[String]](l => Ok(l.toSet))
     case class Tags(tag: Set[String] = Set.empty) derives Parser
     assertEquals(
       ok(Claw.parse[Tags](Seq("--tag", "a", "--tag", "b", "--tag", "a"))),
@@ -120,7 +120,7 @@ class ReaderSuite extends munit.FunSuite:
 
   test("a repeated reader can require at least one occurrence") {
     case class AtLeastOne(xs: List[Int])
-    given Reader[AtLeastOne] = Reader.repeated[Int, AtLeastOne](l =>
+    given Parser[AtLeastOne] = Parser.repeated[Int, AtLeastOne](l =>
       if l.isEmpty then Err("expected at least one occurrence") else Ok(AtLeastOne(l))
     )
     case class Cfg(num: AtLeastOne) derives Parser
@@ -132,9 +132,9 @@ class ReaderSuite extends munit.FunSuite:
   }
 
   test("emap composes over a repeated reader") {
-    given Reader[Int] = Reader.of[Int]("int")(s => s.toIntOption.fold(Err(s"'$s' not an int"))(Ok(_)))
-    given Reader[List[Int]] =
-      Reader[List[Int]](using Reader.repeated[Int, List[Int]](l => Ok(l))).emap(l =>
+    given Parser[Int] = Parser.of[Int]("int")(s => s.toIntOption.fold(Err(s"'$s' not an int"))(Ok(_)))
+    given Parser[List[Int]] =
+      Parser[List[Int]](using Parser.repeated[Int, List[Int]](l => Ok(l))).emap(l =>
         if l.sum > 10 then Err("sum too large") else Ok(l)
       )
     case class Sums(n: List[Int] = Nil) derives Parser
