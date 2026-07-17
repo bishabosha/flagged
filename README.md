@@ -124,12 +124,15 @@ Fine-tune with annotations:
 | `@positional` | positional argument instead of named option |
 
 A field type without a `Parser` given is a compile error, as are annotation
-combinations that are visible in types (e.g. `@positional` with `@short`).
-Shape-dependent combinations and value-level mistakes — duplicate names, a second
-`-h`, a required positional after an optional one — are reported with a descriptive
-`IllegalArgumentException` when the parser instance is constructed, before any
-arguments are parsed. (Instance shapes are erased by `derives` clauses, so they
-cannot participate in compile-time checks without breaking given priority.)
+combinations that are visible in types: `@positional` with `@short` always, and
+annotation × shape conflicts (`Option` of a repeated parser, `@positional` on a
+trailing or command field, ...) whenever the field's instance carries its shape in
+its type — which all built-in instances and unascribed `Parser.of`/`flag`/`repeated`/
+`trailing` definitions do. Shape-erased instances (a `derives`-generated given, or
+one explicitly ascribed to plain `Parser[X]`) fall back to the same checks at parser
+construction, alongside the inherently value-level rules — duplicate names, a second
+`-h`, positional ordering — reported as a descriptive `IllegalArgumentException`
+before any arguments are parsed.
 
 ## Subcommands
 

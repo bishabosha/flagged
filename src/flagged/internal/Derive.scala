@@ -86,17 +86,48 @@ object Derive:
       else fieldOfChecked[F, Anns]
     else fieldOfChecked[F, Anns]
 
-  // Note: instance-shape checks cannot happen here. Selecting the instance with a
-  // shape-refined summon (`Parser.Aux[F, S]`) would skip shape-erased instances and
-  // so break normal given priority — a user's `given Parser[List[Int]] = ...` must
-  // shadow the library's List instance. And once selected through a plain summon,
-  // the refinement is not observable at compile time (a `derives` clause erases it
-  // anyway). The shape half of the matrix is therefore validated at construction, in
-  // one place: `Assemble.resolveField`.
+  // Instance selection is a single plain summon, so normal given priority is
+  // untouched (a user's shape-erased `given Parser[List[Int]] = ...` shadows the
+  // library instance). But the summonFrom *binder* receives the found given's precise
+  // type, so when that instance is shape-refined (all library instances and anything
+  // built by the Parser constructors without an ascription), its `ShapeT` is concrete
+  // and the annotation x shape combination is checked at compile time via
+  // soft-failing `=:=` evidence — an abstract `ShapeT` (a `derives`-generated or
+  // type-ascribed given) simply falls through to the construction-time backstop in
+  // `Assemble.resolveField`.
   inline def fieldOfChecked[F, Anns]: (Parser[?], Boolean) =
     inline erasedValue[F] match
-      case _: Option[e] => (summonInline[Parser[e]], true)
-      case _            => (summonInline[Parser[F]], false)
+      case _: Option[e] => (summonChecked[e, Anns](optional = true), true)
+      case _            => (summonChecked[F, Anns](optional = false), false)
+
+  // note: the summon must go through this helper — a lowercase binder like `e` used
+  // inside a summonFrom pattern would bind a fresh pattern type variable (an
+  // unconstrained query) instead of referring to the enclosing inline-match binder
+  inline def summonChecked[F, Anns](inline optional: Boolean): Parser[?] =
+    summonFrom:
+      case p: Parser[F] =>
+        checkShape[p.ShapeT, Anns](optional)
+        p
+      case _ => summonInline[Parser[F]] // fails with Parser's missing-instance guidance
+
+  /** Compile-time half of the shape x annotation matrix, for statically known shapes. */
+  inline def checkShape[S <: Parser.Shape, Anns](inline optional: Boolean): Unit =
+    summonFrom:
+      case _: (S =:= Parser.Shape.Repeated) =>
+        inline if optional then
+          error("Option of a repeated Parser is not supported: the plain type is empty when absent")
+        else ()
+      case _: (S =:= Parser.Shape.Trailing) =>
+        inline if hasAnn[flagged.positional, Anns] then
+          error("@positional cannot be combined with a trailing field")
+        else inline if hasAnn[flagged.short, Anns] then
+          error("@short cannot be combined with a trailing field")
+        else ()
+      case _: (S =:= Parser.Shape.Command) =>
+        inline if hasAnn[flagged.positional, Anns] then
+          error("@positional cannot be combined with a command-shaped Parser")
+        else ()
+      case _ => () // Value, Flag, or a shape-erased instance
 
   // ---- sums -----------------------------------------------------------------
 

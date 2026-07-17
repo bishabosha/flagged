@@ -230,6 +230,15 @@ class OptionsSuite extends munit.FunSuite:
     assert(e.contains("@short cannot be combined with @positional"), e)
   }
 
+  test("shape/annotation conflicts are compile errors for shape-refined instances") {
+    val e1 = compileErrors("case class C(x: Option[List[Int]]) derives Parser")
+    assert(e1.contains("Option of a repeated Parser"), e1)
+    val e2 = compileErrors("case class C(@positional t: Trailing = Trailing(Nil)) derives Parser")
+    assert(e2.contains("@positional cannot be combined with a trailing field"), e2)
+    val e3 = compileErrors("case class C(@short('t') t: Trailing = Trailing(Nil)) derives Parser")
+    assert(e3.contains("@short cannot be combined with a trailing field"), e3)
+  }
+
   test("a Trailing field collects the raw arguments after --") {
     case class Exec(@short('v') verbose: Boolean = false, rest: Trailing = Trailing(Nil))
         derives Parser
