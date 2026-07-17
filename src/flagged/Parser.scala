@@ -1,4 +1,4 @@
-package claw
+package flagged
 
 import java.io.File
 import java.nio.file.{InvalidPathException, Path, Paths}
@@ -7,7 +7,7 @@ import java.time.format.DateTimeParseException
 import java.util.UUID
 import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.deriving.Mirror
-import claw.internal.{Assemble, Engine, HelpFmt}
+import flagged.internal.{Assemble, Engine, HelpFmt}
 
 /** A counting flag: `-vvv` parses as `Count(3)`, absent as `Count(0)`. */
 final case class Count(value: Int)
@@ -85,7 +85,7 @@ sealed trait Parser[A]:
   /** The command grammar: command shapes directly; value shapes as a command line
     * with one positional argument.
     */
-  private[claw] final def command: internal.Command = schema match
+  private[flagged] final def command: internal.Command = schema match
     case Parser.Schema.Command(impl, _) => impl
     case _                              => Assemble.singleValueCommand(this)
 
@@ -138,7 +138,7 @@ object Parser:
     case Repeated[E, T](element: Parser[E], build: List[E] => Result[T, String]) extends Schema[T]
 
     /** A full command grammar: named options, positionals, subcommands, splices. */
-    case Command[T](impl: claw.internal.Command, prog: String) extends Schema[T]
+    case Command[T](impl: flagged.internal.Command, prog: String) extends Schema[T]
 
   def fromSchema[A](s: Schema[A]): Parser[A] = new Parser[A]:
     def schema = s
@@ -166,7 +166,7 @@ object Parser:
     fromSchema(Schema.Repeated(element, build))
 
   /** Called by derivation. Not intended for direct use. */
-  def make[A](cmd: claw.internal.Command, prog: String): Parser[A] =
+  def make[A](cmd: flagged.internal.Command, prog: String): Parser[A] =
     fromSchema(Schema.Command(cmd, prog))
 
   /** Derivation entry point for `derives Parser` clauses; also usable directly:
@@ -255,10 +255,10 @@ object Parser:
   *
   * {{{
   * @main def app(args: String*): Unit =
-  *   val cfg = Claw.parseOrExit[Config](args)
+  *   val cfg = Flagged.parseOrExit[Config](args)
   * }}}
   */
-object Claw:
+object Flagged:
   def parse[A](args: Seq[String])(using p: Parser[A]): ParseResult[A] = p.parse(args)
   def parse[A](args: Seq[String], prog: String)(using p: Parser[A]): ParseResult[A] = p.parse(args, prog)
   def parseOrExit[A](args: Seq[String])(using p: Parser[A]): A = p.parseOrExit(args)

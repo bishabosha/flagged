@@ -1,10 +1,10 @@
-package claw
+package flagged
 
 import scala.annotation.StaticAnnotation
-import claw.meta.Defaults
+import flagged.meta.Defaults
 
 // Annotations are case classes so they can be rebuilt from an
-// `claw.internal.AnnotMirror` via their `Mirror.ProductOf`, and derive `Defaults`
+// `flagged.internal.AnnotMirror` via their `Mirror.ProductOf`, and derive `Defaults`
 // so materialisation shares one defaults mirror per annotation type.
 
 /** Override the derived long name of an option, the name of a subcommand, or the default program

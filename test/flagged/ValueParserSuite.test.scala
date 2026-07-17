@@ -1,4 +1,4 @@
-package claw
+package flagged
 
 import java.nio.file.Paths
 import scala.concurrent.duration.*
@@ -29,7 +29,7 @@ class ValueParserSuite extends munit.FunSuite:
 
   test("a by-name Parser given makes an enum field a value") {
     assertEquals(
-      ok(Claw.parse[ValueConfig](Seq("--level", "error"))).level,
+      ok(Flagged.parse[ValueConfig](Seq("--level", "error"))).level,
       LogLevel.Error
     )
   }
@@ -37,7 +37,7 @@ class ValueParserSuite extends munit.FunSuite:
   test("built-in readers: path, duration, double, uuid") {
     val id = java.util.UUID.randomUUID()
     val cfg = ok(
-      Claw.parse[ValueConfig](
+      Flagged.parse[ValueConfig](
         Seq("--path", "/tmp/x", "--timeout", "5s", "--ratio", "0.25", "--id", id.toString)
       )
     )
@@ -48,7 +48,7 @@ class ValueParserSuite extends munit.FunSuite:
   }
 
   test("reader typeName appears as metavar in help") {
-    Claw.parse[ValueConfig](Seq("--help")) match
+    Flagged.parse[ValueConfig](Seq("--help")) match
       case Err(ParseError.Help(t)) =>
         assert(t.contains("--path <path>"), t)
         assert(t.contains("--timeout <duration>"), t)
@@ -64,8 +64,8 @@ class ValueParserSuite extends munit.FunSuite:
         case None                          => Err(s"'$s' is not a port")
     )
     case class Srv(port: Int = 80) derives Parser
-    assertEquals(ok(Claw.parse[Srv](Seq("--port", "8080"))).port, 8080)
-    Claw.parse[Srv](Seq("--port", "99999")) match
+    assertEquals(ok(Flagged.parse[Srv](Seq("--port", "8080"))).port, 8080)
+    Flagged.parse[Srv](Seq("--port", "99999")) match
       case Err(ParseError.Failure(m, _)) => assert(m.contains("out of range"), m)
       case other                         => fail(s"expected failure, got $other")
   }
@@ -78,9 +78,9 @@ class ValueParserSuite extends munit.FunSuite:
 
   test("flags can accumulate occurrences (counter)") {
     case class Verb(@short('v') verbose: Count = Count(0)) derives Parser
-    assertEquals(ok(Claw.parse[Verb](Seq("-vvv"))).verbose, Count(3))
-    assertEquals(ok(Claw.parse[Verb](Seq("--verbose", "--verbose"))).verbose, Count(2))
-    assertEquals(ok(Claw.parse[Verb](Nil)).verbose, Count(0))
+    assertEquals(ok(Flagged.parse[Verb](Seq("-vvv"))).verbose, Count(3))
+    assertEquals(ok(Flagged.parse[Verb](Seq("--verbose", "--verbose"))).verbose, Count(2))
+    assertEquals(ok(Flagged.parse[Verb](Nil)).verbose, Count(0))
   }
 
   test("flag shape is pluggable via Parser.flag") {
@@ -88,10 +88,10 @@ class ValueParserSuite extends munit.FunSuite:
       case Quiet, Loud
     given Parser[Volume] = Parser.flag(n => Ok(if n > 0 then Volume.Loud else Volume.Quiet))
     case class Player(@short('l') loud: Volume = Volume.Quiet) derives Parser
-    assertEquals(ok(Claw.parse[Player](Seq("-l"))).loud, Volume.Loud)
-    assertEquals(ok(Claw.parse[Player](Nil)).loud, Volume.Quiet)
+    assertEquals(ok(Flagged.parse[Player](Seq("-l"))).loud, Volume.Loud)
+    assertEquals(ok(Flagged.parse[Player](Nil)).loud, Volume.Quiet)
     // no value parser: --loud=x is rejected
-    Claw.parse[Player](Seq("--loud=x")) match
+    Flagged.parse[Player](Seq("--loud=x")) match
       case Err(ParseError.Failure(m, _)) => assert(m.contains("does not take a value"), m)
       case other                         => fail(s"expected failure, got $other")
   }
@@ -102,8 +102,8 @@ class ValueParserSuite extends munit.FunSuite:
       if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)")
     )
     case class C(@short('v') verbose: Verbosity = Verbosity(0)) derives Parser
-    assertEquals(ok(Claw.parse[C](Seq("-vv"))).verbose, Verbosity(2))
-    Claw.parse[C](Seq("-vvvv")) match
+    assertEquals(ok(Flagged.parse[C](Seq("-vv"))).verbose, Verbosity(2))
+    Flagged.parse[C](Seq("-vvvv")) match
       case Err(ParseError.Failure(m, _)) => assert(m.contains("at most 3"), m)
       case other                         => fail(s"expected failure, got $other")
   }
@@ -112,10 +112,10 @@ class ValueParserSuite extends munit.FunSuite:
     given Parser[Set[String]] = Parser.repeated[String, Set[String]](l => Ok(l.toSet))
     case class Tags(tag: Set[String] = Set.empty) derives Parser
     assertEquals(
-      ok(Claw.parse[Tags](Seq("--tag", "a", "--tag", "b", "--tag", "a"))),
+      ok(Flagged.parse[Tags](Seq("--tag", "a", "--tag", "b", "--tag", "a"))),
       Tags(Set("a", "b"))
     )
-    assertEquals(ok(Claw.parse[Tags](Nil)), Tags(Set.empty))
+    assertEquals(ok(Flagged.parse[Tags](Nil)), Tags(Set.empty))
   }
 
   test("a repeated reader can require at least one occurrence") {
@@ -124,8 +124,8 @@ class ValueParserSuite extends munit.FunSuite:
       if l.isEmpty then Err("expected at least one occurrence") else Ok(AtLeastOne(l))
     )
     case class Cfg(num: AtLeastOne) derives Parser
-    assertEquals(ok(Claw.parse[Cfg](Seq("--num", "1", "--num", "2"))), Cfg(AtLeastOne(List(1, 2))))
-    Claw.parse[Cfg](Nil) match
+    assertEquals(ok(Flagged.parse[Cfg](Seq("--num", "1", "--num", "2"))), Cfg(AtLeastOne(List(1, 2))))
+    Flagged.parse[Cfg](Nil) match
       case Err(ParseError.Failure(m, _)) =>
         assert(m.contains("--num") && m.contains("expected at least one"), m)
       case other => fail(s"expected failure, got $other")
@@ -138,8 +138,8 @@ class ValueParserSuite extends munit.FunSuite:
         if l.sum > 10 then Err("sum too large") else Ok(l)
       )
     case class Sums(n: List[Int] = Nil) derives Parser
-    assertEquals(ok(Claw.parse[Sums](Seq("--n", "1", "--n", "2"))), Sums(List(1, 2)))
-    Claw.parse[Sums](Seq("--n", "9", "--n", "9")) match
+    assertEquals(ok(Flagged.parse[Sums](Seq("--n", "1", "--n", "2"))), Sums(List(1, 2)))
+    Flagged.parse[Sums](Seq("--n", "9", "--n", "9")) match
       case Err(ParseError.Failure(m, _)) => assert(m.contains("sum too large"), m)
       case other                         => fail(s"expected failure, got $other")
   }

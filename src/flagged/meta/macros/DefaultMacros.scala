@@ -1,7 +1,7 @@
-package claw.meta.macros
+package flagged.meta.macros
 
 import scala.quoted.*
-import claw.meta.Defaults
+import flagged.meta.Defaults
 
 object DefaultMacros:
   def defaults[A: Type](using Quotes): Expr[Defaults[A]] =

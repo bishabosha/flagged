@@ -1,13 +1,13 @@
-package claw.internal
+package flagged.internal
 
-import claw.{ParseError, ParseResult}
+import flagged.{ParseError, ParseResult}
 import steps.result.Result
 import steps.result.Result.{Ok, Err, eval}
 import steps.result.Result.eval.ok
 import scala.collection.mutable
 
 /** The token-stream parser. Interprets a `Command` tree against the argument list. */
-private[claw] object Engine:
+private[flagged] object Engine:
 
   def run(cmd: Command, prog: String, path: List[String], args: List[String]): ParseResult[Any] =
     Result:

@@ -1,7 +1,7 @@
-package claw.internal
+package flagged.internal
 
-import claw.Parser
-import claw.meta.Defaults
+import flagged.Parser
+import flagged.meta.Defaults
 import steps.result.Result
 import scala.collection.mutable
 
@@ -33,7 +33,7 @@ object Assemble:
     s => p.asInstanceOf[Parser[Any]].read(s)
 
   private def invalid(msg: String): Nothing =
-    throw new IllegalArgumentException(s"claw: invalid CLI definition: $msg")
+    throw new IllegalArgumentException(s"flagged: invalid CLI definition: $msg")
 
   /** By-name parser for an all-singleton enum, honoring `@name` on cases. */
   def enumValueParser(

@@ -1,4 +1,4 @@
-package claw.meta
+package flagged.meta
 
 /** Default arguments of a case class's constructor, by parameter index. */
 trait Defaults[A]:

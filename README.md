@@ -1,11 +1,11 @@
-# claw
+# flagged
 
 Command-line argument parsing for Scala 3. You describe your CLI as plain data — a
-case class for options, an enum for subcommands — and claw derives the parser, the
+case class for options, an enum for subcommands — and flagged derives the parser, the
 `--help` screens, and the error messages at compile time.
 
 ```scala
-import claw.*
+import flagged.*
 
 @help("Greet someone from the command line")
 case class Greet(
@@ -15,7 +15,7 @@ case class Greet(
 ) derives Parser
 
 @main def greet(args: String*): Unit =
-  val cfg = Claw.parseOrExit[Greet](args)
+  val cfg = Flagged.parseOrExit[Greet](args)
   (1 to cfg.repeat).foreach(_ => println(s"Hello, ${cfg.name}${if cfg.excited then "!" else "."}"))
 ```
 
@@ -46,11 +46,11 @@ Supported option syntax: `--name value` and `--name=value`; short aliases with
 separate (`-n Jamie`), attached (`-nJamie`), or `=` values; flag bundling (`-er`,
 `-rn 3`); `--` to end option parsing; `-` and negative numbers are treated as values.
 
-## Getting claw
+## Getting flagged
 
-claw is not yet published to a Maven repository. To try it out, clone this repository
+flagged is not yet published to a Maven repository. To try it out, clone this repository
 and run `scala-cli test .` or any of the demos in `examples/`; to use it in a project,
-vendor the `src/claw` directory.
+vendor the `src/flagged` directory.
 
 ## Declaring options
 
@@ -112,14 +112,14 @@ enum RemoteAction derives Parser:
   case Remove(@positional name: String)
 
 @main def gitto(args: String*): Unit =
-  Claw.parseOrExit[Gitto](args) match
+  Flagged.parseOrExit[Gitto](args) match
     case Gitto.Clone(repo, dir, depth)             => ???
     case Gitto.Remote(RemoteAction.Add(name, url)) => ???
     case Gitto.Remote(RemoteAction.Remove(name))   => ???
     case Gitto.Status(short)                       => ???
 ```
 
-You handle a plain enum value; claw handles the routing — and every level answers
+You handle a plain enum value; flagged handles the routing — and every level answers
 `--help`:
 
 ```console
@@ -159,7 +159,7 @@ a `@main` varargs parameter, a scala-cli script's `args`, or a classic `main`:
 
 ```scala
 // backup.sc — run with scala-cli
-import claw.*
+import flagged.*
 
 case class Backup(
     @short('d') @help("Destination directory") dest: String,
@@ -167,7 +167,7 @@ case class Backup(
     @positional sources: List[String] = Nil
 ) derives Parser
 
-val cfg = Claw.parseOrExit[Backup](args.toSeq, prog = "backup")
+val cfg = Flagged.parseOrExit[Backup](args.toSeq, prog = "backup")
 ```
 
 On `--help` it prints the help screen and exits 0; on a bad command line it prints an
@@ -176,21 +176,21 @@ error with a hint to stderr and exits 2.
 ## Handling results yourself
 
 If you'd rather not exit — in tests, or when embedding a CLI in a bigger program —
-`Claw.parse` returns a value instead. Results use `Result[T, E]` from
+`Flagged.parse` returns a value instead. Results use `Result[T, E]` from
 [lampepfl/steps](https://github.com/lampepfl/steps): you get `Ok(config)` on success,
 and `Err` carrying a `ParseError` that is either the rendered help screen or a failure
 message with its hint:
 
 ```scala
-Claw.parse[Greet](Seq("--name", "Jamie")) match
+Flagged.parse[Greet](Seq("--name", "Jamie")) match
   case Ok(cfg)                            => run(cfg)
   case Err(ParseError.Help(text))         => println(text)
   case Err(ParseError.Failure(msg, hint)) => logger.error(msg)
 ```
 
-`import claw.*` brings `Result`, `Ok`, and `Err` into scope, and the full steps toolkit
+`import flagged.*` brings `Result`, `Ok`, and `Err` into scope, and the full steps toolkit
 (`map`, `getOrElse`, `toEither`, direct-style `Result:` blocks) is available on parse
-results. `Claw.help[Greet]` gives you the help text without parsing anything.
+results. `Flagged.help[Greet]` gives you the help text without parsing anything.
 
 ## Parsing your own value types
 

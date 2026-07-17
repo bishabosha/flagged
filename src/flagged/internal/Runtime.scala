@@ -1,6 +1,6 @@
-package claw.internal
+package flagged.internal
 
-import claw.Parser
+import flagged.Parser
 import steps.result.Result
 import steps.result.Result.{Ok, Err}
 

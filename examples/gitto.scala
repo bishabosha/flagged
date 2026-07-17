@@ -1,6 +1,6 @@
 package examples
 
-import claw.*
+import flagged.*
 
 /** Options shared by several commands: a case class with a Parser splices its
   * options into whichever command declares a field of this type.
@@ -39,7 +39,7 @@ enum RemoteAction derives Parser:
   case ListAll
 
 @main def gittoMain(args: String*): Unit =
-  Claw.parseOrExit[Gitto](args) match
+  Flagged.parseOrExit[Gitto](args) match
     case Gitto.Clone(repo, dir, depth, out) =>
       val where = dir.getOrElse(repo.split('/').last.stripSuffix(".git"))
       val how = depth.map(d => s" (depth $d)").getOrElse("")

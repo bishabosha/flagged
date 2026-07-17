@@ -1,10 +1,10 @@
-package claw
+package flagged
 
-import claw.meta.{Ann, AnnotMirror}
-import claw.internal.{Derive, FieldAnnots, TargetAnnots}
+import flagged.meta.{Ann, AnnotMirror}
+import flagged.internal.{Derive, FieldAnnots, TargetAnnots}
 import scala.deriving.Mirror
 import scala.annotation.targetName
-import claw.internal.Annots
+import flagged.internal.Annots
 
 // test annotation with default arguments, for the named-args/defaults tests
 final case class tagged(label: String = "none", level: Int = 1)
@@ -107,7 +107,7 @@ class MetaSuite extends munit.FunSuite:
   }
 
   test("non-constant and non-case-class annotations are not mirrored") {
-    // @targetName is not a case class; nothing claw-relevant should surface
+    // @targetName is not a case class; nothing flagged-relevant should surface
     @targetName("Foo") case class Old(@short('x') a: Int = 0)
     val ann = summon[AnnotMirror.Product[Old]]
     summon[ann.MirroredSelfAnnotations =:= EmptyTuple] // no @targetName in the self slot

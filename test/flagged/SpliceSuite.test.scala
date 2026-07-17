@@ -1,4 +1,4 @@
-package claw
+package flagged
 
 // a shared options group, spliced into several commands below
 case class LogOpts(
@@ -21,17 +21,17 @@ class SpliceSuite extends munit.FunSuite:
 
   test("a product-shaped Parser field splices its options into the parent") {
     assertEquals(
-      ok(Claw.parse[Serve](Seq("--port", "9000", "-q", "--log-level", "debug"))),
+      ok(Flagged.parse[Serve](Seq("--port", "9000", "-q", "--log-level", "debug"))),
       Serve(9000, LogOpts(quiet = true, logLevel = "debug"))
     )
   }
 
   test("spliced group defaults apply when its options are absent") {
-    assertEquals(ok(Claw.parse[Serve](Nil)), Serve(8080, LogOpts()))
+    assertEquals(ok(Flagged.parse[Serve](Nil)), Serve(8080, LogOpts()))
   }
 
   test("spliced options appear in the parent's help") {
-    Claw.parse[Serve](Seq("--help")) match
+    Flagged.parse[Serve](Seq("--help")) match
       case Err(ParseError.Help(t)) =>
         assert(t.contains("-q, --quiet"), t)
         assert(t.contains("--log-level <string>"), t)
@@ -42,10 +42,10 @@ class SpliceSuite extends munit.FunSuite:
   test("required options of a spliced group are enforced") {
     case class Auth(@help("API token") token: String) derives Parser
     case class App(url: String = "http://localhost", auth: Auth) derives Parser
-    val m = err(Claw.parse[App](Nil))
+    val m = err(Flagged.parse[App](Nil))
     assert(m.contains("--token"), m)
     assertEquals(
-      ok(Claw.parse[App](Seq("--token", "t0"))),
+      ok(Flagged.parse[App](Seq("--token", "t0"))),
       App("http://localhost", Auth("t0"))
     )
   }
@@ -55,17 +55,17 @@ class SpliceSuite extends munit.FunSuite:
     case class Mid(b: Int = 2, inner: Inner = Inner()) derives Parser
     case class Outer(c: Int = 3, mid: Mid = Mid()) derives Parser
     assertEquals(
-      ok(Claw.parse[Outer](Seq("--a", "10", "--b", "20", "--c", "30"))),
+      ok(Flagged.parse[Outer](Seq("--a", "10", "--b", "20", "--c", "30"))),
       Outer(30, Mid(20, Inner(10)))
     )
   }
 
   test("splicing works inside subcommand cases") {
     assertEquals(
-      ok(Claw.parse[Deploy](Seq("run", "--log-level", "warn"))),
+      ok(Flagged.parse[Deploy](Seq("run", "--log-level", "warn"))),
       Deploy.Run(LogOpts(logLevel = "warn"))
     )
-    assertEquals(ok(Claw.parse[Deploy](Seq("stop"))), Deploy.Stop)
+    assertEquals(ok(Flagged.parse[Deploy](Seq("stop"))), Deploy.Stop)
   }
 
   test("emap composes over a command parser (cross-field validation)") {
@@ -85,8 +85,8 @@ class SpliceSuite extends munit.FunSuite:
       if w.min <= w.max then Ok(w) else Err("min must not exceed max")
     )
     case class App(label: String = "", window: Window = Window()) derives Parser
-    assertEquals(ok(Claw.parse[App](Seq("--min", "5"))), App("", Window(5, 100)))
-    val m = err(Claw.parse[App](Seq("--min", "7", "--max", "2")))
+    assertEquals(ok(Flagged.parse[App](Seq("--min", "5"))), App("", Window(5, 100)))
+    val m = err(Flagged.parse[App](Seq("--min", "7", "--max", "2")))
     assert(m.contains("min must not exceed max"), m)
   }
 

@@ -1,10 +1,10 @@
-package claw.meta.macros
+package flagged.meta.macros
 
 import scala.quoted.*
-import claw.meta.AnnotMirror
-import claw.meta.Ann
+import flagged.meta.AnnotMirror
+import flagged.meta.Ann
 
-/** The two residual macros backing [[Defaults]] and [[AnnotMirror]]. Everything else in claw's
+/** The two residual macros backing [[Defaults]] and [[AnnotMirror]]. Everything else in flagged's
   * derivation is `Mirror` + `inline`.
   */
 object AnnotationMacros:

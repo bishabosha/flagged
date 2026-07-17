@@ -1,9 +1,9 @@
-package claw.internal
+package flagged.internal
 
 import scala.compiletime.*
 import scala.deriving.Mirror
-import claw.Parser
-import claw.meta.{Defaults, AnnotMirror}
+import flagged.Parser
+import flagged.meta.{Defaults, AnnotMirror}
 
 /** `Mirror`-based derivation. Structure and construction come from `Mirror`; field semantics are
   * the field parser's schema: command-shaped instances become nested subcommands (sums) or spliced

@@ -1,7 +1,7 @@
-package claw.internal
+package flagged.internal
 
 /** Renders `--help` screens and usage lines. */
-private[claw] object HelpFmt:
+private[flagged] object HelpFmt:
 
   def render(cmd: Command, prog: String, path: List[String]): String =
     val full = (prog :: path).mkString(" ")

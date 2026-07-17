@@ -1,7 +1,7 @@
-package claw
+package flagged
 
-/** claw uses [[steps.result.Result]] (lampepfl/steps) as its error channel.
-  * Re-exported here so `import claw.*` is enough to pattern-match parse results.
+/** flagged uses [[steps.result.Result]] (lampepfl/steps) as its error channel.
+  * Re-exported here so `import flagged.*` is enough to pattern-match parse results.
   */
 export steps.result.Result
 export steps.result.Result.{Ok, Err}

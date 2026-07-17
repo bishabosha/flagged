@@ -1,4 +1,4 @@
-package claw.meta
+package flagged.meta
 
 import scala.annotation.Annotation
 import scala.compiletime.*
@@ -82,7 +82,7 @@ object AnnotMirror:
   /** The constructor-argument tuple for one mirrored annotation: provided constants are
     * materialised directly; defaulted positions are looked up through the annotation's [[Defaults]]
     * mirror (which throws on an index without a default — unreachable for mirrors synthesized by
-    * claw).
+    * flagged).
     */
   private inline def argsOf[A: Defaults as d, Args, Defaulted, Size <: Int]: Tuple =
     buildTuple(constValue[Size])({ append =>
