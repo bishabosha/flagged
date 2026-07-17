@@ -24,16 +24,16 @@ object Defaults:
 /** claw's annotations on a type or an enum case, extracted at compile time from an
   * [[AnnotMirror]] — fully typed, no `Any` and no runtime type tests.
   */
-final case class TargetAnnots(name: Option[claw.name], help: Option[claw.help])
+final case class TargetAnnots(name: Option[String], help: Option[String])
 
 object TargetAnnots:
   val empty: TargetAnnots = TargetAnnots(None, None)
 
 /** claw's annotations on one constructor field, extracted at compile time. */
 final case class FieldAnnots(
-    name: Option[claw.name],
-    short: Option[claw.short],
-    help: Option[claw.help],
+    name: Option[String],
+    short: Option[Char],
+    help: Option[String],
     positional: Boolean
 )
 

@@ -66,11 +66,11 @@ object AnnotMirror:
     * `derives Defaults` clause to the annotation so a single instance, derived in
     * its companion, is shared across all `find` sites.
     */
-  inline def find[A <: Annotation: {Mirror.ProductOf as m, Defaults}, Anns]: Option[A] =
+  inline def find[A <: Annotation: {Mirror.ProductOf, Defaults}, Anns]: Option[NamedTuple.From[A]] =
     inline erasedValue[Anns] match
       case _: EmptyTuple => None
       case _: (Ann[A, args, defaulted] *: _) =>
-        Some(m.fromProduct(argsOf[A, args, defaulted]))
+        Some(argsOf[A, args, defaulted])
       case _: (_ *: t) => find[A, t]
 
   /** The constructor-argument tuple for one mirrored annotation: provided constants
@@ -78,8 +78,8 @@ object AnnotMirror:
     * annotation's [[Defaults]] mirror (which throws on an index without a default —
     * unreachable for mirrors synthesized by claw).
     */
-  inline def argsOf[A, Args, Defaulted](using d: Defaults[A]): Tuple =
-    resolve[Args, Defaulted](d.defaultArgument)
+  inline def argsOf[A, Args, Defaulted](using d: Defaults[A]): NamedTuple.From[A] =
+    NamedTuple(resolve[Args, Defaulted](d.defaultArgument)).asInstanceOf[NamedTuple.From[A]]
 
   inline def resolve[Args, D](lookup: Int => Any): Tuple =
     inline erasedValue[Args] match

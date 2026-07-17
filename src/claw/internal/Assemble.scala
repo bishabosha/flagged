@@ -26,7 +26,7 @@ object Assemble:
     b.result()
 
   def progName(label: String, onType: TargetAnnots): String =
-    onType.name.map(_.value).getOrElse(kebab(label))
+    onType.name.getOrElse(kebab(label))
 
   private def readFn(p: Parser[?]): String => Result[Any, String] =
     s => p.asInstanceOf[Parser[Any]].read(s)
@@ -42,7 +42,7 @@ object Assemble:
       perCase: List[TargetAnnots]
   ): Parser[Any] =
     val names = caseLabels.zipWithIndex.map { (l, i) =>
-      perCase.lift(i).flatMap(_.name).map(_.value).getOrElse(kebab(l))
+      perCase.lift(i).flatMap(_.name).getOrElse(kebab(l))
     }
     val joined = names.mkString("|")
     val typeName = if joined.length <= 40 then joined else kebab(typeLabel)
@@ -66,14 +66,14 @@ object Assemble:
   def sum(caseLabels: List[String], annots: Annots.Sum[?], entries: List[SubEntry]): Command =
     val cases = entries.zipWithIndex.map { (e, i) =>
       val anns = annots.perCase.lift(i).getOrElse(TargetAnnots.empty)
-      val help = anns.help.map(_.value).getOrElse("")
+      val help = anns.help.getOrElse("")
       val cmd = e match
         case SubEntry.Leaf(v) => Command.leaf(v, help)
         case SubEntry.Node(p) => p().command
-      SubCase(anns.name.map(_.value).getOrElse(kebab(caseLabels(i))), help, cmd)
+      SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd)
     }
     Command(
-      annots.onType.help.map(_.value).getOrElse(""),
+      annots.onType.help.getOrElse(""),
       Vector.empty,
       Vector.empty,
       Some(SubGroup(0, false, None, cases.toVector)),
@@ -103,9 +103,9 @@ object Assemble:
     for i <- 0 until n do
       val anns = annots.perField.lift(i).getOrElse(FieldAnnots.empty)
       val label = labels(i)
-      val long = anns.name.map(_.value).getOrElse(kebab(label))
-      val help = anns.help.map(_.value).getOrElse("")
-      val short = anns.short.map(_.value)
+      val long = anns.name.getOrElse(kebab(label))
+      val help = anns.help.getOrElse("")
+      val short = anns.short
       val default: Option[() => Any] =
         if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None
       val (fieldParser, optional) = fields(i)
@@ -199,7 +199,7 @@ object Assemble:
     val fullBuild: Array[Any] => Any =
       if allSplices.isEmpty then build else arr => build(arr.take(n))
     Command(
-      annots.onType.help.map(_.value).getOrElse(""),
+      annots.onType.help.getOrElse(""),
       opts.result(),
       poss.result(),
       subGroup,

@@ -35,13 +35,16 @@ object Derive:
         )
 
   inline def targetAnnotsOf[Anns]: TargetAnnots =
-    TargetAnnots(AnnotMirror.find[claw.name, Anns], AnnotMirror.find[claw.help, Anns])
+    TargetAnnots(
+      AnnotMirror.find[claw.name, Anns].map(_.value),
+      AnnotMirror.find[claw.help, Anns].map(_.value)
+    )
 
   inline def fieldAnnotsOf[Anns]: FieldAnnots =
     FieldAnnots(
-      AnnotMirror.find[claw.name, Anns],
-      AnnotMirror.find[claw.short, Anns],
-      AnnotMirror.find[claw.help, Anns],
+      AnnotMirror.find[claw.name, Anns].map(_.value),
+      AnnotMirror.find[claw.short, Anns].map(_.value),
+      AnnotMirror.find[claw.help, Anns].map(_.value),
       AnnotMirror.find[claw.positional, Anns].isDefined
     )
 
