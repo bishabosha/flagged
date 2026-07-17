@@ -3,6 +3,7 @@ package claw.meta
 import scala.annotation.Annotation
 import scala.compiletime.*
 import scala.deriving.Mirror
+import scala.annotation.publicInBinary
 
 /** Type-level description of a single annotation occurrence: the monomorphic annotation type `A`,
   * the singleton types of its constructor arguments `Args`, and a parallel tuple `Defaulted` of
@@ -53,37 +54,63 @@ object AnnotMirror:
   transparent inline given ofSum[T]: AnnotMirror.Sum[T] =
     ${ macros.AnnotationMacros.annotMirrorSum[T] }
 
-  /** The first annotation of type `A` in slot `Anns`, materialised — fully resolved at compile
-    * time, so consumers get a typed `Option[A]` with no runtime type test. `A` is matched directly
-    * in the head pattern: it is concrete at expansion and `Ann` is invariant, so each head either
-    * is an `Ann[A, _, _]` or provably is not.
-    *
-    * The annotation's [[Defaults]] mirror is a context parameter: add a `derives Defaults` clause
-    * to the annotation so a single instance, derived in its companion, is shared across all `find`
-    * sites.
+  /** Find first slot in `Anns` that matches type `A` and materialise its arguments as `A`. Default
+    * arguments are filled in.
     */
-  inline def find[A <: Annotation: {Mirror.ProductOf, Defaults}, Anns]: Option[NamedTuple.From[A]] =
+  inline def findExact[A <: Annotation: {Mirror.ProductOf as m, Defaults}, Anns]: Option[A] =
+    findImpl[A, Anns, A](m.fromProduct)
+
+  /** Find first slot in `Anns` that matches type `A` and materialise its arguments as a named
+    * tuple. Default arguments are filled in.
+    */
+  inline def find[A <: Annotation: {Mirror.ProductOf as m, Defaults}, Anns]
+      : Option[NamedTuple.From[A]] =
+    findImpl[A, Anns, NamedTuple.From[A]]: args =>
+      NamedTuple(args).asInstanceOf[NamedTuple.From[A]]
+
+  private inline def findImpl[A <: Annotation: {Mirror.ProductOf as m, Defaults}, Anns, B](
+      inline finish: Tuple => B
+  ): Option[B] =
     inline erasedValue[Anns] match
       case _: EmptyTuple                     => None
       case _: (Ann[A, args, defaulted] *: _) =>
-        Some(argsOf[A, args, defaulted])
-      case _: (_ *: t) => find[A, t]
+        Some(
+          finish(argsOf[A, args, defaulted, Tuple.Size[m.MirroredElemTypes]])
+        )
+      case _: (_ *: t) => findImpl[A, t, B](finish)
 
   /** The constructor-argument tuple for one mirrored annotation: provided constants are
     * materialised directly; defaulted positions are looked up through the annotation's [[Defaults]]
     * mirror (which throws on an index without a default — unreachable for mirrors synthesized by
     * claw).
     */
-  inline def argsOf[A, Args, Defaulted](using d: Defaults[A]): NamedTuple.From[A] =
-    NamedTuple(resolve[Args, Defaulted](d.defaultArgument)).asInstanceOf[NamedTuple.From[A]]
+  private inline def argsOf[A: Defaults as d, Args, Defaulted, Size <: Int]: Tuple =
+    buildTuple(constValue[Size])({ append =>
+      resolve[Args, Defaulted](append, d.defaultArgument)
+    })
 
-  inline def resolve[Args, D](lookup: Int => Any): Tuple =
+  @publicInBinary
+  private[AnnotMirror] def buildTuple[T, A](size: Int)(
+      build: (append: Any => Unit) => Unit
+  ): Tuple =
+    val buf     = new Array[AnyRef](size)
+    val indexer = new (Any => Unit) {
+      var i                   = 0
+      def apply(x: Any): Unit =
+        buf(i) = x.asInstanceOf[AnyRef]
+        i += 1
+    }
+    build(indexer)
+    Tuple.fromIArray(IArray.unsafeFromArray(buf))
+
+  private inline def resolve[Args, D](inline append: Any => Unit, inline lookup: Int => Any): Unit =
     inline erasedValue[Args] match
-      case _: EmptyTuple => EmptyTuple
+      case _: EmptyTuple => ()
       case _: (ah *: at) =>
         inline erasedValue[D] match
           case _: (dh *: dt) =>
-            val head: Any = inline erasedValue[dh] match
+            val next: Any = inline erasedValue[dh] match
               case _: false => constValue[ah]
               case _: true  => lookup(constValue[ah].asInstanceOf[Int])
-            head *: resolve[at, dt](lookup)
+            append(next)
+            resolve[at, dt](append, lookup)

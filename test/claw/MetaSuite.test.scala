@@ -4,6 +4,7 @@ import claw.meta.{Ann, AnnotMirror}
 import claw.internal.{Derive, FieldAnnots, TargetAnnots}
 import scala.deriving.Mirror
 import scala.annotation.targetName
+import claw.internal.Annots
 
 // test annotation with default arguments, for the named-args/defaults tests
 final case class tagged(label: String = "none", level: Int = 1)
@@ -38,12 +39,17 @@ class MetaSuite extends munit.FunSuite:
   test("defaulted positions are looked up through the Defaults mirror") {
     // hand-written mirror type: label defaulted (index 0), level provided
     type Slot = Ann[tagged, (0, 7), (true, false)] *: EmptyTuple
+    assertEquals(AnnotMirror.findExact[tagged, Slot], Some(tagged("none", 7)))
     assertEquals(AnnotMirror.find[tagged, Slot].map(fromMirror[tagged]), Some(tagged("none", 7)))
   }
 
   test("annotation mirror resolves named arguments and fills constant defaults") {
     @tagged(level = 3) case class ByName(x: Int = 0)
     val am = AnnotMirror.ofProduct[ByName]
+    assertEquals(
+      AnnotMirror.findExact[tagged, am.MirroredSelfAnnotations],
+      Some(tagged("none", 3))
+    )
     assertEquals(
       AnnotMirror.find[tagged, am.MirroredSelfAnnotations].map(fromMirror[tagged]),
       Some(tagged("none", 3))
@@ -52,12 +58,20 @@ class MetaSuite extends munit.FunSuite:
     @tagged(level = 5, label = "hi") case class Permuted(x: Int = 0)
     val am2 = AnnotMirror.ofProduct[Permuted]
     assertEquals(
+      AnnotMirror.findExact[tagged, am2.MirroredSelfAnnotations],
+      Some(tagged("hi", 5))
+    )
+    assertEquals(
       AnnotMirror.find[tagged, am2.MirroredSelfAnnotations].map(fromMirror[tagged]),
       Some(tagged("hi", 5))
     )
 
     @tagged() case class AllDefaults(x: Int = 0)
     val am3 = AnnotMirror.ofProduct[AllDefaults]
+    assertEquals(
+      AnnotMirror.findExact[tagged, am3.MirroredSelfAnnotations],
+      Some(tagged("none", 1))
+    )
     assertEquals(
       AnnotMirror.find[tagged, am3.MirroredSelfAnnotations].map(fromMirror[tagged]),
       Some(tagged("none", 1))
@@ -68,7 +82,7 @@ class MetaSuite extends munit.FunSuite:
     @help("a greeter")
     case class G(@short('n') @help("who") name: String = "world", quiet: Boolean = false)
 
-    val a = Derive.productAnnots[G]
+    val a = Annots.productAnnots[G]
     assertEquals(a.onType, TargetAnnots(None, Some("a greeter")))
     assertEquals(
       a.perField,
@@ -80,7 +94,7 @@ class MetaSuite extends munit.FunSuite:
   }
 
   test("annotation extraction for an enum captures per-case annotations") {
-    val a = Derive.sumAnnots[Git]
+    val a = Annots.sumAnnots[Git]
     assertEquals(a.onType, TargetAnnots(None, Some("A tiny git-like tool")))
     assertEquals(
       a.perCase.map(_.help),
@@ -98,7 +112,7 @@ class MetaSuite extends munit.FunSuite:
     val ann = summon[AnnotMirror.Product[Old]]
     summon[ann.MirroredSelfAnnotations =:= EmptyTuple] // no @targetName in the self slot
 
-    val oldAnnots = Derive.productAnnots[Old]
+    val oldAnnots = Annots.productAnnots[Old]
     assertEquals(oldAnnots.onType, TargetAnnots.empty)
     assertEquals(
       oldAnnots.perField,

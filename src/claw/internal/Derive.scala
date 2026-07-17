@@ -16,48 +16,6 @@ import claw.meta.{Defaults, AnnotMirror}
   */
 object Derive:
 
-  /** Extract claw's annotations for a product into typed records. */
-  inline def productAnnots[A]: Annots.Product[A] =
-    summonFrom:
-      case am: AnnotMirror.Product[A] =>
-        Annots.Product[A](
-          targetAnnotsOf[am.MirroredSelfAnnotations],
-          fieldAnnotsEach[am.MirroredAnnotations]
-        )
-
-  /** Extract claw's annotations for a sum into typed records. */
-  inline def sumAnnots[A]: Annots.Sum[A] =
-    summonFrom:
-      case am: AnnotMirror.Sum[A] =>
-        Annots.Sum[A](
-          targetAnnotsOf[am.MirroredSelfAnnotations],
-          targetAnnotsEach[am.MirroredAnnotations]
-        )
-
-  inline def targetAnnotsOf[Anns]: TargetAnnots =
-    TargetAnnots(
-      AnnotMirror.find[claw.name, Anns].map(_.value),
-      AnnotMirror.find[claw.help, Anns].map(_.value)
-    )
-
-  inline def fieldAnnotsOf[Anns]: FieldAnnots =
-    FieldAnnots(
-      AnnotMirror.find[claw.name, Anns].map(_.value),
-      AnnotMirror.find[claw.short, Anns].map(_.value),
-      AnnotMirror.find[claw.help, Anns].map(_.value),
-      AnnotMirror.find[claw.positional, Anns].isDefined
-    )
-
-  inline def fieldAnnotsEach[Slots]: List[FieldAnnots] =
-    inline erasedValue[Slots] match
-      case _: EmptyTuple => Nil
-      case _: (h *: t)   => fieldAnnotsOf[h] :: fieldAnnotsEach[t]
-
-  inline def targetAnnotsEach[Slots]: List[TargetAnnots] =
-    inline erasedValue[Slots] match
-      case _: EmptyTuple => Nil
-      case _: (h *: t)   => targetAnnotsOf[h] :: targetAnnotsEach[t]
-
   // ---- parsers ----------------------------------------------------------------
 
   inline def of[A](using m: Mirror.Of[A]): Parser[A] =
@@ -66,7 +24,7 @@ object Derive:
       case s: Mirror.SumOf[A]     => sum[A](using s)
 
   inline def product[A](using m: Mirror.ProductOf[A]): Parser[A] =
-    val annots = productAnnots[A]
+    val annots = Annots.productAnnots[A]
     val cmd    = Assemble.product(
       labelsOf[m.MirroredElemLabels],
       fieldsOf[m.MirroredElemTypes],
@@ -77,7 +35,7 @@ object Derive:
     Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
   inline def sum[A](using m: Mirror.SumOf[A]): Parser[A] =
-    val annots = sumAnnots[A]
+    val annots = Annots.sumAnnots[A]
     val cmd = Assemble.sum(labelsOf[m.MirroredElemLabels], annots, entriesOf[m.MirroredElemTypes])
     Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
@@ -88,7 +46,7 @@ object Derive:
         constValue[m.MirroredLabel],
         labelsOf[m.MirroredElemLabels],
         singletonValues[m.MirroredElemTypes],
-        sumAnnots[A].perCase
+        Annots.sumAnnots[A].perCase
       )
       .asInstanceOf[Parser[A]]
 
