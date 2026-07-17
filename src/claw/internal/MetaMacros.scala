@@ -5,7 +5,7 @@ import scala.quoted.*
 /** Per-field default values of a case class, in declaration order.
   * `values` is empty for non-products.
   */
-final class Defaults[A](val values: List[Option[() => Any]])
+final class Defaults[A](val values: IndexedSeq[Option[() => Any]])
 
 object Defaults:
   /** The one thing `Mirror` cannot see: default argument getters. Consumers (e.g.
@@ -73,7 +73,7 @@ object MetaMacros:
             case None     => '{ None }
         }
       else Nil
-    '{ new Defaults[A](${ Expr.ofList(entries) }) }
+    '{ new Defaults[A](${ Expr.ofSeq(entries) }.toIndexedSeq) }
 
   def annotMirrorProduct[A: Type](using Quotes): Expr[AnnotMirror.Product[A]] =
     new AnnotHelper().product[A]

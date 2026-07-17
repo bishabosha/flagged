@@ -66,7 +66,7 @@ object AnnotMirror:
     * `derives Defaults` clause to the annotation so a single instance, derived in
     * its companion, is shared across all `find` sites.
     */
-  inline def find[A <: Annotation: {Mirror.ProductOf as m, Defaults as d}, Anns]: Option[A] =
+  inline def find[A <: Annotation: {Mirror.ProductOf as m, Defaults}, Anns]: Option[A] =
     inline erasedValue[Anns] match
       case _: EmptyTuple => None
       case _: (Ann[A, args, defaulted] *: _) =>
