@@ -3,8 +3,8 @@ package flagged.internal
 import compiletime.{summonFrom, erasedValue}
 import flagged.meta.AnnotMirror
 
-/** flagged's annotations on a type or an enum case, extracted at compile time from an [[AnnotMirror]]
-  * — fully typed, no `Any` and no runtime type tests.
+/** flagged's annotations on a type or an enum case, extracted at compile time from an
+  * [[AnnotMirror]] — fully typed, no `Any` and no runtime type tests.
   */
 final case class TargetAnnots(name: Option[String], help: Option[String])
 
@@ -27,20 +27,26 @@ object FieldAnnots:
   */
 enum Annots[A]:
   /** Annotations of a case class: on the type itself and per constructor field. */
-  case Product[T](onType: TargetAnnots, perField: List[FieldAnnots]) extends Annots[T]
+  case Product(onType: TargetAnnots, perField: IndexedSeq[FieldAnnots])
 
   /** Annotations of an enum / sealed trait: on the type itself and per case. */
-  case Sum[T](onType: TargetAnnots, perCase: List[TargetAnnots]) extends Annots[T]
+  case Sum(onType: TargetAnnots, perCase: IndexedSeq[TargetAnnots])
 
   def onType: TargetAnnots
 
 object Annots:
 
+  def makeProduct[A](onType: TargetAnnots, perField: Seq[FieldAnnots]): Annots.Product[A] =
+    Annots.Product(onType, perField.toIndexedSeq)
+
+  def makeSum[A](onType: TargetAnnots, perCase: Seq[TargetAnnots]): Annots.Sum[A] =
+    Annots.Sum(onType, perCase.toIndexedSeq)
+
   /** Extract flagged's annotations for a product into typed records. */
   inline def productAnnots[A]: Annots.Product[A] =
     summonFrom:
       case am: AnnotMirror.Product[A] =>
-        Annots.Product[A](
+        makeProduct[A](
           targetAnnotsOf[am.MirroredSelfAnnotations],
           fieldAnnotsEach[am.MirroredAnnotations]
         )
@@ -49,7 +55,7 @@ object Annots:
   inline def sumAnnots[A]: Annots.Sum[A] =
     summonFrom:
       case am: AnnotMirror.Sum[A] =>
-        Annots.Sum[A](
+        makeSum[A](
           targetAnnotsOf[am.MirroredSelfAnnotations],
           targetAnnotsEach[am.MirroredAnnotations]
         )

@@ -75,7 +75,7 @@ object AnnotMirror:
       case _: EmptyTuple                     => None
       case _: (Ann[A, args, defaulted] *: _) =>
         Some(
-          finish(argsOf[A, args, defaulted, Tuple.Size[m.MirroredElemTypes]])
+          finish(argsOf[A, m.MirroredElemTypes, args, defaulted])
         )
       case _: (_ *: t) => findImpl[A, t, B](finish)
 
@@ -84,10 +84,23 @@ object AnnotMirror:
     * mirror (which throws on an index without a default — unreachable for mirrors synthesized by
     * flagged).
     */
-  private inline def argsOf[A: Defaults as d, Args, Defaulted, Size <: Int]: Tuple =
-    buildTuple(constValue[Size])({ append =>
-      resolve[Args, Defaulted](append, d.defaultArgument)
-    })
+  private inline def argsOf[A: Defaults as d, Elems <: Tuple, Args <: Tuple, Defaulted <: Tuple]
+      : Tuple =
+    inline erasedValue[Elems] match
+      case _: EmptyTuple => EmptyTuple
+      case _             =>
+        inline erasedValue[(Elems, Args, Defaulted)] match
+          case _: (ex *: EmptyTuple, ax *: EmptyTuple, dx *: EmptyTuple) =>
+            Tuple1(resolveInner[ex, ax, dx](d.defaultArgument))
+          case _: (e1 *: e2 *: EmptyTuple, a1 *: a2 *: EmptyTuple, d1 *: d2 *: EmptyTuple) =>
+            Tuple2(
+              resolveInner[e1, a1, d1](d.defaultArgument),
+              resolveInner[e2, a2, d2](d.defaultArgument)
+            )
+          case _ =>
+            buildTuple(constValue[Tuple.Size[Elems]])({ append =>
+              resolveMany[Elems, Args, Defaulted](append, d.defaultArgument)
+            })
 
   @publicInBinary
   private[AnnotMirror] def buildTuple[T, A](size: Int)(
@@ -103,14 +116,23 @@ object AnnotMirror:
     build(indexer)
     Tuple.fromIArray(IArray.unsafeFromArray(buf))
 
-  private inline def resolve[Args, D](inline append: Any => Unit, inline lookup: Int => Any): Unit =
-    inline erasedValue[Args] match
+  private inline def resolveMany[Elems, Args, D](
+      inline append: Any => Unit,
+      inline lookup: Int => Any
+  ): Unit =
+    inline erasedValue[Elems] match
+      case _: (eh *: et) =>
+        inline erasedValue[Args] match
+          case _: (ah *: at) =>
+            inline erasedValue[D] match
+              case _: (dh *: dt) =>
+                append(resolveInner[eh, ah, dh](lookup))
+                resolveMany[et, at, dt](append, lookup)
       case _: EmptyTuple => ()
-      case _: (ah *: at) =>
-        inline erasedValue[D] match
-          case _: (dh *: dt) =>
-            val next: Any = inline erasedValue[dh] match
-              case _: false => constValue[ah]
-              case _: true  => lookup(constValue[ah].asInstanceOf[Int])
-            append(next)
-            resolve[at, dt](append, lookup)
+
+  private inline def resolveInner[Eh, Ah, Dh](
+      inline lookup: Int => Any
+  ): Eh =
+    inline erasedValue[Dh] match
+      case _: false => constValue[Ah].asInstanceOf[Eh]
+      case _: true  => lookup(constValue[Ah].asInstanceOf[Int]).asInstanceOf[Eh]

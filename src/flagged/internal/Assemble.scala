@@ -40,10 +40,10 @@ object Assemble:
       typeLabel: String,
       caseLabels: List[String],
       values: List[Any],
-      perCase: List[TargetAnnots]
+      perCase: IndexedSeq[TargetAnnots]
   ): Parser[Any] =
     val names = caseLabels.zipWithIndex.map { (l, i) =>
-      perCase.lift(i).flatMap(_.name).getOrElse(kebab(l))
+      perCase(i).name.getOrElse(kebab(l))
     }
     val joined   = names.mkString("|")
     val typeName = if joined.length <= 40 then joined else kebab(typeLabel)
@@ -74,7 +74,7 @@ object Assemble:
 
   def sum(caseLabels: List[String], annots: Annots.Sum[?], entries: List[SubEntry]): Command =
     val cases = entries.zipWithIndex.map { (e, i) =>
-      val anns = annots.perCase.lift(i).getOrElse(TargetAnnots.empty)
+      val anns = annots.perCase(i)
       val help = anns.help.getOrElse("")
       val cmd  = e match
         case SubEntry.Leaf(v) => Command.leaf(v, help)
@@ -110,7 +110,7 @@ object Assemble:
     val posKinds = mutable.ListBuffer.empty[(String, String)]
 
     for i <- 0 until n do
-      val anns                       = annots.perField.lift(i).getOrElse(FieldAnnots.empty)
+      val anns                       = annots.perField(i)
       val label                      = labels(i)
       val long                       = anns.name.getOrElse(kebab(label))
       val help                       = anns.help.getOrElse("")

@@ -86,7 +86,7 @@ class MetaSuite extends munit.FunSuite:
     assertEquals(a.onType, TargetAnnots(None, Some("a greeter")))
     assertEquals(
       a.perField,
-      List(
+      Vector(
         FieldAnnots(None, Some('n'), Some("who"), positional = false),
         FieldAnnots.empty
       )
@@ -98,7 +98,7 @@ class MetaSuite extends munit.FunSuite:
     assertEquals(a.onType, TargetAnnots(None, Some("A tiny git-like tool")))
     assertEquals(
       a.perCase.map(_.help),
-      List(
+      Vector(
         Some("Clone a repository"),
         Some("Manage remotes"),
         Some("Show status")
@@ -116,6 +116,6 @@ class MetaSuite extends munit.FunSuite:
     assertEquals(oldAnnots.onType, TargetAnnots.empty)
     assertEquals(
       oldAnnots.perField,
-      List(FieldAnnots(None, Some('x'), None, positional = false))
+      Vector(FieldAnnots(None, Some('x'), None, positional = false))
     )
   }
