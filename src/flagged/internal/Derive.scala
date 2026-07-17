@@ -110,28 +110,23 @@ object Derive:
         p
       case _ => summonInline[Parser[F]] // fails with Parser's missing-instance guidance
 
-  /** Compile-time half of the shape x annotation matrix, for statically known shapes.
-    *
-    * Dispatch is by `=:=` evidence search rather than `inline erasedValue[S] match`:
-    * empirically (3.8.3) a type-test match with a wildcard default also reduces for
-    * abstract `S` — the inliner skips cases it cannot prove — but that leniency goes
-    * beyond the documented reduction rules (conforms / provably disjoint / error),
-    * whereas implicit-search failure falling to the next `summonFrom` case is
-    * specified behavior.
+  /** Compile-time half of the shape x annotation matrix, for statically known shapes. An abstract
+    * `S` (shape-erased instance) matches none of the cases and falls to the wildcard: the inliner
+    * skips unprovable type tests as long as a default remains reachable.
     */
   inline def checkShape[S <: Parser.Shape, Anns](inline optional: Boolean): Unit =
-    summonFrom:
-      case _: (S =:= Parser.Shape.Repeated) =>
+    inline erasedValue[S] match
+      case _: Parser.Shape.Repeated =>
         inline if optional then
           error("Option of a repeated Parser is not supported: the plain type is empty when absent")
         else ()
-      case _: (S =:= Parser.Shape.Trailing) =>
+      case _: Parser.Shape.Trailing =>
         inline if hasAnn[flagged.positional, Anns] then
           error("@positional cannot be combined with a trailing field")
         else inline if hasAnn[flagged.short, Anns] then
           error("@short cannot be combined with a trailing field")
         else ()
-      case _: (S =:= Parser.Shape.Command) =>
+      case _: Parser.Shape.Command =>
         inline if hasAnn[flagged.positional, Anns] then
           error("@positional cannot be combined with a command-shaped Parser")
         else ()
