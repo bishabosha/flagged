@@ -110,7 +110,15 @@ object Derive:
         p
       case _ => summonInline[Parser[F]] // fails with Parser's missing-instance guidance
 
-  /** Compile-time half of the shape x annotation matrix, for statically known shapes. */
+  /** Compile-time half of the shape x annotation matrix, for statically known shapes.
+    *
+    * Dispatch is by `=:=` evidence search rather than `inline erasedValue[S] match`:
+    * empirically (3.8.3) a type-test match with a wildcard default also reduces for
+    * abstract `S` — the inliner skips cases it cannot prove — but that leniency goes
+    * beyond the documented reduction rules (conforms / provably disjoint / error),
+    * whereas implicit-search failure falling to the next `summonFrom` case is
+    * specified behavior.
+    */
   inline def checkShape[S <: Parser.Shape, Anns](inline optional: Boolean): Unit =
     summonFrom:
       case _: (S =:= Parser.Shape.Repeated) =>
