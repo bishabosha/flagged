@@ -32,7 +32,7 @@ object Derive:
         )
         val cmd = Assemble.product(
           labelsOf[m.MirroredElemLabels],
-          fieldsOf[m.MirroredElemTypes, am.MirroredAnnotations],
+          fieldsOf[m.MirroredElemTypes, am.MirroredAnnotations, m.MirroredElemLabels],
           Defaults.derived[A],
           annots,
           arr => steps.result.Result.Ok(m.fromProduct(Tuple.fromArray(arr)))
@@ -66,14 +66,14 @@ object Derive:
     * instances, see [[Parser.Aux]]) are rejected here, at compile time. Shape-erased instances fall
     * back to construction-time validation.
     */
-  inline def fieldsOf[Types <: Tuple, Slots <: Tuple]: List[(Parser[?], Boolean)] =
-    fieldsRec[Types, Slots](seenTrailing = false, seenRepeatedPos = false)
+  inline def fieldsOf[Types <: Tuple, Slots <: Tuple, Labels <: Tuple]: List[(Parser[?], Boolean)] =
+    fieldsRec[Types, Slots, Labels, Nothing, Nothing](seenTrailing = false, seenRepeatedPos = false)
 
   /** The field walk, folding cross-field compile-time state: shapes that are statically known
     * participate in the at-most-one-trailing and repeated-positional-last rules here; shape-erased
     * fields update nothing and are caught by the construction-time backstop.
     */
-  inline def fieldsRec[Types <: Tuple, Slots <: Tuple](
+  inline def fieldsRec[Types <: Tuple, Slots <: Tuple, Labels <: Tuple, Shorts, Longs](
       inline seenTrailing: Boolean,
       inline seenRepeatedPos: Boolean
   ): List[(Parser[?], Boolean)] =
@@ -82,20 +82,87 @@ object Derive:
       case _: (f *: ft)  =>
         inline erasedValue[Slots] match
           case _: (a *: at) =>
-            inline if seenTrailing then
-              inline if staticShapeIs[f, Parser.Shape.Trailing] then
-                error("only one trailing field is supported per command")
-              else ()
-            else ()
-            inline if seenRepeatedPos then
-              inline if hasAnn[flagged.positional, a] then
-                error("a repeated positional must be the last positional field")
-              else ()
-            else ()
-            fieldOf[f, a] :: fieldsRec[ft, at](
-              seenTrailing = seenTrailing || staticShapeIs[f, Parser.Shape.Trailing],
-              seenRepeatedPos = seenRepeatedPos || isRepeatedPositional[f, a]
-            )
+            inline erasedValue[Labels] match
+              case _: (l *: lt) =>
+                inline if seenTrailing then
+                  inline if staticShapeIs[f, Parser.Shape.Trailing] then
+                    error("only one trailing field is supported per command")
+                  else ()
+                else ()
+                inline if seenRepeatedPos then
+                  inline if hasAnn[flagged.positional, a] then
+                    error("a repeated positional must be the last positional field")
+                  else ()
+                else ()
+                // duplicate-name detection by folding known names into union types
+                // and testing membership as subtyping; only fields that surely
+                // become named options fold, and only names known exactly (an
+                // @name constant, or a label that is already kebab-shaped)
+                inline if staticNamedOption[f] then
+                  inline if hasAnn[flagged.positional, a] then
+                    fieldOf[f, a] :: fieldsRec[ft, at, lt, Shorts, Longs](
+                      seenTrailing = seenTrailing,
+                      seenRepeatedPos = seenRepeatedPos || isRepeatedPositional[f, a]
+                    )
+                  else
+                    checkNewShort[a, Shorts]
+                    checkNewLong[a, l, Longs]
+                    fieldOf[f, a] :: fieldsRec[
+                      ft,
+                      at,
+                      lt,
+                      Shorts | ShortIn[a],
+                      Longs | EffLong[a, l]
+                    ](
+                      seenTrailing = seenTrailing,
+                      seenRepeatedPos = seenRepeatedPos
+                    )
+                else
+                  fieldOf[f, a] :: fieldsRec[ft, at, lt, Shorts, Longs](
+                    seenTrailing = seenTrailing || staticShapeIs[f, Parser.Shape.Trailing],
+                    seenRepeatedPos = seenRepeatedPos || isRepeatedPositional[f, a]
+                  )
+
+  /** The `@short` character claimed by the slot, or `Nothing`. */
+  type ShortIn[Anns] = Anns match
+    case Ann[flagged.short, args, ?] *: _ => Tuple.Head[args & NonEmptyTuple]
+    case _ *: t                           => ShortIn[t]
+    case EmptyTuple                       => Nothing
+
+  /** The long name the field claims when written as a constant (`@name`); `Nothing` for
+    * label-derived names, which involve kebab-casing and are checked at construction instead.
+    */
+  type EffLong[Anns, L] = Anns match
+    case Ann[flagged.name, args, ?] *: _ => Tuple.Head[args & NonEmptyTuple]
+    case _ *: t                          => EffLong[t, L]
+    case EmptyTuple                      => Nothing
+
+  /** Whether the field will certainly be a named option (statically value-ish shape). */
+  transparent inline def staticNamedOption[F]: Boolean =
+    summonFrom:
+      case p: Parser[F] =>
+        inline erasedValue[p.ShapeT] match
+          case _: Parser.Shape.Value    => true
+          case _: Parser.Shape.Flag     => true
+          case _: Parser.Shape.Repeated => true
+          case _                        => false
+      case _ => false
+
+  inline def checkNewShort[Anns, Shorts]: Unit =
+    inline if hasAnn[flagged.short, Anns] then
+      summonFrom:
+        case _: (ShortIn[Anns] <:< Shorts) => error("duplicate short option")
+        case _                             => ()
+    else ()
+
+  inline def checkNewLong[Anns, L, Longs]: Unit =
+    inline if longKnown[Anns, L] then
+      summonFrom:
+        case _: (EffLong[Anns, L] <:< Longs) => error("duplicate option name")
+        case _                               => ()
+    else ()
+
+  transparent inline def longKnown[Anns, L]: Boolean = hasAnn[flagged.name, Anns]
 
   /** Whether `F`'s parser is statically known to have shape `S` (false when the instance is
     * shape-erased or missing — those fall to runtime validation).

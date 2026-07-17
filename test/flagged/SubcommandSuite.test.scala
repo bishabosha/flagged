@@ -172,7 +172,9 @@ class SubcommandSuite extends munit.FunSuite:
   }
 
   test("structural misconfiguration reported when the parser is constructed") {
-    case class Dup(@name("x") a: Int = 0, @name("x") b: Int = 0)
+    // a label-derived name collides only after kebab-casing, which is value-level:
+    // this stays a construction-time error (constant @name collisions are static now)
+    case class Dup(maxRetries: Int = 0, @name("max-retries") b: Int = 0)
     val e = intercept[IllegalArgumentException](Parser.Command.derived[Dup])
-    assert(e.getMessage.contains("duplicate option name '--x'"), e.getMessage)
+    assert(e.getMessage.contains("duplicate option name '--max-retries'"), e.getMessage)
   }

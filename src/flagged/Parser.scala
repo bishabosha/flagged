@@ -189,9 +189,6 @@ object Parser:
     /** A full command grammar: named options, positionals, subcommands, splices. */
     case Command[T](impl: flagged.internal.Command, prog: String) extends Schema[T]
 
-  /** Build from a runtime schema value; the resulting parser is shape-erased. */
-  def fromSchema[A](s: Schema[A]): Parser[A] = mk[A, Shape](s)
-
   /** Build a single-value parser from a name and a parse function. */
   def of[A](name: String)(f: String => Result[A, String]): Aux[A, Shape.Value] =
     mk(Schema.Value(name, f))

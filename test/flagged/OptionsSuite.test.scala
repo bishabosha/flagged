@@ -274,6 +274,21 @@ class OptionsSuite extends munit.FunSuite:
     assert(e2.contains("a repeated positional must be the last positional field"), e2)
   }
 
+  test("duplicate constant names are compile errors (union-membership as subtyping)") {
+    val e1 = compileErrors(
+      "case class C(@short('v') a: Int = 0, @short('v') b: Int = 0) derives Parser.Command"
+    )
+    assert(e1.contains("duplicate short option"), e1)
+    val e2 = compileErrors(
+      "case class C(@name(\"x\") a: Int = 0, @name(\"x\") b: Int = 0) derives Parser.Command"
+    )
+    assert(e2.contains("duplicate option name"), e2)
+    // an option and a positional may share a name: separate namespaces
+    case class Ok2(@positional input: String = "-", @name("input") o: Int = 0)
+        derives Parser.Command
+    assertEquals(ok(Flagged.parse[Ok2](Seq("--input", "3", "f"))), Ok2("f", 3))
+  }
+
   test("a Trailing field collects the raw arguments after --") {
     case class Exec(@short('v') verbose: Boolean = false, rest: Trailing = Trailing(Nil))
         derives Parser.Command
