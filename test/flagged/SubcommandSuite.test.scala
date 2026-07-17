@@ -1,7 +1,7 @@
 package flagged
 
 @help("A tiny git-like tool")
-enum Git derives Parser.Command:
+enum Git derives Parser.CommandGroup:
   @help("Clone a repository")
   case Clone(
       @positional @help("Repository URL") repo: String,
@@ -13,13 +13,13 @@ enum Git derives Parser.Command:
   @help("Show status")
   case Status
 
-enum RemoteAction derives Parser.Command:
+enum RemoteAction derives Parser.CommandGroup:
   @help("Add a remote")
   case Add(@positional name: String, @positional url: String)
   @help("Remove a remote")
   case Remove(@positional name: String)
 
-enum SimpleCmd derives Parser.Command:
+enum SimpleCmd derives Parser.CommandGroup:
   case Start
   case Stop
 
@@ -35,7 +35,7 @@ case class Tool(
     action: Option[SimpleAction] = None
 ) derives Parser.Command
 
-enum SimpleAction derives Parser.Command:
+enum SimpleAction derives Parser.CommandGroup:
   case Run(@short('j') jobs: Int = 1)
   case Clean
 
@@ -136,7 +136,7 @@ class SubcommandSuite extends munit.FunSuite:
   }
 
   test("subcommand result via sealed trait") {
-    sealed trait Op derives Parser.Command
+    sealed trait Op derives Parser.CommandGroup
     object Op:
       case class Add(@positional x: Int, @positional y: Int) extends Op
       case object Noop                                       extends Op
@@ -149,11 +149,11 @@ class SubcommandSuite extends munit.FunSuite:
 
   test("derivation reuses a Parser given in scope for a subcommand field") {
     // hand-modified parser for RemoteAction: every command name gets an "x-" prefix
-    val base    = Parser.Command.derived[RemoteAction].parser.command
+    val base    = Parser.CommandGroup.derived[RemoteAction].parser.command
     val renamed =
       base.sub.get.copy(cases = base.sub.get.cases.map(c => c.copy(name = s"x-${c.name}")))
-    given custom: Parser[RemoteAction] =
-      Parser.make(base.copy(sub = Some(renamed)), "remote-action")
+    given custom: Parser.Aux[RemoteAction, Parser.Shape.CommandGroup] =
+      Parser.makeGroup(base.copy(sub = Some(renamed)), "remote-action")
 
     case class Wrap(action: RemoteAction) derives Parser.Command
     // the derived Wrap parser must embed the custom instance, not re-derive structurally

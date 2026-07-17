@@ -93,7 +93,7 @@ repeats:
 | `x: A = default` | optional, default shown in help |
 | `x: Option[A]` | optional, `None` when absent |
 | `x: A` (repeated-schema `Parser[A]`, e.g. `List`/`Seq`/`Vector`) | repeatable |
-| `x: E` (enum `E derives Parser.Command`) | nested subcommands |
+| `x: E` (enum `E derives Parser.CommandGroup`) | nested subcommands |
 | `x: P` (case class `P derives Parser.Command`) | options group spliced into this command |
 | `x: Trailing` (or any trailing-schema `Parser[A]`) | the raw arguments after `--`, verbatim |
 | `@positional x: A` | positional argument (same rules) |
@@ -123,17 +123,20 @@ Fine-tune with annotations:
 | `@help("...")` | help text for fields, cases, and top-level types |
 | `@positional` | positional argument instead of named option |
 
-A field type without a `Parser` given is a compile error, as are annotation
-combinations that are visible in types: `@positional` with `@short` always, and
-annotation × shape conflicts (`Option` of a repeated parser, `@positional` on a
-trailing or command field, ...) whenever the field's instance carries its shape in
-its type — which all built-in instances, unascribed `Parser.of`/`flag`/`repeated`/
-`trailing` definitions, and everything derived via the `Parser.Command` /
-`Parser.Enumerated` witnesses do. Only a given explicitly ascribed to plain
-`Parser[X]` is shape-erased and falls back to the same checks at parser
-construction, alongside the inherently value-level rules — duplicate names, a second
-`-h`, positional ordering — reported as a descriptive `IllegalArgumentException`
-before any arguments are parsed.
+The grammar is validated at compile time: a field type without a `Parser` given,
+conflicting or ineffective annotations (`@positional` with `@short`, `@short` on a
+subcommand field, ...), shape conflicts (`Option` of a repeated parser or of a
+spliced group, a bare flag in `Option`, ...), cross-field rules (two subcommand or
+trailing fields, positionals mixed with subcommands, a positional after a repeated
+one), and duplicate constant names (`@short`/`@name`) are all compile errors. Every
+field's instance must carry its shape in its type — all built-in instances, the
+`Parser.of`/`flag`/`repeated`/`trailing` constructors, and the `Parser.Command` /
+`Parser.CommandGroup` / `Parser.Enumerated` witnesses do this; a given must be
+ascribed to `Parser.Aux[...]`, not plain `Parser[X]`, or derivation rejects it.
+What remains at parser construction is the inherently value-level residue:
+label-derived (kebab-cased) name collisions, splice-content rules, and
+required-before-optional positional ordering, reported as a descriptive
+`IllegalArgumentException` before any arguments are parsed.
 
 ## Subcommands
 
@@ -144,7 +147,7 @@ another level:
 ```scala
 @name("gitto")
 @help("gitto — a tiny version control tool")
-enum Gitto derives Parser.Command:
+enum Gitto derives Parser.CommandGroup:
   @help("Clone a repository into a new directory")
   case Clone(
       @positional @help("Repository URL") repo: String,
@@ -156,7 +159,7 @@ enum Gitto derives Parser.Command:
   @help("Show the working tree status")
   case Status(@short('s') short: Boolean = false)
 
-enum RemoteAction derives Parser.Command:
+enum RemoteAction derives Parser.CommandGroup:
   case Add(@positional name: String, @positional url: String)
   case Remove(@positional name: String)
 
@@ -190,7 +193,7 @@ Run 'gitto remote <command> --help' for more information on a command.
 Things to know:
 
 - Derivation is compositional and stops at enum boundaries: each enum in the command
-  tree derives its own `Parser` (note `derives Parser.Command` on `RemoteAction` above), and
+  tree derives its own `Parser` (note `derives Parser.CommandGroup` on `RemoteAction` above), and
   the parent embeds that instance. Forgetting one is a compile error that says which
   enum needs it. This also means any level can be supplied or customized
   independently — a hand-built `Parser` given for a nested enum is used as-is.
@@ -198,8 +201,8 @@ Things to know:
 - An `Option[E]`-typed command field makes the command optional; a field default
   (`action: Action = Action.List`) works too.
 - An enum field is commands or a value depending on which instance its type provides:
-  `derives Parser.Command` → subcommands, `derives Parser.Enumerated` (parameterless enums
-  only) → a value matched by case name (`--color red`).
+  `derives Parser.CommandGroup` → subcommands, `derives Parser.Enumerated`
+  (parameterless enums only) → a value matched by case name (`--color red`).
 
 ## Scripts and other entry points
 

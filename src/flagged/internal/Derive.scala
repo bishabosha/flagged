@@ -18,11 +18,6 @@ object Derive:
 
   // ---- parsers ----------------------------------------------------------------
 
-  inline def of[A](using m: Mirror.Of[A]): Parser.Aux[A, Parser.Shape.Command] =
-    inline m match
-      case p: Mirror.ProductOf[A] => product[A](using p)
-      case s: Mirror.SumOf[A]     => sum[A](using s)
-
   inline def product[A](using m: Mirror.ProductOf[A]): Parser.Aux[A, Parser.Shape.Command] =
     summonFrom:
       case am: AnnotMirror.Product[A] =>
@@ -39,10 +34,10 @@ object Derive:
         )
         Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
-  inline def sum[A](using m: Mirror.SumOf[A]): Parser.Aux[A, Parser.Shape.Command] =
+  inline def sum[A](using m: Mirror.SumOf[A]): Parser.Aux[A, Parser.Shape.CommandGroup] =
     val annots = Annots.sumAnnots[A]
     val cmd = Assemble.sum(labelsOf[m.MirroredElemLabels], annots, entriesOf[m.MirroredElemTypes])
-    Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
+    Parser.makeGroup[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
   /** Value parser for an enum whose cases are all parameterless, for `Parser.Enumerated`. */
   inline def enumParser[A](using m: Mirror.SumOf[A]): Parser.Aux[A, Parser.Shape.Value] =
@@ -67,18 +62,26 @@ object Derive:
     * back to construction-time validation.
     */
   inline def fieldsOf[Types <: Tuple, Slots <: Tuple, Labels <: Tuple]: List[(Parser[?], Boolean)] =
-    fieldsRec[Types, Slots, Labels, Nothing, Nothing](seenTrailing = false, seenRepeatedPos = false)
+    fieldsRec[Types, Slots, Labels, Nothing, Nothing](
+      seenTrailing = false,
+      seenRepeatedPos = false,
+      seenGroup = false,
+      seenPositional = false
+    )
 
   /** The field walk. Each field costs exactly one implicit search (the instance selection); every
     * compile-time question — annotation combinations, the shape of the found instance,
     * duplicate-name membership — is answered by inline matches over types already at hand.
-    * Cross-field state travels as inline booleans (trailing/repeated-positional) and as union types
-    * (claimed constant names, membership tested as subtyping). Shape-erased instances answer no
-    * shape question and fall through to the construction-time backstop in `Assemble.resolveField`.
+    * Cross-field state travels as inline booleans and as union types (claimed constant names,
+    * membership tested as subtyping). A field whose instance's shape cannot be determined
+    * statically is rejected: ascribe custom givens to `Parser.Aux[...]` (or build them without an
+    * ascription).
     */
   inline def fieldsRec[Types <: Tuple, Slots <: Tuple, Labels <: Tuple, Shorts, Longs](
       inline seenTrailing: Boolean,
-      inline seenRepeatedPos: Boolean
+      inline seenRepeatedPos: Boolean,
+      inline seenGroup: Boolean,
+      inline seenPositional: Boolean
   ): List[(Parser[?], Boolean)] =
     inline erasedValue[Types] match
       case _: EmptyTuple => Nil
@@ -96,6 +99,10 @@ object Derive:
                     error("@short cannot be combined with @positional")
                   else inline if seenRepeatedPos then
                     error("a repeated positional must be the last positional field")
+                  else inline if seenGroup then
+                    error(
+                      "mixing positional fields with a subcommand field is ambiguous and not supported"
+                    )
                   else ()
                 else inline if hasAnnApplied[Ann[flagged.name, "help" *: EmptyTuple, ?], a] then
                   error("option name 'help' is reserved")
@@ -105,13 +112,17 @@ object Derive:
                     step[e, ft, at, lt, a, l, Shorts, Longs](
                       optional = true,
                       seenTrailing = seenTrailing,
-                      seenRepeatedPos = seenRepeatedPos
+                      seenRepeatedPos = seenRepeatedPos,
+                      seenGroup = seenGroup,
+                      seenPositional = seenPositional
                     )
                   case _ =>
                     step[f, ft, at, lt, a, l, Shorts, Longs](
                       optional = false,
                       seenTrailing = seenTrailing,
-                      seenRepeatedPos = seenRepeatedPos
+                      seenRepeatedPos = seenRepeatedPos,
+                      seenGroup = seenGroup,
+                      seenPositional = seenPositional
                     )
 
   /** One field: select the instance (the field's single implicit search), dispatch on its
@@ -120,22 +131,45 @@ object Derive:
   inline def step[E, Ft <: Tuple, At <: Tuple, Lt <: Tuple, Anns, L, Shorts, Longs](
       inline optional: Boolean,
       inline seenTrailing: Boolean,
-      inline seenRepeatedPos: Boolean
+      inline seenRepeatedPos: Boolean,
+      inline seenGroup: Boolean,
+      inline seenPositional: Boolean
   ): List[(Parser[?], Boolean)] =
     summonFrom:
       case p: Parser[E] =>
         inline erasedValue[p.ShapeT] match
           case _: Parser.Shape.ValuedFlag =>
-            named[Ft, At, Lt, Anns, L, Shorts, Longs](p, optional, seenTrailing, seenRepeatedPos)
+            named[Ft, At, Lt, Anns, L, Shorts, Longs](
+              p,
+              optional,
+              seenTrailing,
+              seenRepeatedPos,
+              seenGroup,
+              seenPositional
+            )
           case _: Parser.Shape.Flag =>
             inline if optional then
               error("a flag Parser without a value parser cannot be used inside Option")
             else inline if hasAnn[flagged.positional, Anns] then
               error("a flag Parser without a value parser cannot be used positionally")
             else
-              named[Ft, At, Lt, Anns, L, Shorts, Longs](p, optional, seenTrailing, seenRepeatedPos)
+              named[Ft, At, Lt, Anns, L, Shorts, Longs](
+                p,
+                optional,
+                seenTrailing,
+                seenRepeatedPos,
+                seenGroup,
+                seenPositional
+              )
           case _: Parser.Shape.Value =>
-            named[Ft, At, Lt, Anns, L, Shorts, Longs](p, optional, seenTrailing, seenRepeatedPos)
+            named[Ft, At, Lt, Anns, L, Shorts, Longs](
+              p,
+              optional,
+              seenTrailing,
+              seenRepeatedPos,
+              seenGroup,
+              seenPositional
+            )
           case _: Parser.Shape.Repeated =>
             inline if optional then
               error(
@@ -144,33 +178,78 @@ object Derive:
             else inline if hasAnn[flagged.positional, Anns] then
               (p, optional) :: fieldsRec[Ft, At, Lt, Shorts, Longs](
                 seenTrailing = seenTrailing,
-                seenRepeatedPos = true
+                seenRepeatedPos = true,
+                seenGroup = seenGroup,
+                seenPositional = true
               )
             else
-              named[Ft, At, Lt, Anns, L, Shorts, Longs](p, optional, seenTrailing, seenRepeatedPos)
+              named[Ft, At, Lt, Anns, L, Shorts, Longs](
+                p,
+                optional,
+                seenTrailing,
+                seenRepeatedPos,
+                seenGroup,
+                seenPositional
+              )
           case _: Parser.Shape.Trailing =>
             inline if seenTrailing then error("only one trailing field is supported per command")
             else inline if hasAnn[flagged.positional, Anns] then
               error("@positional cannot be combined with a trailing field")
             else inline if hasAnn[flagged.short, Anns] then
               error("@short cannot be combined with a trailing field")
+            else inline if hasAnn[flagged.name, Anns] then
+              error("@name has no effect on a trailing field")
             else
               (p, optional) :: fieldsRec[Ft, At, Lt, Shorts, Longs](
                 seenTrailing = true,
-                seenRepeatedPos = seenRepeatedPos
+                seenRepeatedPos = seenRepeatedPos,
+                seenGroup = seenGroup,
+                seenPositional = seenPositional
+              )
+          case _: Parser.Shape.CommandGroup =>
+            inline if hasAnn[flagged.positional, Anns] then
+              error("@positional cannot be combined with a subcommand field")
+            else inline if hasAnn[flagged.short, Anns] then
+              error("@short has no effect on a subcommand field")
+            else inline if hasAnn[flagged.name, Anns] then
+              error("@name has no effect on a subcommand field (command names come from the cases)")
+            else inline if hasAnn[flagged.help, Anns] then
+              error("@help has no effect on a subcommand field (put it on the enum or its cases)")
+            else inline if seenGroup then
+              error("only one subcommand field is supported per command")
+            else inline if seenPositional then
+              error(
+                "mixing positional fields with a subcommand field is ambiguous and not supported"
+              )
+            else
+              (p, optional) :: fieldsRec[Ft, At, Lt, Shorts, Longs](
+                seenTrailing = seenTrailing,
+                seenRepeatedPos = seenRepeatedPos,
+                seenGroup = true,
+                seenPositional = seenPositional
               )
           case _: Parser.Shape.Command =>
             inline if hasAnn[flagged.positional, Anns] then
               error("@positional cannot be combined with a command-shaped Parser")
+            else inline if optional then error("Option of a spliced options group is not supported")
+            else inline if hasAnn[flagged.short, Anns] then
+              error("@short has no effect on a spliced options group")
+            else inline if hasAnn[flagged.name, Anns] then
+              error(
+                "@name has no effect on a spliced options group (its options keep their own names)"
+              )
+            else inline if hasAnn[flagged.help, Anns] then
+              error("@help has no effect on a spliced options group")
             else
               (p, optional) :: fieldsRec[Ft, At, Lt, Shorts, Longs](
                 seenTrailing = seenTrailing,
-                seenRepeatedPos = seenRepeatedPos
+                seenRepeatedPos = seenRepeatedPos,
+                seenGroup = seenGroup,
+                seenPositional = seenPositional
               )
-          case _ => // shape-erased: construction-time backstop
-            (p, optional) :: fieldsRec[Ft, At, Lt, Shorts, Longs](
-              seenTrailing = seenTrailing,
-              seenRepeatedPos = seenRepeatedPos
+          case _ =>
+            error(
+              "the shape of this field's Parser is not statically known: ascribe the given to Parser.Aux[...] or build it with the Parser constructors / derivation witnesses"
             )
       case _ =>
         // fails with Parser's missing-instance guidance
@@ -183,19 +262,25 @@ object Derive:
       p: Parser[?],
       inline optional: Boolean,
       inline seenTrailing: Boolean,
-      inline seenRepeatedPos: Boolean
+      inline seenRepeatedPos: Boolean,
+      inline seenGroup: Boolean,
+      inline seenPositional: Boolean
   ): List[(Parser[?], Boolean)] =
     inline if hasAnn[flagged.positional, Anns] then
       (p, optional) :: fieldsRec[Ft, At, Lt, Shorts, Longs](
         seenTrailing = seenTrailing,
-        seenRepeatedPos = seenRepeatedPos
+        seenRepeatedPos = seenRepeatedPos,
+        seenGroup = seenGroup,
+        seenPositional = true
       )
     else
       checkNewShort[Anns, Shorts]
       checkNewLong[Anns, L, Longs]
       (p, optional) :: fieldsRec[Ft, At, Lt, Shorts | ShortIn[Anns], Longs | EffLong[Anns, L]](
         seenTrailing = seenTrailing,
-        seenRepeatedPos = seenRepeatedPos
+        seenRepeatedPos = seenRepeatedPos,
+        seenGroup = seenGroup,
+        seenPositional = seenPositional
       )
 
   /** The `@short` character claimed by the slot, or `Nothing`. */

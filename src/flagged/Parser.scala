@@ -39,7 +39,7 @@ object Trailing:
   */
 @scala.annotation.implicitNotFound(
   "No given Parser[${A}] found.\n" +
-    "For a subcommand enum or a spliceable options group, add `derives Parser.Command` to its definition;\n" +
+    "For a subcommand enum add `derives Parser.CommandGroup`; for a spliceable options group add `derives Parser.Command`;\n" +
     "for an enum parsed by case name, add `derives Parser.Enumerated`;\n" +
     "for other value types provide one with Parser.of / Parser.flag / Parser.repeated."
 )
@@ -154,7 +154,12 @@ object Parser:
     sealed trait ValuedFlag extends Flag
     sealed trait Repeated   extends Shape
     sealed trait Trailing   extends Shape
-    sealed trait Command    extends Shape
+
+    /** A single command's grammar (a product: options, positionals, trailing). */
+    sealed trait Command extends Shape
+
+    /** A group of subcommands (a sum); usable wherever a command is. */
+    sealed trait CommandGroup extends Command
 
   /** A parser whose shape is visible in its type. */
   type Aux[A, S <: Shape] = Parser[A] { type ShapeT = S }
@@ -224,16 +229,28 @@ object Parser:
   def make[A](cmd: flagged.internal.Command, prog: String): Aux[A, Shape.Command] =
     mk(Schema.Command(cmd, prog))
 
+  /** Called by derivation for sums. Not intended for direct use. */
+  def makeGroup[A](cmd: flagged.internal.Command, prog: String): Aux[A, Shape.CommandGroup] =
+    mk(Schema.Command(cmd, prog))
+
+  /** Derivation witness for a single command: `case class Config(...) derives Parser.Command`. As a
+    * field of another command, a `Command`-shaped parser is a spliced options group.
+    */
   final class Command[A](val parser: Parser.Aux[A, Shape.Command])
   object Command:
-    /** Derivation entry point for `derives Parser.Command` clauses; also usable directly:
-      * `given Parser.Command[Config] = Parser.Command.derived`.
-      *
-      * Derivation is `Mirror`-based and compositional: fields use the `Parser` given for their type
-      * — command-shaped instances become subcommands (sums) or spliced option groups (products);
-      * value-shaped instances parse as option values.
-      */
-    inline def derived[A](using m: Mirror.Of[A]): Command[A] = new Command[A](internal.Derive.of[A])
+    inline def derived[A](using m: Mirror.ProductOf[A]): Command[A] =
+      new Command[A](internal.Derive.product[A])
+
+  /** Derivation witness for a group of subcommands: `enum Cmd derives Parser.CommandGroup`. As a
+    * field of another command, a `CommandGroup`-shaped parser is a set of nested subcommands.
+    *
+    * Derivation is `Mirror`-based and compositional: fields use the `Parser` given for their type,
+    * dispatched on its statically known shape.
+    */
+  final class CommandGroup[A](val parser: Parser.Aux[A, Shape.CommandGroup])
+  object CommandGroup:
+    inline def derived[A](using m: Mirror.SumOf[A]): CommandGroup[A] =
+      new CommandGroup[A](internal.Derive.sum[A])
 
   /** A parser for an enum whose cases are all parameterless, matched by kebab-cased case name,
     * case-insensitively. Usable directly or via `derives Parser.Enumerated`.
@@ -251,7 +268,9 @@ object Parser:
       Parser.Enumerated(enumerated[A])
 
   given fromEnum[A](using e: Parser.Enumerated[A]): Aux[A, Shape.Value]   = e.parser
-  given fromCommand[A](using e: Parser.Command[A]): Aux[A, Shape.Command] = e.parser
+  given fromCommand[A](using c: Parser.Command[A]): Aux[A, Shape.Command] = c.parser
+
+  given fromCommandGroup[A](using g: Parser.CommandGroup[A]): Aux[A, Shape.CommandGroup] = g.parser
 
   given [A](using Parser[A]): Aux[List[A], Shape.Repeated]   = repeated[A, List[A]](l => Ok(l))
   given [A](using Parser[A]): Aux[Vector[A], Shape.Repeated] =

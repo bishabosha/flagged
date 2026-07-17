@@ -82,7 +82,7 @@ class SpliceSuite extends munit.FunSuite:
 
   test("a validated options group keeps its validation when spliced") {
     case class Window(min: Int = 0, max: Int = 100)
-    given Parser[Window] = Parser.Command
+    given Parser.Aux[Window, Parser.Shape.Command] = Parser.Command
       .derived[Window]
       .parser
       .emap(w => if w.min <= w.max then Ok(w) else Err("min must not exceed max"))
@@ -99,10 +99,9 @@ class SpliceSuite extends munit.FunSuite:
     assert(e.getMessage.contains("options group 'logging'"), e.getMessage)
   }
 
-  test("Option of a spliced group is rejected") {
-    case class Bad(logging: Option[LogOpts] = None)
-    val e = intercept[IllegalArgumentException](Parser.Command.derived[Bad])
-    assert(e.getMessage.contains("Option of a spliced options group"), e.getMessage)
+  test("Option of a spliced group is rejected at compile time") {
+    val e = compileErrors("case class Bad(logging: Option[LogOpts] = None) derives Parser.Command")
+    assert(e.contains("Option of a spliced options group"), e)
   }
 
   test("a spliced group with a trailing field is rejected") {
@@ -121,6 +120,6 @@ class SpliceSuite extends munit.FunSuite:
     assert(e.getMessage.contains("cannot contain positional fields"), e.getMessage)
   }
 
-enum Deploy derives Parser.Command:
+enum Deploy derives Parser.CommandGroup:
   case Run(logging: LogOpts = LogOpts())
   case Stop
