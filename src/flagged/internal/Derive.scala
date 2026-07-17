@@ -18,12 +18,12 @@ object Derive:
 
   // ---- parsers ----------------------------------------------------------------
 
-  inline def of[A](using m: Mirror.Of[A]): Parser[A] =
+  inline def of[A](using m: Mirror.Of[A]): Parser.Aux[A, Parser.Shape.Command] =
     inline m match
       case p: Mirror.ProductOf[A] => product[A](using p)
       case s: Mirror.SumOf[A]     => sum[A](using s)
 
-  inline def product[A](using m: Mirror.ProductOf[A]): Parser[A] =
+  inline def product[A](using m: Mirror.ProductOf[A]): Parser.Aux[A, Parser.Shape.Command] =
     summonFrom:
       case am: AnnotMirror.Product[A] =>
         val annots = Annots.makeProduct[A](
@@ -39,13 +39,13 @@ object Derive:
         )
         Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
-  inline def sum[A](using m: Mirror.SumOf[A]): Parser[A] =
+  inline def sum[A](using m: Mirror.SumOf[A]): Parser.Aux[A, Parser.Shape.Command] =
     val annots = Annots.sumAnnots[A]
     val cmd = Assemble.sum(labelsOf[m.MirroredElemLabels], annots, entriesOf[m.MirroredElemTypes])
     Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
   /** Value parser for an enum whose cases are all parameterless, for `Parser.Enumerated`. */
-  inline def enumParser[A](using m: Mirror.SumOf[A]): Parser[A] =
+  inline def enumParser[A](using m: Mirror.SumOf[A]): Parser.Aux[A, Parser.Shape.Value] =
     Assemble
       .enumValueParser(
         constValue[m.MirroredLabel],
@@ -53,7 +53,7 @@ object Derive:
         singletonValues[m.MirroredElemTypes],
         Annots.sumAnnots[A].perCase
       )
-      .asInstanceOf[Parser[A]]
+      .asInstanceOf[Parser.Aux[A, Parser.Shape.Value]]
 
   // ---- fields ---------------------------------------------------------------
 

@@ -229,24 +229,24 @@ object Parser:
     * command-shaped instances become subcommands (sums) or spliced option groups (products);
     * value-shaped instances parse as option values.
     */
-  inline def derived[A](using Mirror.Of[A]): Parser[A] = internal.Derive.of[A]
+  inline def derived[A](using Mirror.Of[A]): Aux[A, Shape.Command] = internal.Derive.of[A]
 
   /** A parser for an enum whose cases are all parameterless, matched by kebab-cased case name,
     * case-insensitively. Usable directly or via `derives Parser.Enumerated`.
     */
-  inline def enumerated[A](using Mirror.SumOf[A]): Parser[A] = internal.Derive.enumParser[A]
+  inline def enumerated[A](using Mirror.SumOf[A]): Aux[A, Shape.Value] =
+    internal.Derive.enumParser[A]
 
   /** Derivation-flavor witness enabling `enum Color derives Parser.Enumerated`: the enum's parser
     * parses *values* by case name instead of becoming subcommands.
     */
-  final class Enumerated[A](val parser: Parser[A])
+  final class Enumerated[A](val parser: Parser.Aux[A, Parser.Shape.Value])
 
   object Enumerated:
     inline def derived[A](using Mirror.SumOf[A]): Parser.Enumerated[A] =
       Parser.Enumerated(enumerated[A])
 
-  given fromEnum[A](using e: Parser.Enumerated[A]): Aux[A, Shape.Value] =
-    e.parser.asInstanceOf[Aux[A, Shape.Value]] // enumerated parsers are built with Parser.of
+  given fromEnum[A](using e: Parser.Enumerated[A]): Aux[A, Shape.Value] = e.parser
 
   given [A](using Parser[A]): Aux[List[A], Shape.Repeated]   = repeated[A, List[A]](l => Ok(l))
   given [A](using Parser[A]): Aux[Vector[A], Shape.Repeated] =
