@@ -246,6 +246,34 @@ class OptionsSuite extends munit.FunSuite:
     assert(e4.contains("@positional cannot be combined with a command-shaped Parser"), e4)
   }
 
+  test("bare flags are rejected statically in Option and positional position") {
+    val e1 = compileErrors("case class C(v: Option[Count] = None) derives Parser.Command")
+    assert(e1.contains("cannot be used inside Option"), e1)
+    val e2 = compileErrors("case class C(@positional v: Count = Count(0)) derives Parser.Command")
+    assert(e2.contains("cannot be used positionally"), e2)
+    // Boolean has the explicit-value form, so Option[Boolean] stays legal
+    case class D(dry: Option[Boolean] = None) derives Parser.Command
+    assertEquals(ok(Flagged.parse[D](Seq("--dry", "true"))), D(Some(true)))
+  }
+
+  test("reserved names are compile errors when given as constants") {
+    val e1 = compileErrors("case class C(@short('h') x: Int = 0) derives Parser.Command")
+    assert(e1.contains("short option 'h' is reserved for help"), e1)
+    val e2 = compileErrors("case class C(@name(\"help\") x: Int = 0) derives Parser.Command")
+    assert(e2.contains("option name 'help' is reserved"), e2)
+  }
+
+  test("cross-field rules with static shapes are compile errors") {
+    val e1 = compileErrors(
+      "case class C(a: Trailing = Trailing(Nil), b: Trailing = Trailing(Nil)) derives Parser.Command"
+    )
+    assert(e1.contains("only one trailing field is supported per command"), e1)
+    val e2 = compileErrors(
+      "case class C(@positional xs: List[Int] = Nil, @positional y: Int = 0) derives Parser.Command"
+    )
+    assert(e2.contains("a repeated positional must be the last positional field"), e2)
+  }
+
   test("a Trailing field collects the raw arguments after --") {
     case class Exec(@short('v') verbose: Boolean = false, rest: Trailing = Trailing(Nil))
         derives Parser.Command

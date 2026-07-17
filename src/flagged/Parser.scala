@@ -145,11 +145,16 @@ object Parser:
   /** Type-level counterpart of [[Schema]]'s cases, carried by [[Parser.Aux]]. */
   sealed trait Shape
   object Shape:
-    sealed trait Value    extends Shape
-    sealed trait Flag     extends Shape
-    sealed trait Repeated extends Shape
-    sealed trait Trailing extends Shape
-    sealed trait Command  extends Shape
+    sealed trait Value extends Shape
+    sealed trait Flag  extends Shape
+
+    /** A flag that also accepts the explicit `--flag=value` form (and is therefore usable
+      * positionally and inside `Option`).
+      */
+    sealed trait ValuedFlag extends Flag
+    sealed trait Repeated   extends Shape
+    sealed trait Trailing   extends Shape
+    sealed trait Command    extends Shape
 
   /** A parser whose shape is visible in its type. */
   type Aux[A, S <: Shape] = Parser[A] { type ShapeT = S }
@@ -203,7 +208,7 @@ object Parser:
   def flag[A](
       fromCount: Int => Result[A, String],
       fromValue: String => Result[A, String]
-  ): Aux[A, Shape.Flag] =
+  ): Aux[A, Shape.ValuedFlag] =
     mk(Schema.Flag(fromCount, Some(fromValue)))
 
   /** Opt `A` into repeated shape: each occurrence is parsed with the element's parser, and the
@@ -272,7 +277,7 @@ object Parser:
   given Aux[BigInt, Shape.Value]     = numeric("integer")(BigInt(_))
   given Aux[BigDecimal, Shape.Value] = numeric("decimal")(BigDecimal(_))
 
-  given Aux[Boolean, Shape.Flag] = flag(n => Ok(n > 0), internal.Runtime.parseBool)
+  given Aux[Boolean, Shape.ValuedFlag] = flag(n => Ok(n > 0), internal.Runtime.parseBool)
 
   given Aux[Char, Shape.Value] = of("char")(s =>
     if s.length == 1 then Ok(s.charAt(0)) else Err(s"'$s' is not a single character")

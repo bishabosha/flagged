@@ -67,11 +67,50 @@ object Derive:
     * back to construction-time validation.
     */
   inline def fieldsOf[Types <: Tuple, Slots <: Tuple]: List[(Parser[?], Boolean)] =
+    fieldsRec[Types, Slots](seenTrailing = false, seenRepeatedPos = false)
+
+  /** The field walk, folding cross-field compile-time state: shapes that are statically known
+    * participate in the at-most-one-trailing and repeated-positional-last rules here; shape-erased
+    * fields update nothing and are caught by the construction-time backstop.
+    */
+  inline def fieldsRec[Types <: Tuple, Slots <: Tuple](
+      inline seenTrailing: Boolean,
+      inline seenRepeatedPos: Boolean
+  ): List[(Parser[?], Boolean)] =
     inline erasedValue[Types] match
       case _: EmptyTuple => Nil
       case _: (f *: ft)  =>
         inline erasedValue[Slots] match
-          case _: (a *: at) => fieldOf[f, a] :: fieldsOf[ft, at]
+          case _: (a *: at) =>
+            inline if seenTrailing then
+              inline if staticShapeIs[f, Parser.Shape.Trailing] then
+                error("only one trailing field is supported per command")
+              else ()
+            else ()
+            inline if seenRepeatedPos then
+              inline if hasAnn[flagged.positional, a] then
+                error("a repeated positional must be the last positional field")
+              else ()
+            else ()
+            fieldOf[f, a] :: fieldsRec[ft, at](
+              seenTrailing = seenTrailing || staticShapeIs[f, Parser.Shape.Trailing],
+              seenRepeatedPos = seenRepeatedPos || isRepeatedPositional[f, a]
+            )
+
+  /** Whether `F`'s parser is statically known to have shape `S` (false when the instance is
+    * shape-erased or missing — those fall to runtime validation).
+    */
+  transparent inline def staticShapeIs[F, S <: Parser.Shape]: Boolean =
+    summonFrom:
+      case p: Parser[F] =>
+        inline erasedValue[p.ShapeT] match
+          case _: S => true
+          case _    => false
+      case _ => false
+
+  transparent inline def isRepeatedPositional[F, Anns]: Boolean =
+    inline if hasAnn[flagged.positional, Anns] then staticShapeIs[F, Parser.Shape.Repeated]
+    else false
 
   /** Whether annotation slot `Anns` contains an `A` — a compile-time constant. */
   transparent inline def hasAnn[A <: scala.annotation.Annotation, Anns]: Boolean =
@@ -80,10 +119,23 @@ object Derive:
       case _: (Ann[A, ?, ?] *: _) => true
       case _: (_ *: t)            => hasAnn[A, t]
 
+  /** Whether the slot contains a specific annotation *application*, e.g. `@short('h')` — decidable
+    * because `Ann` is invariant with constant arguments.
+    */
+  transparent inline def hasAnnApplied[Applied, Anns]: Boolean =
+    inline erasedValue[Anns] match
+      case _: EmptyTuple     => false
+      case _: (Applied *: _) => true
+      case _: (_ *: t)       => hasAnnApplied[Applied, t]
+
   inline def fieldOf[F, Anns]: (Parser[?], Boolean) =
-    inline if hasAnn[flagged.positional, Anns] then
+    inline if hasAnnApplied[Ann[flagged.short, 'h' *: EmptyTuple, ?], Anns] then
+      error("short option 'h' is reserved for help")
+    else inline if hasAnn[flagged.positional, Anns] then
       inline if hasAnn[flagged.short, Anns] then error("@short cannot be combined with @positional")
       else fieldOfChecked[F, Anns]
+    else inline if hasAnnApplied[Ann[flagged.name, "help" *: EmptyTuple, ?], Anns] then
+      error("option name 'help' is reserved")
     else fieldOfChecked[F, Anns]
 
   // Instance selection is a single plain summon, so normal given priority is
@@ -117,6 +169,13 @@ object Derive:
     */
   inline def checkShape[S <: Parser.Shape, Anns](inline optional: Boolean): Unit =
     inline erasedValue[S] match
+      case _: Parser.Shape.ValuedFlag => () // usable everywhere: has the explicit-value form
+      case _: Parser.Shape.Flag       =>
+        inline if optional then
+          error("a flag Parser without a value parser cannot be used inside Option")
+        else inline if hasAnn[flagged.positional, Anns] then
+          error("a flag Parser without a value parser cannot be used positionally")
+        else ()
       case _: Parser.Shape.Repeated =>
         inline if optional then
           error("Option of a repeated Parser is not supported: the plain type is empty when absent")
