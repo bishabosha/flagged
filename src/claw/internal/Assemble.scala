@@ -68,7 +68,7 @@ object Assemble:
       Vector(PosSpec("value", "", p.typeName, 0, mode, None)),
       None,
       Nil,
-      arr => arr(0),
+      arr => steps.result.Result.Ok(arr(0)),
       1
     )
 
@@ -87,7 +87,7 @@ object Assemble:
       Vector.empty,
       Some(SubGroup(0, false, None, cases.toVector)),
       Nil,
-      arr => arr(0),
+      arr => steps.result.Result.Ok(arr(0)),
       1
     )
 
@@ -96,7 +96,7 @@ object Assemble:
       fields: List[(Parser[?], Boolean)],
       defaults: Defaults[?],
       annots: Annots.Product[?],
-      build: Array[Any] => Any
+      build: Array[Any] => Result[Any, String]
   ): Command =
     val n                          = labels.length
     val opts                       = Vector.newBuilder[OptSpec]
@@ -213,7 +213,7 @@ object Assemble:
 
     val allSplices = splices.result()
     // `build` expects exactly the parent's own field slots
-    val fullBuild: Array[Any] => Any =
+    val fullBuild: Array[Any] => Result[Any, String] =
       if allSplices.isEmpty then build else arr => build(arr.take(n))
     Command(
       annots.onType.help.getOrElse(""),

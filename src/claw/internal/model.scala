@@ -62,17 +62,24 @@ final case class Command(
     positionals: Vector[PosSpec],
     sub: Option[SubGroup],
     splices: List[Splice],
-    build: Array[Any] => Any,
+    build: Array[Any] => Result[Any, String], // fallible: `emap` validation composes here
     arity: Int // value-storage size: own fields plus spliced children's storage
 ):
-  /** Build spliced children from their storage slices, then build this command's value. */
-  def finish(values: Array[Any]): Any =
-    splices.foreach { s =>
-      values(s.slot) = s.command.finish(values.slice(s.offset, s.offset + s.command.arity))
-    }
-    build(values)
+  /** Build spliced children from their storage slices, then build this command's
+    * value; the first failing build (e.g. an `emap` validation) short-circuits.
+    */
+  def finish(values: Array[Any]): Result[Any, String] =
+    def loop(remaining: List[Splice]): Result[Any, String] = remaining match
+      case Nil => build(values)
+      case s :: rest =>
+        s.command.finish(values.slice(s.offset, s.offset + s.command.arity)) match
+          case Result.Ok(v) =>
+            values(s.slot) = v
+            loop(rest)
+          case err => err
+    loop(splices)
 
 object Command:
   /** A command with no parameters that always produces `value` (parameterless enum case / case object). */
   def leaf(value: Any, description: String): Command =
-    Command(description, Vector.empty, Vector.empty, None, Nil, _ => value, 0)
+    Command(description, Vector.empty, Vector.empty, None, Nil, _ => Result.Ok(value), 0)

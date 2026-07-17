@@ -56,14 +56,11 @@ sealed trait Parser[A]:
     case Parser.Schema.Repeated(element, build) => element.read(s).flatMap(e => build(List(e)))
     case Parser.Schema.Command(_, prog) => Err(s"'$s': '$prog' is a command parser, not a single value")
 
-  final def map[B](f: A => B): Parser[B] = schema match
-    case Parser.Schema.Command(impl, prog) =>
-      Parser.fromSchema(
-        Parser.Schema.Command(impl.copy(build = arr => f(impl.build(arr).asInstanceOf[A])), prog)
-      )
-    case _ => emap(a => Ok(f(a)))
+  final def map[B](f: A => B): Parser[B] = emap(a => Ok(f(a)))
 
-  /** Validate/transform the parsed value; not supported for command-shaped parsers. */
+  /** Validate/transform the parsed value. On command shapes this composes after the
+    * command is built — parse-time cross-field validation.
+    */
   final def emap[B](f: A => Result[B, String]): Parser[B] = Parser.fromSchema:
     schema match
       case Parser.Schema.Value(name, parse) => Parser.Schema.Value(name, s => parse(s).flatMap(f))
@@ -71,8 +68,11 @@ sealed trait Parser[A]:
         Parser.Schema.Flag(n => fromCount(n).flatMap(f), fromValue.map(g => s => g(s).flatMap(f)))
       case Parser.Schema.Repeated(element, build) =>
         Parser.Schema.Repeated(element, l => build(l).flatMap(f))
-      case Parser.Schema.Command(_, prog) =>
-        throw new UnsupportedOperationException(s"emap is not supported for command parser '$prog'")
+      case Parser.Schema.Command(impl, prog) =>
+        Parser.Schema.Command(
+          impl.copy(build = arr => impl.build(arr).flatMap(a => f(a.asInstanceOf[A]))),
+          prog
+        )
 
   /** Rename the metavar (value shapes) or the default program name (command shapes). */
   final def withTypeName(name: String): Parser[A] = Parser.fromSchema:
