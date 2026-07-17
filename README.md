@@ -48,6 +48,29 @@ separate (`-n Jamie`), attached (`-nJamie`), or `=` values; flag bundling (`-er`
 declared, to hand everything after it to that field verbatim (`run img -- cmd args`);
 `-` and negative numbers are treated as values.
 
+### The meaning of `--`
+
+flagged follows the GNU convention: the first `--` is a delimiter that is itself
+dropped, and every argument after it is treated as a positional value, even when it
+begins with `-` ([POSIX Utility Syntax Guidelines, guideline 10]; [getopt(3p)]
+consumes the `--` token). Because flagged *permutes* — options may appear after
+positionals — the `--` is honored wherever it appears on the line, so
+`prog a -- b c` yields the positionals `a b c`. Strict POSIX differs here: without
+permutation, option scanning ends at the first operand and a later `--` is a literal
+argument. C programs toggle between the two with `POSIXLY_CORRECT` (see [glibc's
+Program Argument Syntax Conventions] and [getopt(3)]); flagged's behavior matches the
+default of GNU getopt, Python's argparse, and Rust's clap.
+
+When a command declares a `Trailing` field, `--` instead hands everything after it
+to that field verbatim — the delegation idiom of `ssh host -- cmd` or
+`docker run img -- cmd`, which POSIX does not specify but which layers on the same
+delimiter rule.
+
+[POSIX Utility Syntax Guidelines, guideline 10]: https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap12.html
+[getopt(3p)]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/getopt.html
+[glibc's Program Argument Syntax Conventions]: https://www.gnu.org/software/libc/manual/html_node/Argument-Syntax.html
+[getopt(3)]: https://man7.org/linux/man-pages/man3/getopt.3.html
+
 ## Getting flagged
 
 flagged is not yet published to a Maven repository. To try it out, clone this repository
