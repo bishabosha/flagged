@@ -72,7 +72,6 @@ class SpliceSuite extends munit.FunSuite:
     case class Range(lo: Int = 0, hi: Int = 10)
     val p = Parser.Command
       .derived[Range]
-      .parser
       .emap(r => if r.lo <= r.hi then Ok(r) else Err(s"lo (${r.lo}) must not exceed hi (${r.hi})"))
     assertEquals(ok(p.parse(Seq("--lo", "3"))), Range(3, 10))
     p.parse(Seq("--lo", "5", "--hi", "3")) match
@@ -82,9 +81,8 @@ class SpliceSuite extends munit.FunSuite:
 
   test("a validated options group keeps its validation when spliced") {
     case class Window(min: Int = 0, max: Int = 100)
-    given Parser.Aux[Window, Parser.Shape.Command] = Parser.Command
+    given Parser.Command[Window] = Parser.Command
       .derived[Window]
-      .parser
       .emap(w => if w.min <= w.max then Ok(w) else Err("min must not exceed max"))
     case class App(label: String = "", window: Window = Window()) derives Parser.Command
     assertEquals(ok(Flagged.parse[App](Seq("--min", "5"))), App("", Window(5, 100)))

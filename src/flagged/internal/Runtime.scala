@@ -14,8 +14,8 @@ object Runtime:
       case other => Err(s"'$other' is not a valid bool (expected true/false)")
 
   /** Value parser for enums whose cases are all parameterless, matching kebab-cased names. */
-  def enumParser[A](name: String, pairs: Vector[(String, A)]): Parser[A] =
-    Parser.of[A](name)(s =>
+  def enumParser[A](name: String, pairs: Vector[(String, A)]): Parser.Enumerated[A] =
+    Parser.enumeratedOf[A](name)(s =>
       pairs.collectFirst { case (n, v) if n.equalsIgnoreCase(s.trim) => v } match
         case Some(v) => Ok(v)
         case None    => Err(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")

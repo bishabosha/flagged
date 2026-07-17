@@ -88,14 +88,14 @@ repeats:
 | Field shape | Meaning |
 |---|---|
 | `x: Boolean` | flag `--x` (also `--x=false`); always optional |
-| `x: Count` (or any flag-schema `Parser[A]`) | counting flag: `-vvv` → `Count(3)` |
-| `x: A` (value-schema `Parser[A]`) | required option `--x <a>` |
+| `x: Count` (or any `Parser.Flag[A]`) | counting flag: `-vvv` → `Count(3)` |
+| `x: A` (`Parser.Value[A]`) | required option `--x <a>` |
 | `x: A = default` | optional, default shown in help |
 | `x: Option[A]` | optional, `None` when absent |
-| `x: A` (repeated-schema `Parser[A]`, e.g. `List`/`Seq`/`Vector`) | repeatable |
+| `x: A` (`Parser.Repeated[A]`, e.g. `List`/`Seq`/`Vector`) | repeatable |
 | `x: E` (enum `E derives Parser.CommandGroup`) | nested subcommands |
 | `x: P` (case class `P derives Parser.Command`) | options group spliced into this command |
-| `x: Trailing` (or any trailing-schema `Parser[A]`) | the raw arguments after `--`, verbatim |
+| `x: Trailing` (or any `Parser.Trailing[A]`) | the raw arguments after `--`, verbatim |
 | `@positional x: A` | positional argument (same rules) |
 
 A `Trailing` field collects the raw arguments after `--`, verbatim — nothing after
@@ -129,10 +129,10 @@ subcommand field, ...), shape conflicts (`Option` of a repeated parser or of a
 spliced group, a bare flag in `Option`, ...), cross-field rules (two subcommand or
 trailing fields, positionals mixed with subcommands, a positional after a repeated
 one), and duplicate constant names (`@short`/`@name`) are all compile errors. Every
-field's instance must carry its shape in its type — all built-in instances, the
-`Parser.of`/`flag`/`repeated`/`trailing` constructors, and the `Parser.Command` /
-`Parser.CommandGroup` / `Parser.Enumerated` witnesses do this; a given must be
-ascribed to `Parser.Aux[...]`, not plain `Parser[X]`, or derivation rejects it.
+field's instance must carry its shape in its type: the shape *is* the subtype
+(`Parser.Value[X]`, `Parser.Flag[X]`, `Parser.Repeated[X]`, ...), which all built-in
+instances, the `Parser.of`/`flag`/`repeated`/`trailing` constructors, and the
+derivation clauses produce; a given ascribed to plain `Parser[X]` is rejected.
 What remains at parser construction is the inherently value-level residue:
 label-derived (kebab-cased) name collisions, splice-content rules, and
 required-before-optional positional ordering, reported as a descriptive
@@ -256,25 +256,26 @@ A custom value parser is a one-liner, and its type name becomes the `<metavar>` 
 output:
 
 ```scala
-given Parser[Port] = Parser.of[Port]("port")(s =>
+given Parser.Value[Port] = Parser.of[Port]("port")(s =>
   s.toIntOption.filter(p => p > 0 && p < 65536) match
     case Some(p) => Ok(Port(p))
     case None    => Err(s"'$s' is not a valid port"))
 ```
 
-A parser's underlying `Parser.Schema` encodes its *shape* — `Value`, `Flag`,
-`Repeated`, or `Command` (the shape derivation produces for case classes and enums).
-`Parser.of` builds single-value parsers; `Parser.repeated` builds parsers whose
-argument may appear any number of times, each occurrence parsed by an element parser
-and the collected elements combined by a function of your choice. The provided
-`List`/`Seq`/`Vector` instances are ordinary `Parser.repeated` definitions, and any
-type can opt in the same way — including with constraints, since the combining
-function may fail (it also receives `Nil` when the argument is absent):
+A parser's *shape* is its subtype — `Parser.Value`, `Parser.Flag`,
+`Parser.Repeated`, `Parser.Trailing`, `Parser.Command`/`CommandGroup`. `Parser.of`
+builds single-value parsers; `Parser.repeated` builds parsers whose argument may
+appear any number of times, each occurrence parsed by a `Parser.Value` element (so
+repeats cannot nest, by construction) and the collected elements combined by a
+function of your choice. The provided `List`/`Seq`/`Vector` instances are ordinary
+`Parser.repeated` definitions, and any type can opt in the same way — including with
+constraints, since the combining function may fail (it also receives `Nil` when the
+argument is absent):
 
 ```scala
-given Parser[Set[String]] = Parser.repeated[String, Set[String]](l => Ok(l.toSet))
+given Parser.Repeated[Set[String]] = Parser.repeated[String, Set[String]](l => Ok(l.toSet))
 
-given Parser[NonEmpty] = Parser.repeated[Int, NonEmpty](l =>
+given Parser.Repeated[NonEmpty] = Parser.repeated[Int, NonEmpty](l =>
   if l.isEmpty then Err("expected at least one occurrence") else Ok(NonEmpty(l)))
 ```
 
@@ -285,7 +286,7 @@ counting flags (`-vvv` → `Count(3)`), and `fromCount` may fail, so occurrence 
 are expressible:
 
 ```scala
-given Parser[Verbosity] = Parser.flag(n =>
+given Parser.Flag[Verbosity] = Parser.flag(n =>
   if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)"))
 ```
 

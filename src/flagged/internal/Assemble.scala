@@ -72,7 +72,7 @@ object Assemble:
       caseLabels: List[String],
       values: List[Any],
       perCase: IndexedSeq[TargetAnnots]
-  ): Parser[Any] =
+  ): Parser.Enumerated[Any] =
     val names = caseLabels.zipWithIndex.map { (l, i) =>
       perCase(i).name.getOrElse(kebab(l))
     }
@@ -82,18 +82,20 @@ object Assemble:
 
   /** The command view of a value-shaped parser: one positional argument. */
   def singleValueCommand(p: Parser[?]): Command =
-    val mode = p.schema match
-      case Parser.Schema.Value(_, _) =>
-        Mode.Single(readFn(p), false)
-      case Parser.Schema.Flag(_, fromValue) =>
-        fromValue match
-          case Some(f) => Mode.Single(f.asInstanceOf[String => Result[Any, String]], false)
-          case None    => invalid("a flag parser without a value parser cannot be run standalone")
-      case Parser.Schema.Repeated(element, build) =>
-        Mode.Repeated(readFn(element), build.asInstanceOf[List[Any] => Result[Any, String]])
-      case Parser.Schema.Trailing(build) =>
+    val mode = p match
+      case _: Parser.Value[?]       => Mode.Single(readFn(p), false)
+      case vf: Parser.ValuedFlag[?] =>
+        Mode.Single(vf.fromValue.asInstanceOf[String => Result[Any, String]], false)
+      case _: Parser.Flag[?] =>
+        invalid("a flag parser without a value parser cannot be run standalone")
+      case r: Parser.Repeated[?] =>
+        Mode.Repeated(
+          s => r.element.parse(s),
+          r.build.asInstanceOf[List[Any] => Result[Any, String]]
+        )
+      case t: Parser.Trailing[?] =>
         val spec =
-          TrailingSpec(0, "", build.asInstanceOf[List[String] => Result[Any, String]], false, None)
+          TrailingSpec(0, "", t.build, false, None)
         return Command(
           "",
           Vector.empty,
@@ -104,8 +106,8 @@ object Assemble:
           arr => Result.Ok(arr(0)),
           1
         )
-      case Parser.Schema.Command(impl, _) =>
-        return impl
+      case c: Parser.Command[?] =>
+        return c.impl
     Command(
       "",
       Vector.empty,
@@ -170,74 +172,56 @@ object Assemble:
   /** The complete field matrix: one parser shape × `@positional` × `Option[_]` case at a time, each
     * producing a [[Plan]] or a construction error.
     */
+  /** Translate one field into its [[Plan]]. Shape x annotation combinations are guaranteed by the
+    * compile-time layer in `Derive`; only value-level rules (reserved/duplicate names via
+    * kebab-cased labels, splice contents) are checked here.
+    */
   private def resolveField(f: Field): Plan =
-    import Parser.Schema
     def bad(msg: String): Nothing = invalid(s"field '${f.label}': $msg")
     def posKind                   =
       if f.optional || f.default.nonEmpty then PosKind.Optional else PosKind.Required
     def named(metavar: String, mode: Mode): Plan =
       if f.long == "help" then bad("option name 'help' is reserved")
-      if f.short.contains('h') then bad("short option 'h' is reserved for help")
       Plan.Named(OptSpec(f.long, f.short, f.help, metavar, f.index, mode, f.default))
     def positional(metavar: String, mode: Mode, kind: PosKind): Plan =
-      if f.short.nonEmpty then bad("@short cannot be combined with @positional")
       Plan.Positional(PosSpec(f.long, f.help, metavar, f.index, mode, f.default), kind)
 
-    f.parser.schema match
-      case Schema.Value(metavar, _) =>
+    f.parser match
+      case cg: Parser.CommandGroup[?] =>
+        Plan.Commands(f.index, f.optional, f.default, cg.impl)
+
+      case c: Parser.Command[?] =>
+        val inner = c.impl
+        if inner.positionals.nonEmpty then
+          bad("a spliced options group cannot contain positional fields")
+        if inner.trailing.nonEmpty then
+          bad("a spliced options group cannot contain a trailing field")
+        Plan.Grouped(f.index, f.label, inner)
+
+      case vf: Parser.ValuedFlag[?] =>
+        val fv = vf.fromValue.asInstanceOf[String => Result[Any, String]]
+        if f.positional || f.optional then
+          val mode = Mode.Single(fv, f.optional)
+          if f.positional then positional("value", mode, posKind) else named("value", mode)
+        else named("", Mode.Flag(vf.fromCount.asInstanceOf[Int => Result[Any, String]], Some(fv)))
+
+      case fl: Parser.Flag[?] =>
+        named("", Mode.Flag(fl.fromCount.asInstanceOf[Int => Result[Any, String]], None))
+
+      case v: Parser.Value[?] =>
         val mode = Mode.Single(readFn(f.parser), f.optional)
-        if f.positional then positional(metavar, mode, posKind) else named(metavar, mode)
+        if f.positional then positional(v.typeName, mode, posKind) else named(v.typeName, mode)
 
-      case Schema.Flag(fromCount, fromValue) =>
-        val fc = fromCount.asInstanceOf[Int => Result[Any, String]]
-        val fv = fromValue.map(_.asInstanceOf[String => Result[Any, String]])
-        (f.positional, f.optional) match
-          case (false, false) => named("", Mode.Flag(fc, fv))
-          case (pos, _)       => // Option[_] or positional: only the explicit-value form works
-            val parse = fv.getOrElse(
-              bad(
-                s"a flag Parser without a value parser cannot be used ${
-                    if f.optional then "inside Option" else "positionally"
-                  }"
-              )
-            )
-            val mode = Mode.Single(parse, f.optional)
-            if pos then positional("value", mode, posKind) else named("value", mode)
-
-      case Schema.Repeated(element, buildList) =>
-        if f.optional then bad("Option of a repeated Parser is not supported")
-        element.schema match
-          case _: Schema.Value[?] => ()
-          case _                  => bad("repeated Parsers require a single-value element Parser")
-        val mode =
-          Mode.Repeated(readFn(element), buildList.asInstanceOf[List[Any] => Result[Any, String]])
-        if f.positional then positional(element.typeName, mode, PosKind.Repeated)
-        else named(element.typeName, mode)
-
-      case Schema.Trailing(buildList) =>
-        if f.positional then bad("@positional cannot be combined with a trailing field")
-        if f.short.nonEmpty then bad("@short cannot be combined with a trailing field")
-        Plan.Rest(
-          TrailingSpec(
-            f.index,
-            f.help,
-            buildList.asInstanceOf[List[String] => Result[Any, String]],
-            f.optional,
-            f.default
-          )
+      case r: Parser.Repeated[?] =>
+        val mode = Mode.Repeated(
+          s => r.element.parse(s),
+          r.build.asInstanceOf[List[Any] => Result[Any, String]]
         )
+        if f.positional then positional(r.typeName, mode, PosKind.Repeated)
+        else named(r.typeName, mode)
 
-      case Schema.Command(inner, _) =>
-        if f.positional then bad("@positional cannot be combined with a command-shaped Parser")
-        inner.sub match
-          case Some(_) => Plan.Commands(f.index, f.optional, f.default, inner)
-          case None    =>
-            if f.optional then bad("Option of a spliced options group is not supported")
-            if inner.positionals.nonEmpty then
-              bad("a spliced options group cannot contain positional fields")
-            if inner.trailing.nonEmpty then
-              bad("a spliced options group cannot contain a trailing field")
-            Plan.Grouped(f.index, f.label, inner)
+      case t: Parser.Trailing[?] =>
+        Plan.Rest(TrailingSpec(f.index, f.help, t.build, f.optional, f.default))
 
   /** Cross-field aggregation: name uniqueness, at-most-one subcommand/trailing field, positional
     * ordering, splice storage layout.

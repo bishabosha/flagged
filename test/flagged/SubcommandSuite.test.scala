@@ -149,10 +149,10 @@ class SubcommandSuite extends munit.FunSuite:
 
   test("derivation reuses a Parser given in scope for a subcommand field") {
     // hand-modified parser for RemoteAction: every command name gets an "x-" prefix
-    val base    = Parser.CommandGroup.derived[RemoteAction].parser.command
+    val base    = Parser.CommandGroup.derived[RemoteAction].command
     val renamed =
       base.sub.get.copy(cases = base.sub.get.cases.map(c => c.copy(name = s"x-${c.name}")))
-    given custom: Parser.Aux[RemoteAction, Parser.Shape.CommandGroup] =
+    given custom: Parser.CommandGroup[RemoteAction] =
       Parser.makeGroup(base.copy(sub = Some(renamed)), "remote-action")
 
     case class Wrap(action: RemoteAction) derives Parser.Command

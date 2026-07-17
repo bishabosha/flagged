@@ -18,7 +18,7 @@ object Derive:
 
   // ---- parsers ----------------------------------------------------------------
 
-  inline def product[A](using m: Mirror.ProductOf[A]): Parser.Aux[A, Parser.Shape.Command] =
+  inline def product[A](using m: Mirror.ProductOf[A]): Parser.Command[A] =
     summonFrom:
       case am: AnnotMirror.Product[A] =>
         val annots = Annots.makeProduct[A](
@@ -34,13 +34,13 @@ object Derive:
         )
         Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
-  inline def sum[A](using m: Mirror.SumOf[A]): Parser.Aux[A, Parser.Shape.CommandGroup] =
+  inline def sum[A](using m: Mirror.SumOf[A]): Parser.CommandGroup[A] =
     val annots = Annots.sumAnnots[A]
     val cmd = Assemble.sum(labelsOf[m.MirroredElemLabels], annots, entriesOf[m.MirroredElemTypes])
     Parser.makeGroup[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
   /** Value parser for an enum whose cases are all parameterless, for `Parser.Enumerated`. */
-  inline def enumParser[A](using m: Mirror.SumOf[A]): Parser.Aux[A, Parser.Shape.Value] =
+  inline def enumParser[A](using m: Mirror.SumOf[A]): Parser.Enumerated[A] =
     Assemble
       .enumValueParser(
         constValue[m.MirroredLabel],
@@ -48,7 +48,7 @@ object Derive:
         singletonValues[m.MirroredElemTypes],
         Annots.sumAnnots[A].perCase
       )
-      .asInstanceOf[Parser.Aux[A, Parser.Shape.Value]]
+      .asInstanceOf[Parser.Enumerated[A]]
 
   // ---- fields ---------------------------------------------------------------
 
@@ -137,8 +137,8 @@ object Derive:
   ): List[(Parser[?], Boolean)] =
     summonFrom:
       case p: Parser[E] =>
-        inline erasedValue[p.ShapeT] match
-          case _: Parser.Shape.ValuedFlag =>
+        inline p match
+          case _: Parser.ValuedFlag[?] =>
             named[Ft, At, Lt, Anns, L, Shorts, Longs](
               p,
               optional,
@@ -147,7 +147,7 @@ object Derive:
               seenGroup,
               seenPositional
             )
-          case _: Parser.Shape.Flag =>
+          case _: Parser.Flag[?] =>
             inline if optional then
               error("a flag Parser without a value parser cannot be used inside Option")
             else inline if hasAnn[flagged.positional, Anns] then
@@ -161,7 +161,7 @@ object Derive:
                 seenGroup,
                 seenPositional
               )
-          case _: Parser.Shape.Value =>
+          case _: Parser.Value[?] =>
             named[Ft, At, Lt, Anns, L, Shorts, Longs](
               p,
               optional,
@@ -170,7 +170,7 @@ object Derive:
               seenGroup,
               seenPositional
             )
-          case _: Parser.Shape.Repeated =>
+          case _: Parser.Repeated[?] =>
             inline if optional then
               error(
                 "Option of a repeated Parser is not supported: the plain type is empty when absent"
@@ -191,7 +191,7 @@ object Derive:
                 seenGroup,
                 seenPositional
               )
-          case _: Parser.Shape.Trailing =>
+          case _: Parser.Trailing[?] =>
             inline if seenTrailing then error("only one trailing field is supported per command")
             else inline if hasAnn[flagged.positional, Anns] then
               error("@positional cannot be combined with a trailing field")
@@ -206,7 +206,7 @@ object Derive:
                 seenGroup = seenGroup,
                 seenPositional = seenPositional
               )
-          case _: Parser.Shape.CommandGroup =>
+          case _: Parser.CommandGroup[?] =>
             inline if hasAnn[flagged.positional, Anns] then
               error("@positional cannot be combined with a subcommand field")
             else inline if hasAnn[flagged.short, Anns] then
@@ -228,7 +228,7 @@ object Derive:
                 seenGroup = true,
                 seenPositional = seenPositional
               )
-          case _: Parser.Shape.Command =>
+          case _: Parser.Command[?] =>
             inline if hasAnn[flagged.positional, Anns] then
               error("@positional cannot be combined with a command-shaped Parser")
             else inline if optional then error("Option of a spliced options group is not supported")
@@ -249,7 +249,7 @@ object Derive:
               )
           case _ =>
             error(
-              "the shape of this field's Parser is not statically known: ascribe the given to Parser.Aux[...] or build it with the Parser constructors / derivation witnesses"
+              "the shape of this field's Parser is not statically known: give the given a shape type such as Parser.Value[X], or build it with the Parser constructors / derivation clauses"
             )
       case _ =>
         // fails with Parser's missing-instance guidance

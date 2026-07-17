@@ -335,7 +335,7 @@ class OptionsSuite extends munit.FunSuite:
 
   test("custom trailing parsers can require arguments") {
     case class Cmdline(parts: List[String])
-    given Parser.Aux[Cmdline, Parser.Shape.Trailing] = Parser.trailing(l =>
+    given Parser.Trailing[Cmdline] = Parser.trailing(l =>
       if l.isEmpty then Err("expected a command after '--'") else Ok(Cmdline(l))
     )
     case class Run(image: String = "img", cmd: Cmdline) derives Parser.Command
