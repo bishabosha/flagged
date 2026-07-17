@@ -105,6 +105,15 @@ class SpliceSuite extends munit.FunSuite:
     assert(e.getMessage.contains("Option of a spliced options group"), e.getMessage)
   }
 
+  test("a spliced group with a trailing field is rejected") {
+    // previously produced a silent null: the splice copies only the child's options,
+    // so the child's trailing slot could never be filled
+    case class WithTrailing(x: Int = 1, rest: Trailing = Trailing(Nil)) derives Parser.Command
+    case class Bad(g: WithTrailing = WithTrailing())
+    val e = intercept[IllegalArgumentException](Parser.Command.derived[Bad])
+    assert(e.getMessage.contains("cannot contain a trailing field"), e.getMessage)
+  }
+
   test("a spliced group with positionals is rejected") {
     case class WithPos(@positional input: String = "-") derives Parser.Command
     case class Bad(files: WithPos = WithPos())

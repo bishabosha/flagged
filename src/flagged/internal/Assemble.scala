@@ -235,6 +235,8 @@ object Assemble:
             if f.optional then bad("Option of a spliced options group is not supported")
             if inner.positionals.nonEmpty then
               bad("a spliced options group cannot contain positional fields")
+            if inner.trailing.nonEmpty then
+              bad("a spliced options group cannot contain a trailing field")
             Plan.Grouped(f.index, f.label, inner)
 
   /** Cross-field aggregation: name uniqueness, at-most-one subcommand/trailing field, positional
