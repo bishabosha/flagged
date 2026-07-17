@@ -39,7 +39,7 @@ object Trailing:
   */
 @scala.annotation.implicitNotFound(
   "No given Parser[${A}] found.\n" +
-    "For a subcommand enum or a spliceable options group, add `derives Parser` to its definition;\n" +
+    "For a subcommand enum or a spliceable options group, add `derives Parser.Command` to its definition;\n" +
     "for an enum parsed by case name, add `derives Parser.Enumerated`;\n" +
     "for other value types provide one with Parser.of / Parser.flag / Parser.repeated."
 )
@@ -47,11 +47,11 @@ sealed trait Parser[A]:
   self =>
   def schema: Parser.Schema[A]
 
-  /** The parser's shape at the type level. Library constructors and given instances refine this
-    * member (see [[Parser.Aux]]), letting derivation reject invalid shape/annotation combinations
-    * at compile time. Instances that reach a use site unrefined — e.g. through a `derives` clause,
-    * which ascribes the plain `Parser[A]` type — are validated when the command is constructed
-    * instead.
+  /** The parser's shape at the type level. Library constructors, given instances, and the
+    * derivation witnesses (`Parser.Command`, `Parser.Enumerated`) refine this member (see
+    * [[Parser.Aux]]), letting derivation reject invalid shape/annotation combinations at compile
+    * time. Instances that reach a use site unrefined — a given explicitly ascribed to plain
+    * `Parser[A]` — are validated when the command is constructed instead.
     */
   type ShapeT <: Parser.Shape
 
@@ -225,7 +225,7 @@ object Parser:
   final class Command[A](val parser: Parser.Aux[A, Shape.Command])
   object Command:
     /** Derivation entry point for `derives Parser.Command` clauses; also usable directly:
-      * `given Parser.Command[Config] = Parser.derived`.
+      * `given Parser.Command[Config] = Parser.Command.derived`.
       *
       * Derivation is `Mirror`-based and compositional: fields use the `Parser` given for their type
       * — command-shaped instances become subcommands (sums) or spliced option groups (products);

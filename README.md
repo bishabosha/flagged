@@ -12,7 +12,7 @@ case class Greet(
     @short('n') @help("Who to greet") name: String = "world",
     @short('e') @help("Add excitement") excited: Boolean = false,
     @short('r') @help("How many times to greet") repeat: Int = 1
-) derives Parser
+) derives Parser.Command
 
 @main def greet(args: String*): Unit =
   val cfg = Flagged.parseOrExit[Greet](args)
@@ -93,8 +93,8 @@ repeats:
 | `x: A = default` | optional, default shown in help |
 | `x: Option[A]` | optional, `None` when absent |
 | `x: A` (repeated-schema `Parser[A]`, e.g. `List`/`Seq`/`Vector`) | repeatable |
-| `x: E` (enum `E derives Parser`) | nested subcommands |
-| `x: P` (case class `P derives Parser`) | options group spliced into this command |
+| `x: E` (enum `E derives Parser.Command`) | nested subcommands |
+| `x: P` (case class `P derives Parser.Command`) | options group spliced into this command |
 | `x: Trailing` (or any trailing-schema `Parser[A]`) | the raw arguments after `--`, verbatim |
 | `@positional x: A` | positional argument (same rules) |
 
@@ -103,7 +103,7 @@ the delimiter is parsed as an option. This is the delegation idiom of
 `docker run img -- cmd args...`:
 
 ```scala
-case class Run(@short('i') image: String = "alpine", cmd: Trailing = Trailing(Nil)) derives Parser
+case class Run(@short('i') image: String = "alpine", cmd: Trailing = Trailing(Nil)) derives Parser.Command
 // run -i ubuntu -- echo --not-an-option   →   Run("ubuntu", Trailing(List("echo", "--not-an-option")))
 ```
 
@@ -127,9 +127,10 @@ A field type without a `Parser` given is a compile error, as are annotation
 combinations that are visible in types: `@positional` with `@short` always, and
 annotation × shape conflicts (`Option` of a repeated parser, `@positional` on a
 trailing or command field, ...) whenever the field's instance carries its shape in
-its type — which all built-in instances and unascribed `Parser.of`/`flag`/`repeated`/
-`trailing` definitions do. Shape-erased instances (a `derives`-generated given, or
-one explicitly ascribed to plain `Parser[X]`) fall back to the same checks at parser
+its type — which all built-in instances, unascribed `Parser.of`/`flag`/`repeated`/
+`trailing` definitions, and everything derived via the `Parser.Command` /
+`Parser.Enumerated` witnesses do. Only a given explicitly ascribed to plain
+`Parser[X]` is shape-erased and falls back to the same checks at parser
 construction, alongside the inherently value-level rules — duplicate names, a second
 `-h`, positional ordering — reported as a descriptive `IllegalArgumentException`
 before any arguments are parsed.
@@ -143,7 +144,7 @@ another level:
 ```scala
 @name("gitto")
 @help("gitto — a tiny version control tool")
-enum Gitto derives Parser:
+enum Gitto derives Parser.Command:
   @help("Clone a repository into a new directory")
   case Clone(
       @positional @help("Repository URL") repo: String,
@@ -155,7 +156,7 @@ enum Gitto derives Parser:
   @help("Show the working tree status")
   case Status(@short('s') short: Boolean = false)
 
-enum RemoteAction derives Parser:
+enum RemoteAction derives Parser.Command:
   case Add(@positional name: String, @positional url: String)
   case Remove(@positional name: String)
 
@@ -189,7 +190,7 @@ Run 'gitto remote <command> --help' for more information on a command.
 Things to know:
 
 - Derivation is compositional and stops at enum boundaries: each enum in the command
-  tree derives its own `Parser` (note `derives Parser` on `RemoteAction` above), and
+  tree derives its own `Parser` (note `derives Parser.Command` on `RemoteAction` above), and
   the parent embeds that instance. Forgetting one is a compile error that says which
   enum needs it. This also means any level can be supplied or customized
   independently — a hand-built `Parser` given for a nested enum is used as-is.
@@ -197,7 +198,7 @@ Things to know:
 - An `Option[E]`-typed command field makes the command optional; a field default
   (`action: Action = Action.List`) works too.
 - An enum field is commands or a value depending on which instance its type provides:
-  `derives Parser` → subcommands, `derives Parser.Enumerated` (parameterless enums
+  `derives Parser.Command` → subcommands, `derives Parser.Enumerated` (parameterless enums
   only) → a value matched by case name (`--color red`).
 
 ## Scripts and other entry points
@@ -213,7 +214,7 @@ case class Backup(
     @short('d') @help("Destination directory") dest: String,
     @short('n') @help("Print actions without copying") dryRun: Boolean = false,
     @positional sources: List[String] = Nil
-) derives Parser
+) derives Parser.Command
 
 val cfg = Flagged.parseOrExit[Backup](args.toSeq, prog = "backup")
 ```
@@ -292,9 +293,9 @@ directly into the surrounding command — the flattened options parse as if decl
 inline, and the group is reconstructed as a value:
 
 ```scala
-case class LogOpts(@short('q') quiet: Boolean = false, logLevel: String = "info") derives Parser
+case class LogOpts(@short('q') quiet: Boolean = false, logLevel: String = "info") derives Parser.Command
 
-case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser
+case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser.Command
 // serve --port 9000 -q --log-level debug
 ```
 

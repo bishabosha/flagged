@@ -168,7 +168,7 @@ class SubcommandSuite extends munit.FunSuite:
   test("a nested subcommand enum without its own Parser instance is a compile error") {
     val errors = compileErrors("case class Root(action: NoDerive) derives Parser.Command")
     assert(errors.contains("No given Parser[flagged.NoDerive] found"), errors)
-    assert(errors.contains("derives Parser"), errors)
+    assert(errors.contains("derives Parser.Command"), errors)
   }
 
   test("structural misconfiguration reported when the parser is constructed") {

@@ -239,6 +239,11 @@ class OptionsSuite extends munit.FunSuite:
     val e3 =
       compileErrors("case class C(@short('t') t: Trailing = Trailing(Nil)) derives Parser.Command")
     assert(e3.contains("@short cannot be combined with a trailing field"), e3)
+    // the Parser.Command witness keeps derived instances shape-refined, so this is
+    // static too — a derives clause no longer erases the shape
+    val e4 =
+      compileErrors("case class C(@positional action: SimpleAction) derives Parser.Command")
+    assert(e4.contains("@positional cannot be combined with a command-shaped Parser"), e4)
   }
 
   test("a Trailing field collects the raw arguments after --") {

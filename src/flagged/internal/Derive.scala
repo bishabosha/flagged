@@ -90,11 +90,12 @@ object Derive:
   // untouched (a user's shape-erased `given Parser[List[Int]] = ...` shadows the
   // library instance). But the summonFrom *binder* receives the found given's precise
   // type, so when that instance is shape-refined (all library instances and anything
-  // built by the Parser constructors without an ascription), its `ShapeT` is concrete
-  // and the annotation x shape combination is checked at compile time via
-  // soft-failing `=:=` evidence — an abstract `ShapeT` (a `derives`-generated or
-  // type-ascribed given) simply falls through to the construction-time backstop in
-  // `Assemble.resolveField`.
+  // built by the Parser constructors without an ascription, and everything derived
+  // through the Parser.Command / Parser.Enumerated witnesses, whose bridging givens
+  // are library-declared with refined types), its `ShapeT` is concrete and the
+  // annotation x shape combination is checked at compile time — an abstract `ShapeT`
+  // (a given explicitly ascribed to plain `Parser[X]`) simply falls through to the
+  // construction-time backstop in `Assemble.resolveField`.
   inline def fieldOfChecked[F, Anns]: (Parser[?], Boolean) =
     inline erasedValue[F] match
       case _: Option[e] => (summonChecked[e, Anns](optional = true), true)
