@@ -225,6 +225,11 @@ class OptionsSuite extends munit.FunSuite:
     assert(m.contains("unknown option"), m)
   }
 
+  test("conflicting annotations are compile errors") {
+    val e = compileErrors("case class C(@positional @short('x') a: Int = 0) derives Parser")
+    assert(e.contains("@short cannot be combined with @positional"), e)
+  }
+
   test("a Trailing field collects the raw arguments after --") {
     case class Exec(@short('v') verbose: Boolean = false, rest: Trailing = Trailing(Nil))
         derives Parser

@@ -3,7 +3,7 @@ package flagged.internal
 import scala.compiletime.*
 import scala.deriving.Mirror
 import flagged.Parser
-import flagged.meta.Defaults
+import flagged.meta.{Ann, AnnotMirror, Defaults}
 
 /** `Mirror`-based derivation. Structure and construction come from `Mirror`; field semantics are
   * the field parser's schema: command-shaped instances become nested subcommands (sums) or spliced
@@ -24,15 +24,20 @@ object Derive:
       case s: Mirror.SumOf[A]     => sum[A](using s)
 
   inline def product[A](using m: Mirror.ProductOf[A]): Parser[A] =
-    val annots = Annots.productAnnots[A]
-    val cmd    = Assemble.product(
-      labelsOf[m.MirroredElemLabels],
-      fieldsOf[m.MirroredElemTypes],
-      Defaults.derived[A],
-      annots,
-      arr => steps.result.Result.Ok(m.fromProduct(Tuple.fromArray(arr)))
-    )
-    Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
+    summonFrom:
+      case am: AnnotMirror.Product[A] =>
+        val annots = Annots.makeProduct[A](
+          Annots.targetAnnotsOf[am.MirroredSelfAnnotations],
+          Annots.fieldAnnotsEach[am.MirroredAnnotations]
+        )
+        val cmd = Assemble.product(
+          labelsOf[m.MirroredElemLabels],
+          fieldsOf[m.MirroredElemTypes, am.MirroredAnnotations],
+          Defaults.derived[A],
+          annots,
+          arr => steps.result.Result.Ok(m.fromProduct(Tuple.fromArray(arr)))
+        )
+        Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
   inline def sum[A](using m: Mirror.SumOf[A]): Parser[A] =
     val annots = Annots.sumAnnots[A]
@@ -56,14 +61,39 @@ object Derive:
     constValueTuple[L].toList.asInstanceOf[List[String]]
 
   /** The single field rule: summon the field type's `Parser`; `Option[_]` marks it optional. The
-    * parser's schema decides everything else at assembly.
+    * parser's schema decides everything else at assembly — except that combinations already visible
+    * in types (the field's annotations, `Option` wrapping, and the shape of shape-refined
+    * instances, see [[Parser.Aux]]) are rejected here, at compile time. Shape-erased instances fall
+    * back to construction-time validation.
     */
-  inline def fieldsOf[T <: Tuple]: List[(Parser[?], Boolean)] =
-    inline erasedValue[T] match
+  inline def fieldsOf[Types <: Tuple, Slots <: Tuple]: List[(Parser[?], Boolean)] =
+    inline erasedValue[Types] match
       case _: EmptyTuple => Nil
-      case _: (h *: t)   => fieldOf[h] :: fieldsOf[t]
+      case _: (f *: ft)  =>
+        inline erasedValue[Slots] match
+          case _: (a *: at) => fieldOf[f, a] :: fieldsOf[ft, at]
 
-  inline def fieldOf[F]: (Parser[?], Boolean) =
+  /** Whether annotation slot `Anns` contains an `A` — a compile-time constant. */
+  transparent inline def hasAnn[A <: scala.annotation.Annotation, Anns]: Boolean =
+    inline erasedValue[Anns] match
+      case _: EmptyTuple          => false
+      case _: (Ann[A, ?, ?] *: _) => true
+      case _: (_ *: t)            => hasAnn[A, t]
+
+  inline def fieldOf[F, Anns]: (Parser[?], Boolean) =
+    inline if hasAnn[flagged.positional, Anns] then
+      inline if hasAnn[flagged.short, Anns] then error("@short cannot be combined with @positional")
+      else fieldOfChecked[F, Anns]
+    else fieldOfChecked[F, Anns]
+
+  // Note: instance-shape checks cannot happen here. Selecting the instance with a
+  // shape-refined summon (`Parser.Aux[F, S]`) would skip shape-erased instances and
+  // so break normal given priority — a user's `given Parser[List[Int]] = ...` must
+  // shadow the library's List instance. And once selected through a plain summon,
+  // the refinement is not observable at compile time (a `derives` clause erases it
+  // anyway). The shape half of the matrix is therefore validated at construction, in
+  // one place: `Assemble.resolveField`.
+  inline def fieldOfChecked[F, Anns]: (Parser[?], Boolean) =
     inline erasedValue[F] match
       case _: Option[e] => (summonInline[Parser[e]], true)
       case _            => (summonInline[Parser[F]], false)

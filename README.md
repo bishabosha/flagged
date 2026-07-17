@@ -123,10 +123,13 @@ Fine-tune with annotations:
 | `@help("...")` | help text for fields, cases, and top-level types |
 | `@positional` | positional argument instead of named option |
 
-A field type without a `Parser` given is a compile error.
-Structural mistakes — duplicate names, a second `-h`, a required positional after an
-optional one — are reported with a descriptive `IllegalArgumentException` when the
-parser instance is constructed, before any arguments are parsed.
+A field type without a `Parser` given is a compile error, as are annotation
+combinations that are visible in types (e.g. `@positional` with `@short`).
+Shape-dependent combinations and value-level mistakes — duplicate names, a second
+`-h`, a required positional after an optional one — are reported with a descriptive
+`IllegalArgumentException` when the parser instance is constructed, before any
+arguments are parsed. (Instance shapes are erased by `derives` clauses, so they
+cannot participate in compile-time checks without breaking given priority.)
 
 ## Subcommands
 
