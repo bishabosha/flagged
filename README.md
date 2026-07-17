@@ -98,6 +98,22 @@ repeats:
 | `x: Trailing` (or any trailing-schema `Parser[A]`) | the raw arguments after `--`, verbatim |
 | `@positional x: A` | positional argument (same rules) |
 
+A `Trailing` field collects the raw arguments after `--`, verbatim — nothing after
+the delimiter is parsed as an option. This is the delegation idiom of
+`docker run img -- cmd args...`:
+
+```scala
+case class Run(@short('i') image: String = "alpine", cmd: Trailing = Trailing(Nil)) derives Parser
+// run -i ubuntu -- echo --not-an-option   →   Run("ubuntu", Trailing(List("echo", "--not-an-option")))
+```
+
+`Trailing(Nil)` when no `--` is given; an `Option[Trailing]` field distinguishes an
+absent `--` (`None`) from a present-but-empty one (`Some(Trailing(Nil))`). Any type
+can opt into the shape via `Parser.trailing`, whose combining function may fail —
+e.g. to require a command after `--`. One trailing field per command; in help it
+appears as `[-- <args>]` in the usage line. See also
+[the meaning of `--`](#the-meaning-of---) above.
+
 Fine-tune with annotations:
 
 | Annotation | Effect |
