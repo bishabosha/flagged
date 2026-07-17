@@ -75,15 +75,11 @@ object AnnotMirror:
 
   /** The constructor-argument tuple for one mirrored annotation: provided constants
     * are materialised directly; defaulted positions are looked up through the
-    * annotation's [[Defaults]] mirror.
+    * annotation's [[Defaults]] mirror (which throws on an index without a default —
+    * unreachable for mirrors synthesized by claw).
     */
   inline def argsOf[A, Args, Defaulted](using d: Defaults[A]): Tuple =
-    resolve[Args, Defaulted](i =>
-      d.values
-        .lift(i)
-        .flatten
-        .fold(throw new IllegalStateException(s"no default for annotation parameter $i"))(_())
-    )
+    resolve[Args, Defaulted](d.defaultArgument)
 
   inline def resolve[Args, D](lookup: Int => Any): Tuple =
     inline erasedValue[Args] match

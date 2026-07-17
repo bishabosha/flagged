@@ -2,10 +2,16 @@ package claw.internal
 
 import scala.quoted.*
 
-/** Per-field default values of a case class, in declaration order.
-  * `values` is empty for non-products.
-  */
-final class Defaults[A](val values: IndexedSeq[Option[() => Any]])
+/** Default arguments of a case class's constructor, by parameter index. */
+trait Defaults[A]:
+  /** The default value of constructor parameter `index`; throws
+    * `NoSuchElementException` when the parameter has no default (or is out of
+    * bounds). Implemented as a switch on the index.
+    */
+  def defaultArgument(index: Int): Any
+
+  /** Whether constructor parameter `index` declares a default argument. */
+  def hasDefault(index: Int): Boolean
 
 object Defaults:
   /** The one thing `Mirror` cannot see: default argument getters. Consumers (e.g.
@@ -55,25 +61,52 @@ object MetaMacros:
   def defaults[A: Type](using Quotes): Expr[Defaults[A]] =
     import quotes.reflect.*
     val sym = TypeRepr.of[A].typeSymbol
-    val entries: List[Expr[Option[() => Any]]] =
+
+    /** (parameter index, default-getter call) for every parameter with a default. */
+    val getters: List[(Int, Term)] =
       if sym.isClassDef && sym.flags.is(Flags.Case) && !sym.flags.is(Flags.Module) then
         val comp = sym.companionModule
         val params = sym.primaryConstructor.paramSymss.flatten.filter(_.isTerm)
-        sym.caseFields.indices.toList.map { i =>
-          val hasDefault = params.lift(i).exists(_.flags.is(Flags.HasDefault))
-          val getter =
-            if hasDefault then
-              comp
-                .methodMember(s"apply$$default$$${i + 1}")
-                .headOption
-                .orElse(comp.methodMember(s"$$lessinit$$greater$$default$$${i + 1}").headOption)
-            else None
-          getter match
-            case Some(dm) => '{ Some(() => ${ Ref(comp).select(dm).asExprOf[Any] }) }
-            case None     => '{ None }
+        params.zipWithIndex.flatMap { (p, i) =>
+          if p.flags.is(Flags.HasDefault) then
+            comp
+              .methodMember(s"apply$$default$$${i + 1}")
+              .headOption
+              .orElse(comp.methodMember(s"$$lessinit$$greater$$default$$${i + 1}").headOption)
+              .map(dm => i -> Ref(comp).select(dm))
+          else None
         }
       else Nil
-    '{ new Defaults[A](${ Expr.ofSeq(entries) }.toIndexedSeq) }
+
+    def argBody(idx: Expr[Int]): Expr[Any] =
+      val cases = getters.map { (i, getter) =>
+        CaseDef(Literal(IntConstant(i)), None, getter)
+      }
+      val fallback = CaseDef(
+        Wildcard(),
+        None,
+        '{ throw new NoSuchElementException("no default argument at index " + $idx) }.asTerm
+      )
+      Match(idx.asTerm, cases :+ fallback).asExprOf[Any]
+
+    def hasBody(idx: Expr[Int]): Expr[Boolean] =
+      getters.map(_._1) match
+        case Nil => '{ false }
+        case indices =>
+          val pattern = indices.map(i => Literal(IntConstant(i))) match
+            case single :: Nil => single
+            case many          => Alternatives(many)
+          val cases = List(
+            CaseDef(pattern, None, '{ true }.asTerm),
+            CaseDef(Wildcard(), None, '{ false }.asTerm)
+          )
+          Match(idx.asTerm, cases).asExprOf[Boolean]
+
+    '{
+      new Defaults[A]:
+        def defaultArgument(index: Int): Any = ${ argBody('index) }
+        def hasDefault(index: Int): Boolean = ${ hasBody('index) }
+    }
 
   def annotMirrorProduct[A: Type](using Quotes): Expr[AnnotMirror.Product[A]] =
     new AnnotHelper().product[A]

@@ -85,12 +85,11 @@ object Assemble:
   def product(
       labels: List[String],
       fields: List[(Parser[?], Boolean)],
-      defaults: List[Option[() => Any]],
+      defaults: Defaults[?],
       annots: Annots.Product[?],
       build: Array[Any] => Any
   ): Command =
     val n = labels.length
-    val defs = if defaults.length == n then defaults else List.fill(n)(None)
     val opts = Vector.newBuilder[OptSpec]
     val poss = Vector.newBuilder[PosSpec]
     var subGroup: Option[SubGroup] = None
@@ -107,7 +106,8 @@ object Assemble:
       val long = anns.name.map(_.value).getOrElse(kebab(label))
       val help = anns.help.map(_.value).getOrElse("")
       val short = anns.short.map(_.value)
-      val default = defs(i)
+      val default: Option[() => Any] =
+        if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None
       val (fieldParser, optional) = fields(i)
 
       def addOpt(metavar: String, mode: Mode): Unit =

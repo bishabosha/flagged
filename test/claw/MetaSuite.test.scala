@@ -18,6 +18,17 @@ class MetaSuite extends munit.FunSuite:
     assertEquals(n, None)
   }
 
+  test("Defaults is an index switch that throws on invalid indices") {
+    case class Partial(a: Int, b: Int = 2, c: String = "x")
+    val d = internal.Defaults.derived[Partial]
+    assert(!d.hasDefault(0))
+    assert(d.hasDefault(1) && d.hasDefault(2))
+    assertEquals(d.defaultArgument(1), 2)
+    assertEquals(d.defaultArgument(2), "x")
+    intercept[NoSuchElementException](d.defaultArgument(0))
+    intercept[NoSuchElementException](d.defaultArgument(9))
+  }
+
   test("defaulted positions are looked up through the Defaults mirror") {
     // hand-written mirror type: label defaulted (index 0), level provided
     type Slot = Ann[tagged, (0, 7), (true, false)] *: EmptyTuple
