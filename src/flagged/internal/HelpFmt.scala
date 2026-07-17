@@ -1,11 +1,11 @@
-package claw.internal
+package flagged.internal
 
 /** Renders `--help` screens and usage lines. */
-private[claw] object HelpFmt:
+private[flagged] object HelpFmt:
 
   def render(cmd: Command, prog: String, path: List[String]): String =
     val full = (prog :: path).mkString(" ")
-    val b = new StringBuilder
+    val b    = new StringBuilder
 
     if cmd.description.nonEmpty then
       b ++= cmd.description
@@ -26,6 +26,12 @@ private[claw] object HelpFmt:
       b ++= table(cmd.positionals.map(p => s"<${p.name}>" -> withExtras(p.help, posExtras(p))))
       b += '\n'
 
+    cmd.trailing.filter(_.help.nonEmpty).foreach { t =>
+      b ++= "\nArguments after --:\n"
+      b ++= table(Seq("-- <args>" -> t.help))
+      b += '\n'
+    }
+
     b ++= "\nOptions:\n"
     val optRows = cmd.opts.map(o => optLeft(o) -> withExtras(o.help, optExtras(o))) :+
       ("-h, --help" -> "Show this message and exit")
@@ -44,31 +50,37 @@ private[claw] object HelpFmt:
     parts += "[options]"
     cmd.positionals.foreach { p =>
       p.mode match
-        case Mode.Repeated(_, _)     => parts += s"[<${p.name}>...]"
-        case _ if isRequiredPos(p)   => parts += s"<${p.name}>"
-        case _                       => parts += s"[<${p.name}>]"
+        case Mode.Repeated(_, _)   => parts += s"[<${p.name}>...]"
+        case _ if isRequiredPos(p) => parts += s"<${p.name}>"
+        case _                     => parts += s"[<${p.name}>]"
     }
     cmd.sub.foreach { g =>
       parts += (if g.optional || g.default.nonEmpty then "[<command>]" else "<command>")
     }
+    cmd.trailing.foreach { _ => parts += "[-- <args>]" }
     parts.result().mkString(" ")
 
   private def isRequiredPos(p: PosSpec): Boolean =
     p.default.isEmpty && (p.mode match
       case Mode.Single(_, optional) => !optional
-      case _                        => false
-    )
+      case _                        => false)
 
   private def optLeft(o: OptSpec): String =
     val short = o.short.map(c => s"-$c, ").getOrElse("    ")
     val value = o.mode match
-      case Mode.Flag            => ""
-      case Mode.Single(_, _)    => s" <${o.metavar}>"
-      case Mode.Repeated(_, _)  => s" <${o.metavar}>"
+      case Mode.Flag(_, _)     => ""
+      case Mode.Single(_, _)   => s" <${o.metavar}>"
+      case Mode.Repeated(_, _) => s" <${o.metavar}>"
     s"$short--${o.long}$value"
 
   private def optExtras(o: OptSpec): List[String] =
-    val dflt = o.default.map(d => d()) match
+    val default = o.default.map(d => d()).filterNot { v =>
+      // a flag default equal to the absent-value (fromCount(0)) conveys nothing
+      o.mode match
+        case Mode.Flag(fromCount, _) => fromCount(0).toOption.contains(v)
+        case _                       => false
+    }
+    val dflt = default match
       case Some(v) => fmtDefault(v).map(s => s"default: $s")
       case None    => None
     val required = o.mode match
@@ -89,12 +101,12 @@ private[claw] object HelpFmt:
 
   /** Human-friendly rendering of a default value; `None` means "don't show". */
   private def fmtDefault(v: Any): Option[String] = v match
-    case None                     => None
-    case Some(x)                  => Some(x.toString)
-    case false                    => None
-    case s: Seq[?] if s.isEmpty   => None
-    case s: Seq[?]                => Some(s.mkString(","))
-    case other                    => Some(other.toString)
+    case None                   => None
+    case Some(x)                => Some(x.toString)
+    case false                  => None
+    case s: Seq[?] if s.isEmpty => None
+    case s: Seq[?]              => Some(s.mkString(","))
+    case other                  => Some(other.toString)
 
   private def withExtras(help: String, extras: List[String]): String =
     if extras.isEmpty then help

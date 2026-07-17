@@ -1,9 +1,9 @@
-package claw
+package flagged
 
 class HelpSuite extends munit.FunSuite:
 
   def helpText[A](args: Seq[String])(using Parser[A]): String =
-    Claw.parse[A](args) match
+    Flagged.parse[A](args) match
       case Err(ParseError.Help(t)) => t
       case other                   => fail(s"expected help, got $other")
 
@@ -61,10 +61,10 @@ class HelpSuite extends munit.FunSuite:
     assert(t.contains("repeatable"), t)
   }
 
-  test("help via Claw.help without parsing") {
-    val t = Claw.help[Git]
+  test("help via Flagged.help without parsing") {
+    val t = Flagged.help[Git]
     assert(t.contains("Usage: git"), t)
-    assert(Claw.help[Git]("mygit").contains("Usage: mygit"))
+    assert(Flagged.help[Git]("mygit").contains("Usage: mygit"))
   }
 
   test("prog name defaults to kebab-cased type name") {
@@ -73,7 +73,7 @@ class HelpSuite extends munit.FunSuite:
   }
 
   test("failure hints point at --help for the right level") {
-    Claw.parse[Git](Seq("clone")) match
+    Flagged.parse[Git](Seq("clone")) match
       case Err(ParseError.Failure(m, hint)) =>
         assert(m.contains("<repo>"), m)
         assert(hint.contains("git clone --help"), hint)

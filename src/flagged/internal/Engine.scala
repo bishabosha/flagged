@@ -1,30 +1,31 @@
-package claw.internal
+package flagged.internal
 
-import claw.{ParseError, ParseResult}
+import flagged.{ParseError, ParseResult}
 import steps.result.Result
 import steps.result.Result.{Ok, Err, eval}
 import steps.result.Result.eval.ok
 import scala.collection.mutable
 
 /** The token-stream parser. Interprets a `Command` tree against the argument list. */
-private[claw] object Engine:
+private[flagged] object Engine:
 
   def run(cmd: Command, prog: String, path: List[String], args: List[String]): ParseResult[Any] =
     Result:
-      val full = (prog :: path).mkString(" ")
-      def hint = s"Try '$full --help' for more information."
+      val full                       = (prog :: path).mkString(" ")
+      def hint                       = s"Try '$full --help' for more information."
       def fail(msg: String): Nothing = eval.raise(ParseError.Failure(msg, hint))
-      def helpNow(): Nothing = eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path)))
+      def helpNow(): Nothing         = eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path)))
 
-      val values = new Array[Any](cmd.arity)
-      val isSet = new Array[Boolean](cmd.arity)
-      val collected = mutable.LinkedHashMap.empty[Int, mutable.ListBuffer[Any]]
-      var rest = args
-      var posIdx = 0
+      val values     = new Array[Any](cmd.arity)
+      val isSet      = new Array[Boolean](cmd.arity)
+      val collected  = mutable.LinkedHashMap.empty[Int, mutable.ListBuffer[Any]]
+      val flagCounts = mutable.Map.empty[Int, Int].withDefaultValue(0)
+      var rest       = args
+      var posIdx     = 0
       var noMoreOpts = false
 
       def longOf(n: String) = cmd.opts.find(_.long == n)
-      def shortOf(c: Char) = cmd.opts.find(_.short.contains(c))
+      def shortOf(c: Char)  = cmd.opts.find(_.short.contains(c))
 
       def isNegativeNumber(s: String): Boolean =
         s.length > 1 && s(0) == '-' &&
@@ -48,20 +49,26 @@ private[claw] object Engine:
 
       def setParsed(spec: OptSpec, raw: String, display: String): Unit =
         spec.mode match
-          case Mode.Flag =>
-            values(spec.index) = readOr(Runtime.parseBool(_), raw, display)
-            isSet(spec.index) = true
+          case Mode.Flag(_, fromValue) =>
+            fromValue match
+              case None    => fail(s"flag '$display' does not take a value")
+              case Some(f) =>
+                values(spec.index) = readOr(f, raw, display)
+                isSet(spec.index) = true
           case Mode.Single(read, optional) =>
             val v = readOr(read, raw, display)
             values(spec.index) = if optional then Some(v) else v
             isSet(spec.index) = true
           case Mode.Repeated(read, _) =>
-            collected.getOrElseUpdate(spec.index, mutable.ListBuffer.empty) += readOr(read, raw, display)
+            collected.getOrElseUpdate(spec.index, mutable.ListBuffer.empty) += readOr(
+              read,
+              raw,
+              display
+            )
             isSet(spec.index) = true
 
       def setFlag(spec: OptSpec): Unit =
-        values(spec.index) = true
-        isSet(spec.index) = true
+        flagCounts(spec.index) += 1
 
       def handleFree(tok: String): Unit =
         cmd.sub match
@@ -92,7 +99,7 @@ private[claw] object Engine:
                 values(p.index) = if optional then Some(v) else v
                 isSet(p.index) = true
                 posIdx += 1
-              case Mode.Flag =>
+              case Mode.Flag(_, _) =>
                 fail(s"unexpected argument '$tok'") // positionals are never flags
 
       while rest.nonEmpty do
@@ -103,9 +110,19 @@ private[claw] object Engine:
           noMoreOpts || tok == "-" || !tok.startsWith("-") ||
             (isNegativeNumber(tok) && shortOf(tok(1)).isEmpty)
         if isFree then handleFree(tok)
-        else if tok == "--" then noMoreOpts = true
+        else if tok == "--" then
+          cmd.trailing match
+            case Some(t) =>
+              // divert everything after `--` to the trailing field, verbatim
+              t.build(rest) match
+                case Ok(v) =>
+                  values(t.index) = if t.optional then Some(v) else v
+                  isSet(t.index) = true
+                case Err(msg) => fail(s"invalid arguments after '--': $msg")
+              rest = Nil
+            case None => noMoreOpts = true
         else if tok.startsWith("--") then
-          val body = tok.drop(2)
+          val body              = tok.drop(2)
           val (nm, inlineValue) = body.indexOf('=') match
             case -1 => (body, None)
             case i  => (body.take(i), Some(body.drop(i + 1)))
@@ -119,7 +136,7 @@ private[claw] object Engine:
               fail(s"unknown option '--$nm'$sug")
             case Some(spec) =>
               spec.mode match
-                case Mode.Flag =>
+                case Mode.Flag(_, _) =>
                   inlineValue match
                     case None    => setFlag(spec)
                     case Some(v) => setParsed(spec, v, s"--$nm")
@@ -128,7 +145,7 @@ private[claw] object Engine:
                   setParsed(spec, raw, s"--$nm")
         else
           // short option cluster: -v, -abc, -o value, -ovalue, -o=value
-          var i = 1
+          var i             = 1
           var consumedValue = false
           while i < tok.length && !consumedValue do
             val c = tok(i)
@@ -138,62 +155,105 @@ private[claw] object Engine:
                 fail(s"unknown option '-$c'")
               case Some(spec) =>
                 spec.mode match
-                  case Mode.Flag =>
+                  case Mode.Flag(_, _) =>
                     setFlag(spec)
                     i += 1
                   case _ =>
                     val attached = tok.drop(i + 1)
-                    val raw =
+                    val raw      =
                       if attached.nonEmpty then
                         if attached.startsWith("=") then attached.drop(1) else attached
                       else takeValue(s"-$c")
                     setParsed(spec, raw, s"-$c")
                     consumedValue = true
 
+      def combineRepeated(
+          display: String,
+          fromList: List[Any] => Result[Any, String],
+          elems: List[Any]
+      ): Any =
+        fromList(elems) match
+          case Ok(v)    => v
+          case Err(msg) => fail(s"invalid value for '$display': $msg")
+
       // materialize repeated values
       collected.foreach { (idx, buf) =>
-        val fromList =
-          cmd.opts.find(_.index == idx).map(_.mode).orElse(cmd.positionals.find(_.index == idx).map(_.mode)) match
-            case Some(Mode.Repeated(_, f)) => f
-            case _                         => identity[List[Any]]
-        values(idx) = fromList(buf.toList)
+        val entry = cmd.opts
+          .find(_.index == idx)
+          .map(o => (s"--${o.long}", o.mode))
+          .orElse(cmd.positionals.find(_.index == idx).map(p => (s"<${p.name}>", p.mode)))
+        entry match
+          case Some((display, Mode.Repeated(_, fromList))) =>
+            values(idx) = combineRepeated(display, fromList, buf.toList)
+          case _ =>
+            values(idx) = buf.toList
       }
+
+      def countedFlag(display: String, fromCount: Int => Result[Any, String], n: Int): Any =
+        fromCount(n) match
+          case Ok(v)    => v
+          case Err(msg) => fail(s"invalid value for '$display': $msg")
 
       // apply defaults, collect missing
       val missing = mutable.ListBuffer.empty[String]
       cmd.opts.foreach { o =>
         if !isSet(o.index) then
-          o.default match
-            case Some(d) => values(o.index) = d()
-            case None =>
-              o.mode match
-                case Mode.Flag                  => values(o.index) = false
-                case Mode.Single(_, true)       => values(o.index) = None
-                case Mode.Single(_, false)      => missing += s"--${o.long}"
-                case Mode.Repeated(_, fromList) => values(o.index) = fromList(Nil)
+          o.mode match
+            case Mode.Flag(fromCount, _) =>
+              // occurrences beat the field default; absent means count 0
+              val n = flagCounts(o.index)
+              values(o.index) =
+                if n > 0 then countedFlag(s"--${o.long}", fromCount, n)
+                else o.default.map(_()).getOrElse(countedFlag(s"--${o.long}", fromCount, 0))
+            case _ =>
+              o.default match
+                case Some(d) => values(o.index) = d()
+                case None    =>
+                  o.mode match
+                    case Mode.Single(_, true)       => values(o.index) = None
+                    case Mode.Single(_, false)      => missing += s"--${o.long}"
+                    case Mode.Repeated(_, fromList) =>
+                      values(o.index) = combineRepeated(s"--${o.long}", fromList, Nil)
+                    case Mode.Flag(_, _) => () // handled above
       }
       cmd.positionals.foreach { p =>
         if !isSet(p.index) then
           p.default match
             case Some(d) => values(p.index) = d()
-            case None =>
+            case None    =>
               p.mode match
                 case Mode.Single(_, true)       => values(p.index) = None
                 case Mode.Single(_, false)      => missing += s"<${p.name}>"
-                case Mode.Repeated(_, fromList) => values(p.index) = fromList(Nil)
-                case Mode.Flag                  => values(p.index) = false
+                case Mode.Repeated(_, fromList) =>
+                  values(p.index) = combineRepeated(s"<${p.name}>", fromList, Nil)
+                case Mode.Flag(fromCount, _) =>
+                  values(p.index) = countedFlag(s"<${p.name}>", fromCount, 0)
       }
       if missing.nonEmpty then
         val what = if missing.sizeIs == 1 then "argument" else "arguments"
         fail(s"missing required $what: ${missing.mkString(", ")}")
 
+      cmd.trailing.foreach { t =>
+        if !isSet(t.index) then
+          t.default match
+            case Some(d) => values(t.index) = d()
+            case None    =>
+              if t.optional then values(t.index) = None
+              else
+                t.build(Nil) match
+                  case Ok(v)    => values(t.index) = v
+                  case Err(msg) => fail(s"missing arguments after '--': $msg")
+      }
+
       cmd.sub.foreach { g =>
         if !isSet(g.index) then
           g.default match
-            case Some(d) => values(g.index) = d()
+            case Some(d)            => values(g.index) = d()
             case None if g.optional => values(g.index) = None
-            case None =>
+            case None               =>
               fail(s"missing command (expected one of: ${g.cases.map(_.name).mkString(", ")})")
       }
 
-      cmd.build(values)
+      cmd.finish(values) match
+        case Ok(v)    => v
+        case Err(msg) => fail(msg)

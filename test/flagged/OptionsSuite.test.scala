@@ -1,0 +1,272 @@
+package flagged
+
+case class Basic(
+    @short('v') @help("Increase verbosity") verbose: Boolean = false,
+    @short('o') @help("Output file") output: String = "out.txt",
+    @help("Number of retries") maxRetries: Int = 3,
+    tag: Option[String] = None
+) derives Parser
+
+case class Required(
+    host: String,
+    port: Int = 8080
+) derives Parser
+
+case class Collections(
+    @short('f') file: List[String] = Nil,
+    nums: Vector[Int] = Vector.empty
+) derives Parser
+
+case class WithPositionals(
+    @positional @help("Input path") input: String,
+    @positional output: Option[String] = None,
+    @short('n') dryRun: Boolean = false
+) derives Parser
+
+case class VarargPositionals(
+    @short('v') verbose: Boolean = false,
+    @positional files: List[String] = Nil
+) derives Parser
+
+class OptionsSuite extends munit.FunSuite:
+
+  def ok[A](r: ParseResult[A]): A = r match
+    case Ok(a)                         => a
+    case Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
+    case Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
+
+  def err[A](r: ParseResult[A]): String = r match
+    case Err(ParseError.Failure(m, _)) => m
+    case other                         => fail(s"expected failure, got $other")
+
+  test("all defaults") {
+    assertEquals(ok(Flagged.parse[Basic](Nil)), Basic())
+  }
+
+  test("long options with separate values") {
+    assertEquals(
+      ok(Flagged.parse[Basic](Seq("--output", "x.txt", "--max-retries", "7"))),
+      Basic(output = "x.txt", maxRetries = 7)
+    )
+  }
+
+  test("long options with = values") {
+    assertEquals(
+      ok(Flagged.parse[Basic](Seq("--output=x.txt", "--max-retries=7"))),
+      Basic(output = "x.txt", maxRetries = 7)
+    )
+  }
+
+  test("long flag") {
+    assertEquals(ok(Flagged.parse[Basic](Seq("--verbose"))), Basic(verbose = true))
+  }
+
+  test("flag with explicit value") {
+    assertEquals(ok(Flagged.parse[Basic](Seq("--verbose=false"))), Basic(verbose = false))
+    assertEquals(ok(Flagged.parse[Basic](Seq("--verbose=yes"))), Basic(verbose = true))
+  }
+
+  test("short option with separate value") {
+    assertEquals(ok(Flagged.parse[Basic](Seq("-o", "x.txt"))), Basic(output = "x.txt"))
+  }
+
+  test("short option with attached value") {
+    assertEquals(ok(Flagged.parse[Basic](Seq("-ox.txt"))), Basic(output = "x.txt"))
+  }
+
+  test("short option with =value") {
+    assertEquals(ok(Flagged.parse[Basic](Seq("-o=x.txt"))), Basic(output = "x.txt"))
+  }
+
+  test("short flag") {
+    assertEquals(ok(Flagged.parse[Basic](Seq("-v"))), Basic(verbose = true))
+  }
+
+  test("Option field") {
+    assertEquals(ok(Flagged.parse[Basic](Seq("--tag", "beta"))), Basic(tag = Some("beta")))
+    assertEquals(ok(Flagged.parse[Basic](Nil)).tag, None)
+  }
+
+  test("kebab-case naming") {
+    assertEquals(ok(Flagged.parse[Basic](Seq("--max-retries", "9"))).maxRetries, 9)
+  }
+
+  test("last occurrence wins for single-value options") {
+    assertEquals(ok(Flagged.parse[Basic](Seq("-o", "a", "-o", "b"))).output, "b")
+  }
+
+  test("missing required option") {
+    val m = err(Flagged.parse[Required](Nil))
+    assert(m.contains("--host"), m)
+  }
+
+  test("required option provided") {
+    assertEquals(ok(Flagged.parse[Required](Seq("--host", "example.com"))), Required("example.com"))
+  }
+
+  test("invalid int value") {
+    val m = err(Flagged.parse[Required](Seq("--host", "h", "--port", "banana")))
+    assert(m.contains("--port") && m.contains("banana"), m)
+  }
+
+  test("unknown long option with suggestion") {
+    val m = err(Flagged.parse[Basic](Seq("--outpot", "x")))
+    assert(m.contains("unknown option '--outpot'"), m)
+    assert(m.contains("did you mean '--output'"), m)
+  }
+
+  test("unknown short option") {
+    val m = err(Flagged.parse[Basic](Seq("-z")))
+    assert(m.contains("unknown option '-z'"), m)
+  }
+
+  test("option missing its value") {
+    val m = err(Flagged.parse[Basic](Seq("--output")))
+    assert(m.contains("requires a value"), m)
+  }
+
+  test("option value that looks like an option is rejected") {
+    val m = err(Flagged.parse[Basic](Seq("--output", "--verbose")))
+    assert(m.contains("requires a value"), m)
+  }
+
+  test("repeated list option") {
+    assertEquals(
+      ok(Flagged.parse[Collections](Seq("-f", "a", "--file", "b", "-fc"))),
+      Collections(file = List("a", "b", "c"))
+    )
+  }
+
+  test("repeated vector option with element parsing") {
+    assertEquals(
+      ok(Flagged.parse[Collections](Seq("--nums", "1", "--nums", "2"))),
+      Collections(nums = Vector(1, 2))
+    )
+  }
+
+  test("positional arguments in order") {
+    assertEquals(
+      ok(Flagged.parse[WithPositionals](Seq("in.txt", "out.txt"))),
+      WithPositionals("in.txt", Some("out.txt"))
+    )
+  }
+
+  test("optional positional omitted") {
+    assertEquals(ok(Flagged.parse[WithPositionals](Seq("in.txt"))), WithPositionals("in.txt", None))
+  }
+
+  test("missing required positional") {
+    val m = err(Flagged.parse[WithPositionals](Nil))
+    assert(m.contains("<input>"), m)
+  }
+
+  test("positionals mixed with options") {
+    assertEquals(
+      ok(Flagged.parse[WithPositionals](Seq("-n", "in.txt", "out.txt"))),
+      WithPositionals("in.txt", Some("out.txt"), dryRun = true)
+    )
+    assertEquals(
+      ok(Flagged.parse[WithPositionals](Seq("in.txt", "-n", "out.txt"))),
+      WithPositionals("in.txt", Some("out.txt"), dryRun = true)
+    )
+  }
+
+  test("too many positionals") {
+    val m = err(Flagged.parse[WithPositionals](Seq("a", "b", "c")))
+    assert(m.contains("unexpected argument 'c'"), m)
+  }
+
+  test("repeated positional collects everything") {
+    assertEquals(
+      ok(Flagged.parse[VarargPositionals](Seq("a", "b", "-v", "c"))),
+      VarargPositionals(verbose = true, files = List("a", "b", "c"))
+    )
+  }
+
+  test("-- ends option parsing") {
+    assertEquals(
+      ok(Flagged.parse[VarargPositionals](Seq("a", "--", "-v", "--weird"))),
+      VarargPositionals(verbose = false, files = List("a", "-v", "--weird"))
+    )
+  }
+
+  test("bundled short flags") {
+    case class Flags(
+        @short('a') alpha: Boolean = false,
+        @short('b') beta: Boolean = false,
+        @short('c') gamma: Boolean = false
+    ) derives Parser
+    assertEquals(ok(Flagged.parse[Flags](Seq("-abc"))), Flags(true, true, true))
+  }
+
+  test("bundled flags ending in a value option") {
+    case class Mixed(
+        @short('v') verbose: Boolean = false,
+        @short('o') output: String = ""
+    ) derives Parser
+    assertEquals(ok(Flagged.parse[Mixed](Seq("-vo", "x"))), Mixed(true, "x"))
+    assertEquals(ok(Flagged.parse[Mixed](Seq("-vox"))), Mixed(true, "x"))
+  }
+
+  test("negative numbers are values, not options") {
+    case class Neg(@positional n: Int, offset: Int = 0) derives Parser
+    assertEquals(ok(Flagged.parse[Neg](Seq("-5", "--offset", "-3"))), Neg(-5, -3))
+  }
+
+  test("single dash is a positional value") {
+    case class Dash(@positional input: String) derives Parser
+    assertEquals(ok(Flagged.parse[Dash](Seq("-"))), Dash("-"))
+  }
+
+  test("@name overrides the long name") {
+    case class Named(@name("out") @help("x") outputFileName: String = "a") derives Parser
+    assertEquals(ok(Flagged.parse[Named](Seq("--out", "b"))), Named("b"))
+    val m = err(Flagged.parse[Named](Seq("--output-file-name", "b")))
+    assert(m.contains("unknown option"), m)
+  }
+
+  test("a Trailing field collects the raw arguments after --") {
+    case class Exec(@short('v') verbose: Boolean = false, rest: Trailing = Trailing(Nil))
+        derives Parser
+    assertEquals(
+      ok(Flagged.parse[Exec](Seq("-v", "--", "-x", "--weird", "--"))),
+      Exec(verbose = true, rest = Trailing(List("-x", "--weird", "--")))
+    )
+    assertEquals(ok(Flagged.parse[Exec](Seq("-v"))), Exec(verbose = true))
+  }
+
+  test("Option[Trailing] distinguishes absent -- from present-but-empty") {
+    case class Exec(cmd: String = "sh", rest: Option[Trailing] = None) derives Parser
+    assertEquals(ok(Flagged.parse[Exec](Nil)).rest, None)
+    assertEquals(ok(Flagged.parse[Exec](Seq("--"))).rest, Some(Trailing(Nil)))
+    assertEquals(ok(Flagged.parse[Exec](Seq("--", "a"))).rest, Some(Trailing(List("a"))))
+  }
+
+  test("custom trailing parsers can require arguments") {
+    case class Cmdline(parts: List[String])
+    given Parser[Cmdline] = Parser.trailing(l =>
+      if l.isEmpty then Err("expected a command after '--'") else Ok(Cmdline(l))
+    )
+    case class Run(image: String = "img", cmd: Cmdline) derives Parser
+    assertEquals(ok(Flagged.parse[Run](Seq("--", "echo", "hi"))).cmd, Cmdline(List("echo", "hi")))
+    val m = err(Flagged.parse[Run](Nil))
+    assert(m.contains("expected a command after '--'"), m)
+  }
+
+  test("without a trailing field, -- still escapes option parsing") {
+    // (VarargPositionals behavior, asserted again next to the trailing tests)
+    assertEquals(
+      ok(Flagged.parse[VarargPositionals](Seq("a", "--", "-v"))),
+      VarargPositionals(verbose = false, files = List("a", "-v"))
+    )
+  }
+
+  test("trailing fields appear in usage and help") {
+    case class Exec(@help("Command to run in the container") rest: Trailing = Trailing(Nil))
+        derives Parser
+    Flagged.parse[Exec](Seq("--help")) match
+      case Err(ParseError.Help(t)) =>
+        assert(t.contains("[-- <args>]"), t)
+        assert(t.contains("Command to run in the container"), t)
+      case other => fail(s"expected help, got $other")
+  }
