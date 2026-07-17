@@ -72,7 +72,6 @@ class SpliceSuite extends munit.FunSuite:
     case class Range(lo: Int = 0, hi: Int = 10)
     val p = Parser.Command
       .derived[Range]
-      .parser
       .emap(r => if r.lo <= r.hi then Ok(r) else Err(s"lo (${r.lo}) must not exceed hi (${r.hi})"))
     assertEquals(ok(p.parse(Seq("--lo", "3"))), Range(3, 10))
     p.parse(Seq("--lo", "5", "--hi", "3")) match
@@ -82,9 +81,8 @@ class SpliceSuite extends munit.FunSuite:
 
   test("a validated options group keeps its validation when spliced") {
     case class Window(min: Int = 0, max: Int = 100)
-    given Parser[Window] = Parser.Command
+    given Parser.Command[Window] = Parser.Command
       .derived[Window]
-      .parser
       .emap(w => if w.min <= w.max then Ok(w) else Err("min must not exceed max"))
     case class App(label: String = "", window: Window = Window()) derives Parser.Command
     assertEquals(ok(Flagged.parse[App](Seq("--min", "5"))), App("", Window(5, 100)))
@@ -99,10 +97,18 @@ class SpliceSuite extends munit.FunSuite:
     assert(e.getMessage.contains("options group 'logging'"), e.getMessage)
   }
 
-  test("Option of a spliced group is rejected") {
-    case class Bad(logging: Option[LogOpts] = None)
+  test("Option of a spliced group is rejected at compile time") {
+    val e = compileErrors("case class Bad(logging: Option[LogOpts] = None) derives Parser.Command")
+    assert(e.contains("Option of a spliced options group"), e)
+  }
+
+  test("a spliced group with a trailing field is rejected") {
+    // previously produced a silent null: the splice copies only the child's options,
+    // so the child's trailing slot could never be filled
+    case class WithTrailing(x: Int = 1, rest: Trailing = Trailing(Nil)) derives Parser.Command
+    case class Bad(g: WithTrailing = WithTrailing())
     val e = intercept[IllegalArgumentException](Parser.Command.derived[Bad])
-    assert(e.getMessage.contains("Option of a spliced options group"), e.getMessage)
+    assert(e.getMessage.contains("cannot contain a trailing field"), e.getMessage)
   }
 
   test("a spliced group with positionals is rejected") {
@@ -112,6 +118,6 @@ class SpliceSuite extends munit.FunSuite:
     assert(e.getMessage.contains("cannot contain positional fields"), e.getMessage)
   }
 
-enum Deploy derives Parser.Command:
+enum Deploy derives Parser.CommandGroup:
   case Run(logging: LogOpts = LogOpts())
   case Stop

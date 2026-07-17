@@ -13,7 +13,7 @@ case class Output(
 /** A git-like CLI demonstrating nested subcommands derived from enums. */
 @name("gitto")
 @help("gitto — a tiny, definitely-not-git version control tool")
-enum Gitto derives Parser.Command:
+enum Gitto derives Parser.CommandGroup:
   @help("Clone a repository into a new directory")
   case Clone(
       @positional @help("Repository URL") repo: String,
@@ -29,7 +29,7 @@ enum Gitto derives Parser.Command:
       output: Output = Output()
   )
 
-enum RemoteAction derives Parser.Command:
+enum RemoteAction derives Parser.CommandGroup:
   @help("Add a remote named <name> for the repository at <url>")
   case Add(
       @positional name: String,

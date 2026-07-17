@@ -243,7 +243,34 @@ class OptionsSuite extends munit.FunSuite:
     // static too — a derives clause no longer erases the shape
     val e4 =
       compileErrors("case class C(@positional action: SimpleAction) derives Parser.Command")
-    assert(e4.contains("@positional cannot be combined with a command-shaped Parser"), e4)
+    assert(e4.contains("@positional cannot be combined with a subcommand field"), e4)
+  }
+
+  test("cross-field and annotation rules for command shapes are compile errors") {
+    val e1 = compileErrors(
+      "case class C(a: SimpleAction, b: SimpleAction) derives Parser.Command"
+    )
+    assert(e1.contains("only one subcommand field is supported per command"), e1)
+    val e2 = compileErrors(
+      "case class C(@positional x: Int = 0, action: SimpleAction) derives Parser.Command"
+    )
+    assert(e2.contains("mixing positional fields with a subcommand field"), e2)
+    val e3 = compileErrors(
+      "case class C(@short('a') action: SimpleAction) derives Parser.Command"
+    )
+    assert(e3.contains("@short has no effect on a subcommand field"), e3)
+    val e4 = compileErrors(
+      "case class C(@name(\"g\") g: LogOpts) derives Parser.Command"
+    )
+    assert(e4.contains("@name has no effect on a spliced options group"), e4)
+  }
+
+  test("a shape-erased instance is rejected statically") {
+    val e = compileErrors(
+      """given Parser[Byte] = Parser.of[Byte]("b")(s => Err("no"))
+         case class C(b: Byte = 0) derives Parser.Command"""
+    )
+    assert(e.contains("not statically known"), e)
   }
 
   test("bare flags are rejected statically in Option and positional position") {
@@ -308,7 +335,7 @@ class OptionsSuite extends munit.FunSuite:
 
   test("custom trailing parsers can require arguments") {
     case class Cmdline(parts: List[String])
-    given Parser[Cmdline] = Parser.trailing(l =>
+    given Parser.Trailing[Cmdline] = Parser.trailing(l =>
       if l.isEmpty then Err("expected a command after '--'") else Ok(Cmdline(l))
     )
     case class Run(image: String = "img", cmd: Cmdline) derives Parser.Command

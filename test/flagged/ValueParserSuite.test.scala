@@ -57,7 +57,7 @@ class ValueParserSuite extends munit.FunSuite:
   }
 
   test("map/emap combinators") {
-    given portParser: Parser[Int] = Parser.of[Int]("port")(s =>
+    given portParser: Parser.Value[Int] = Parser.of[Int]("port")(s =>
       s.toIntOption match
         case Some(p) if p > 0 && p < 65536 => Ok(p)
         case Some(_)                       => Err(s"'$s' out of range")
@@ -86,7 +86,8 @@ class ValueParserSuite extends munit.FunSuite:
   test("flag shape is pluggable via Parser.flag") {
     enum Volume:
       case Quiet, Loud
-    given Parser[Volume] = Parser.flag(n => Ok(if n > 0 then Volume.Loud else Volume.Quiet))
+    given Parser.Flag[Volume] =
+      Parser.flag(n => Ok(if n > 0 then Volume.Loud else Volume.Quiet))
     case class Player(@short('l') loud: Volume = Volume.Quiet) derives Parser.Command
     assertEquals(ok(Flagged.parse[Player](Seq("-l"))).loud, Volume.Loud)
     assertEquals(ok(Flagged.parse[Player](Nil)).loud, Volume.Quiet)
@@ -98,7 +99,7 @@ class ValueParserSuite extends munit.FunSuite:
 
   test("a flag reader can bound the occurrence count") {
     case class Verbosity(n: Int)
-    given Parser[Verbosity] =
+    given Parser.Flag[Verbosity] =
       Parser.flag(n => if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)"))
     case class C(@short('v') verbose: Verbosity = Verbosity(0)) derives Parser.Command
     assertEquals(ok(Flagged.parse[C](Seq("-vv"))).verbose, Verbosity(2))
@@ -108,7 +109,8 @@ class ValueParserSuite extends munit.FunSuite:
   }
 
   test("any type can opt into repeated shape via Parser.repeated") {
-    given Parser[Set[String]] = Parser.repeated[String, Set[String]](l => Ok(l.toSet))
+    given Parser.Repeated[Set[String]] =
+      Parser.repeated[String, Set[String]](l => Ok(l.toSet))
     case class Tags(tag: Set[String] = Set.empty) derives Parser.Command
     assertEquals(
       ok(Flagged.parse[Tags](Seq("--tag", "a", "--tag", "b", "--tag", "a"))),
@@ -119,7 +121,7 @@ class ValueParserSuite extends munit.FunSuite:
 
   test("a repeated reader can require at least one occurrence") {
     case class AtLeastOne(xs: List[Int])
-    given Parser[AtLeastOne] = Parser.repeated[Int, AtLeastOne](l =>
+    given Parser.Repeated[AtLeastOne] = Parser.repeated[Int, AtLeastOne](l =>
       if l.isEmpty then Err("expected at least one occurrence") else Ok(AtLeastOne(l))
     )
     case class Cfg(num: AtLeastOne) derives Parser.Command
@@ -134,12 +136,12 @@ class ValueParserSuite extends munit.FunSuite:
   }
 
   test("emap composes over a repeated reader") {
-    given Parser[Int] =
+    given Parser.Value[Int] =
       Parser.of[Int]("int")(s => s.toIntOption.fold(Err(s"'$s' not an int"))(Ok(_)))
-    given Parser[List[Int]] =
-      Parser[List[Int]](using Parser.repeated[Int, List[Int]](l => Ok(l))).emap(l =>
-        if l.sum > 10 then Err("sum too large") else Ok(l)
-      )
+    given Parser.Repeated[List[Int]] =
+      Parser
+        .repeated[Int, List[Int]](l => Ok(l))
+        .emap(l => if l.sum > 10 then Err("sum too large") else Ok(l))
     case class Sums(n: List[Int] = Nil) derives Parser.Command
     assertEquals(ok(Flagged.parse[Sums](Seq("--n", "1", "--n", "2"))), Sums(List(1, 2)))
     Flagged.parse[Sums](Seq("--n", "9", "--n", "9")) match
