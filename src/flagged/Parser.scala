@@ -222,14 +222,16 @@ object Parser:
   def make[A](cmd: flagged.internal.Command, prog: String): Aux[A, Shape.Command] =
     mk(Schema.Command(cmd, prog))
 
-  /** Derivation entry point for `derives Parser` clauses; also usable directly:
-    * `given Parser[Config] = Parser.derived`.
-    *
-    * Derivation is `Mirror`-based and compositional: fields use the `Parser` given for their type —
-    * command-shaped instances become subcommands (sums) or spliced option groups (products);
-    * value-shaped instances parse as option values.
-    */
-  inline def derived[A](using Mirror.Of[A]): Aux[A, Shape.Command] = internal.Derive.of[A]
+  final class Command[A](val parser: Parser.Aux[A, Shape.Command])
+  object Command:
+    /** Derivation entry point for `derives Parser.Command` clauses; also usable directly:
+      * `given Parser.Command[Config] = Parser.derived`.
+      *
+      * Derivation is `Mirror`-based and compositional: fields use the `Parser` given for their type
+      * — command-shaped instances become subcommands (sums) or spliced option groups (products);
+      * value-shaped instances parse as option values.
+      */
+    inline def derived[A](using m: Mirror.Of[A]): Command[A] = new Command[A](internal.Derive.of[A])
 
   /** A parser for an enum whose cases are all parameterless, matched by kebab-cased case name,
     * case-insensitively. Usable directly or via `derives Parser.Enumerated`.
@@ -246,7 +248,8 @@ object Parser:
     inline def derived[A](using Mirror.SumOf[A]): Parser.Enumerated[A] =
       Parser.Enumerated(enumerated[A])
 
-  given fromEnum[A](using e: Parser.Enumerated[A]): Aux[A, Shape.Value] = e.parser
+  given fromEnum[A](using e: Parser.Enumerated[A]): Aux[A, Shape.Value]   = e.parser
+  given fromCommand[A](using e: Parser.Command[A]): Aux[A, Shape.Command] = e.parser
 
   given [A](using Parser[A]): Aux[List[A], Shape.Repeated]   = repeated[A, List[A]](l => Ok(l))
   given [A](using Parser[A]): Aux[Vector[A], Shape.Repeated] =

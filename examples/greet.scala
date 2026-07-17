@@ -8,7 +8,7 @@ case class Greet(
     @short('n') @help("Who to greet") name: String = "world",
     @short('e') @help("Add excitement") excited: Boolean = false,
     @short('r') @help("How many times to greet") repeat: Int = 1
-) derives Parser
+) derives Parser.Command
 
 @main def greetMain(args: String*): Unit =
   val cfg    = Flagged.parseOrExit[Greet](args)

@@ -6,7 +6,7 @@ case class Backup(
     @short('d') @help("Destination directory") dest: String,
     @short('n') @help("Print actions without copying") dryRun: Boolean = false,
     @positional @help("Directories to back up") sources: List[String] = Nil
-) derives Parser
+) derives Parser.Command
 
 val cfg  = Flagged.parseOrExit[Backup](args.toSeq, prog = "backup")
 val verb = if cfg.dryRun then "Would copy" else "Copying"

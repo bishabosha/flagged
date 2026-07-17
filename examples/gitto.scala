@@ -8,12 +8,12 @@ import flagged.*
 case class Output(
     @short('q') @help("Operate quietly") quiet: Boolean = false,
     @short('v') @help("Increase verbosity (repeatable)") verbose: Count = Count(0)
-) derives Parser
+) derives Parser.Command
 
 /** A git-like CLI demonstrating nested subcommands derived from enums. */
 @name("gitto")
 @help("gitto — a tiny, definitely-not-git version control tool")
-enum Gitto derives Parser:
+enum Gitto derives Parser.Command:
   @help("Clone a repository into a new directory")
   case Clone(
       @positional @help("Repository URL") repo: String,
@@ -29,7 +29,7 @@ enum Gitto derives Parser:
       output: Output = Output()
   )
 
-enum RemoteAction derives Parser:
+enum RemoteAction derives Parser.Command:
   @help("Add a remote named <name> for the repository at <url>")
   case Add(
       @positional name: String,
