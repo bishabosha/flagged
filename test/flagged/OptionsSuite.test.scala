@@ -225,3 +225,47 @@ class OptionsSuite extends munit.FunSuite:
     val m = err(Flagged.parse[Named](Seq("--output-file-name", "b")))
     assert(m.contains("unknown option"), m)
   }
+
+  test("a Trailing field collects the raw arguments after --") {
+    case class Exec(@short('v') verbose: Boolean = false, rest: Trailing = Trailing(Nil)) derives Parser
+    assertEquals(
+      ok(Flagged.parse[Exec](Seq("-v", "--", "-x", "--weird", "--"))),
+      Exec(verbose = true, rest = Trailing(List("-x", "--weird", "--")))
+    )
+    assertEquals(ok(Flagged.parse[Exec](Seq("-v"))), Exec(verbose = true))
+  }
+
+  test("Option[Trailing] distinguishes absent -- from present-but-empty") {
+    case class Exec(cmd: String = "sh", rest: Option[Trailing] = None) derives Parser
+    assertEquals(ok(Flagged.parse[Exec](Nil)).rest, None)
+    assertEquals(ok(Flagged.parse[Exec](Seq("--"))).rest, Some(Trailing(Nil)))
+    assertEquals(ok(Flagged.parse[Exec](Seq("--", "a"))).rest, Some(Trailing(List("a"))))
+  }
+
+  test("custom trailing parsers can require arguments") {
+    case class Cmdline(parts: List[String])
+    given Parser[Cmdline] = Parser.trailing(l =>
+      if l.isEmpty then Err("expected a command after '--'") else Ok(Cmdline(l))
+    )
+    case class Run(image: String = "img", cmd: Cmdline) derives Parser
+    assertEquals(ok(Flagged.parse[Run](Seq("--", "echo", "hi"))).cmd, Cmdline(List("echo", "hi")))
+    val m = err(Flagged.parse[Run](Nil))
+    assert(m.contains("expected a command after '--'"), m)
+  }
+
+  test("without a trailing field, -- still escapes option parsing") {
+    // (VarargPositionals behavior, asserted again next to the trailing tests)
+    assertEquals(
+      ok(Flagged.parse[VarargPositionals](Seq("a", "--", "-v"))),
+      VarargPositionals(verbose = false, files = List("a", "-v"))
+    )
+  }
+
+  test("trailing fields appear in usage and help") {
+    case class Exec(@help("Command to run in the container") rest: Trailing = Trailing(Nil)) derives Parser
+    Flagged.parse[Exec](Seq("--help")) match
+      case Err(ParseError.Help(t)) =>
+        assert(t.contains("[-- <args>]"), t)
+        assert(t.contains("Command to run in the container"), t)
+      case other => fail(s"expected help, got $other")
+  }

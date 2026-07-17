@@ -60,12 +60,25 @@ object Assemble:
           case None    => invalid("a flag parser without a value parser cannot be run standalone")
       case Parser.Schema.Repeated(element, build) =>
         Mode.Repeated(readFn(element), build.asInstanceOf[List[Any] => Result[Any, String]])
+      case Parser.Schema.Trailing(build) =>
+        val spec = TrailingSpec(0, "", build.asInstanceOf[List[String] => Result[Any, String]], false, None)
+        return Command(
+          "",
+          Vector.empty,
+          Vector.empty,
+          None,
+          Some(spec),
+          Nil,
+          arr => steps.result.Result.Ok(arr(0)),
+          1
+        )
       case Parser.Schema.Command(impl, _) =>
         return impl
     Command(
       "",
       Vector.empty,
       Vector(PosSpec("value", "", p.typeName, 0, mode, None)),
+      None,
       None,
       Nil,
       arr => steps.result.Result.Ok(arr(0)),
@@ -86,6 +99,7 @@ object Assemble:
       Vector.empty,
       Vector.empty,
       Some(SubGroup(0, false, None, cases.toVector)),
+      None,
       Nil,
       arr => steps.result.Result.Ok(arr(0)),
       1
@@ -101,7 +115,8 @@ object Assemble:
     val n                          = labels.length
     val opts                       = Vector.newBuilder[OptSpec]
     val poss                       = Vector.newBuilder[PosSpec]
-    var subGroup: Option[SubGroup] = None
+    var subGroup: Option[SubGroup]      = None
+    var trailing: Option[TrailingSpec]  = None
     val splices                    = List.newBuilder[Splice]
     var storage                    = n // spliced children's specs live past the parent's own slots
     val longSeen                   = mutable.Set.empty[String]
@@ -189,6 +204,16 @@ object Assemble:
                 )
           else addOpt("", Mode.Flag(fc, fv))
 
+        case Parser.Schema.Trailing(buildList) =>
+          if anns.positional then
+            invalid(s"field '$label': @positional cannot be combined with a trailing field")
+          if anns.short.nonEmpty then
+            invalid(s"field '$label': @short cannot be combined with a trailing field")
+          if trailing.nonEmpty then invalid("only one trailing field is supported per command")
+          trailing = Some(
+            TrailingSpec(i, help, buildList.asInstanceOf[List[String] => Result[Any, String]], optional, default)
+          )
+
         case Parser.Schema.Repeated(element, buildList) =>
           if optional then invalid(s"field '$label': Option of a repeated Parser is not supported")
           element.schema match
@@ -220,6 +245,7 @@ object Assemble:
       opts.result(),
       poss.result(),
       subGroup,
+      trailing,
       allSplices,
       fullBuild,
       storage

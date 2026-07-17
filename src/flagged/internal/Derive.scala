@@ -3,7 +3,7 @@ package flagged.internal
 import scala.compiletime.*
 import scala.deriving.Mirror
 import flagged.Parser
-import flagged.meta.{Defaults, AnnotMirror}
+import flagged.meta.Defaults
 
 /** `Mirror`-based derivation. Structure and construction come from `Mirror`; field semantics are
   * the field parser's schema: command-shaped instances become nested subcommands (sums) or spliced
@@ -11,8 +11,8 @@ import flagged.meta.{Defaults, AnnotMirror}
   * across type boundaries — each enum or options group in a command tree provides its own instance.
   *
   * The only macro-backed pieces are [[Defaults]] (term-level: default values are arbitrary
-  * expressions) and [[AnnotMirror]] (type-level: annotations reduced to singleton types, extracted
-  * here via [[AnnotMirror.find]] into typed [[Annots]]).
+  * expressions) and [[flagged.meta.AnnotMirror]] (type-level: annotations reduced to singleton types, extracted
+  * here via [[flagged.meta.AnnotMirror.find]] into typed [[Annots]]).
   */
 object Derive:
 

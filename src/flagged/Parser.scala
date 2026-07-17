@@ -15,12 +15,22 @@ final case class Count(value: Int)
 object Count:
   given Parser[Count] = Parser.flag(n => Ok(Count(n)))
 
+/** The raw arguments after `--`, collected verbatim (no option parsing). Empty when
+  * no `--` is given; use `Option[Trailing]` to distinguish an absent `--` from a
+  * present-but-empty one.
+  */
+final case class Trailing(args: List[String])
+
+object Trailing:
+  given Parser[Trailing] = Parser.trailing(l => Ok(Trailing(l)))
+
 /** Describes how command-line input becomes an `A`. The underlying
   * [[Parser.Schema]] encodes the *shape*:
   *
   *   - `Value` — one token per occurrence (numbers, paths, enum-by-name values, ...)
   *   - `Flag` — no token; built from the occurrence count (booleans, counters)
   *   - `Repeated` — any number of occurrences, combined from an element parser
+  *   - `Trailing` — the raw arguments after `--`, taken verbatim
   *   - `Command` — a full command grammar: options, positionals, subcommands
   *
   * The same type is used at every level: a field whose parser is command-shaped
@@ -44,6 +54,7 @@ sealed trait Parser[A]:
     case Parser.Schema.Value(name, _)       => name
     case Parser.Schema.Flag(_, _)           => "flag"
     case Parser.Schema.Repeated(element, _) => element.typeName
+    case Parser.Schema.Trailing(_)          => "args"
     case Parser.Schema.Command(_, prog)     => prog
 
   /** Parse a single token (for repeated parsers: one element, then combine; for
@@ -54,6 +65,7 @@ sealed trait Parser[A]:
     case Parser.Schema.Flag(_, fromValue) =>
       fromValue.fold(Err(s"'$s': this flag does not take a value"))(f => f(s))
     case Parser.Schema.Repeated(element, build) => element.read(s).flatMap(e => build(List(e)))
+    case Parser.Schema.Trailing(build)          => build(List(s))
     case Parser.Schema.Command(_, prog) => Err(s"'$s': '$prog' is a command parser, not a single value")
 
   final def map[B](f: A => B): Parser[B] = emap(a => Ok(f(a)))
@@ -68,6 +80,8 @@ sealed trait Parser[A]:
         Parser.Schema.Flag(n => fromCount(n).flatMap(f), fromValue.map(g => s => g(s).flatMap(f)))
       case Parser.Schema.Repeated(element, build) =>
         Parser.Schema.Repeated(element, l => build(l).flatMap(f))
+      case Parser.Schema.Trailing(build) =>
+        Parser.Schema.Trailing(l => build(l).flatMap(f))
       case Parser.Schema.Command(impl, prog) =>
         Parser.Schema.Command(
           impl.copy(build = arr => impl.build(arr).flatMap(a => f(a.asInstanceOf[A]))),
@@ -80,6 +94,7 @@ sealed trait Parser[A]:
       case Parser.Schema.Value(_, parse)          => Parser.Schema.Value(name, parse)
       case flag: Parser.Schema.Flag[A]            => flag
       case Parser.Schema.Repeated(element, build) => Parser.Schema.Repeated(element.withTypeName(name), build)
+      case trailing: Parser.Schema.Trailing[A]    => trailing
       case Parser.Schema.Command(impl, _)         => Parser.Schema.Command(impl, name)
 
   /** The command grammar: command shapes directly; value shapes as a command line
@@ -137,6 +152,11 @@ object Parser:
       */
     case Repeated[E, T](element: Parser[E], build: List[E] => Result[T, String]) extends Schema[T]
 
+    /** The raw arguments after `--`, taken verbatim; `build` combines them (also
+      * invoked with `Nil` when no `--` is given — return `Err` to require one).
+      */
+    case Trailing[T](build: List[String] => Result[T, String]) extends Schema[T]
+
     /** A full command grammar: named options, positionals, subcommands, splices. */
     case Command[T](impl: flagged.internal.Command, prog: String) extends Schema[T]
 
@@ -164,6 +184,10 @@ object Parser:
     */
   def repeated[E, A](build: List[E] => Result[A, String])(using element: Parser[E]): Parser[A] =
     fromSchema(Schema.Repeated(element, build))
+
+  /** Opt `A` into trailing shape: it is built from the raw arguments after `--`. */
+  def trailing[A](build: List[String] => Result[A, String]): Parser[A] =
+    fromSchema(Schema.Trailing(build))
 
   /** Called by derivation. Not intended for direct use. */
   def make[A](cmd: flagged.internal.Command, prog: String): Parser[A] =

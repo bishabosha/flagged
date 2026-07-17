@@ -106,7 +106,17 @@ private[flagged] object Engine:
           noMoreOpts || tok == "-" || !tok.startsWith("-") ||
             (isNegativeNumber(tok) && shortOf(tok(1)).isEmpty)
         if isFree then handleFree(tok)
-        else if tok == "--" then noMoreOpts = true
+        else if tok == "--" then
+          cmd.trailing match
+            case Some(t) =>
+              // divert everything after `--` to the trailing field, verbatim
+              t.build(rest) match
+                case Ok(v)    =>
+                  values(t.index) = if t.optional then Some(v) else v
+                  isSet(t.index) = true
+                case Err(msg) => fail(s"invalid arguments after '--': $msg")
+              rest = Nil
+            case None => noMoreOpts = true
         else if tok.startsWith("--") then
           val body = tok.drop(2)
           val (nm, inlineValue) = body.indexOf('=') match
@@ -211,6 +221,18 @@ private[flagged] object Engine:
       if missing.nonEmpty then
         val what = if missing.sizeIs == 1 then "argument" else "arguments"
         fail(s"missing required $what: ${missing.mkString(", ")}")
+
+      cmd.trailing.foreach { t =>
+        if !isSet(t.index) then
+          t.default match
+            case Some(d) => values(t.index) = d()
+            case None =>
+              if t.optional then values(t.index) = None
+              else
+                t.build(Nil) match
+                  case Ok(v)    => values(t.index) = v
+                  case Err(msg) => fail(s"missing arguments after '--': $msg")
+      }
 
       cmd.sub.foreach { g =>
         if !isSet(g.index) then

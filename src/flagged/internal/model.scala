@@ -56,11 +56,21 @@ final case class SubGroup(
   */
 final case class Splice(slot: Int, offset: Int, command: Command)
 
+/** A field collecting the raw arguments after `--`, verbatim. */
+final case class TrailingSpec(
+    index: Int,
+    help: String,
+    build: List[String] => Result[Any, String],
+    optional: Boolean,
+    default: Option[() => Any]
+)
+
 final case class Command(
     description: String,
     opts: Vector[OptSpec],
     positionals: Vector[PosSpec],
     sub: Option[SubGroup],
+    trailing: Option[TrailingSpec],
     splices: List[Splice],
     build: Array[Any] => Result[Any, String], // fallible: `emap` validation composes here
     arity: Int // value-storage size: own fields plus spliced children's storage
@@ -82,4 +92,4 @@ final case class Command(
 object Command:
   /** A command with no parameters that always produces `value` (parameterless enum case / case object). */
   def leaf(value: Any, description: String): Command =
-    Command(description, Vector.empty, Vector.empty, None, Nil, _ => Result.Ok(value), 0)
+    Command(description, Vector.empty, Vector.empty, None, None, Nil, _ => Result.Ok(value), 0)

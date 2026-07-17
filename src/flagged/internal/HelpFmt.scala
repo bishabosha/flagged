@@ -26,6 +26,12 @@ private[flagged] object HelpFmt:
       b ++= table(cmd.positionals.map(p => s"<${p.name}>" -> withExtras(p.help, posExtras(p))))
       b += '\n'
 
+    cmd.trailing.filter(_.help.nonEmpty).foreach { t =>
+      b ++= "\nArguments after --:\n"
+      b ++= table(Seq("-- <args>" -> t.help))
+      b += '\n'
+    }
+
     b ++= "\nOptions:\n"
     val optRows = cmd.opts.map(o => optLeft(o) -> withExtras(o.help, optExtras(o))) :+
       ("-h, --help" -> "Show this message and exit")
@@ -51,6 +57,7 @@ private[flagged] object HelpFmt:
     cmd.sub.foreach { g =>
       parts += (if g.optional || g.default.nonEmpty then "[<command>]" else "<command>")
     }
+    cmd.trailing.foreach { _ => parts += "[-- <args>]" }
     parts.result().mkString(" ")
 
   private def isRequiredPos(p: PosSpec): Boolean =

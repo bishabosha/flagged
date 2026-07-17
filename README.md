@@ -44,7 +44,9 @@ Try 'greet --help' for more information.
 
 Supported option syntax: `--name value` and `--name=value`; short aliases with
 separate (`-n Jamie`), attached (`-nJamie`), or `=` values; flag bundling (`-er`,
-`-rn 3`); `--` to end option parsing; `-` and negative numbers are treated as values.
+`-rn 3`); `--` to end option parsing — or, when a field of type `Trailing` is
+declared, to hand everything after it to that field verbatim (`run img -- cmd args`);
+`-` and negative numbers are treated as values.
 
 ## Getting flagged
 
@@ -70,6 +72,7 @@ repeats:
 | `x: A` (repeated-schema `Parser[A]`, e.g. `List`/`Seq`/`Vector`) | repeatable |
 | `x: E` (enum `E derives Parser`) | nested subcommands |
 | `x: P` (case class `P derives Parser`) | options group spliced into this command |
+| `x: Trailing` (or any trailing-schema `Parser[A]`) | the raw arguments after `--`, verbatim |
 | `@positional x: A` | positional argument (same rules) |
 
 Fine-tune with annotations:
