@@ -6,7 +6,23 @@ import steps.result.Result.{Ok, Err, eval}
 import steps.result.Result.eval.ok
 import scala.collection.mutable
 
-/** The token-stream parser. Interprets a `Command` tree against the argument list. */
+/** One occurrence of an option or positional on the command line. */
+private enum Occ:
+  /** A flag mention without a value (`-v`, `--verbose`). */
+  case Bare
+
+  /** A raw value, with the spelling it arrived under (for error messages). */
+  case Val(raw: String, display: String)
+
+/** The token-stream parser, in two orthogonal phases:
+  *
+  *   1. *routing* — walk the tokens, decide only which spec each one belongs to and whether it
+  *      consumes a value, and record raw [[Occ]]urrences per value slot (subcommands and `--`
+  *      trailing divert the remaining tokens immediately);
+  *   1. *finishing* — one uniform pass interprets each spec's occurrence list according to its
+  *      `Mode` (count flags, last-wins singles, combined repeats), falling back to defaults, then
+  *      builds the command's value.
+  */
 private[flagged] object Engine:
 
   def run(cmd: Command, prog: String, path: List[String], args: List[String]): ParseResult[Any] =
@@ -17,9 +33,9 @@ private[flagged] object Engine:
       def helpNow(): Nothing         = eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path)))
 
       val values     = new Array[Any](cmd.arity)
-      val isSet      = new Array[Boolean](cmd.arity)
-      val collected  = mutable.LinkedHashMap.empty[Int, mutable.ListBuffer[Any]]
-      val flagCounts = mutable.Map.empty[Int, Int].withDefaultValue(0)
+      val occs       = Array.fill(cmd.arity)(mutable.ListBuffer.empty[Occ])
+      var subValue   = Option.empty[Any]
+      var trailValue = Option.empty[Any]
       var rest       = args
       var posIdx     = 0
       var noMoreOpts = false
@@ -42,33 +58,9 @@ private[flagged] object Engine:
           case _ =>
             fail(s"option '$display' requires a value")
 
-      def readOr(read: String => Result[Any, String], raw: String, display: String): Any =
-        read(raw) match
-          case Ok(v)    => v
-          case Err(msg) => fail(s"invalid value for '$display': $msg")
-
-      def setParsed(spec: OptSpec, raw: String, display: String): Unit =
-        spec.mode match
-          case Mode.Flag(_, fromValue) =>
-            fromValue match
-              case None    => fail(s"flag '$display' does not take a value")
-              case Some(f) =>
-                values(spec.index) = readOr(f, raw, display)
-                isSet(spec.index) = true
-          case Mode.Single(read, optional) =>
-            val v = readOr(read, raw, display)
-            values(spec.index) = if optional then Some(v) else v
-            isSet(spec.index) = true
-          case Mode.Repeated(read, _) =>
-            collected.getOrElseUpdate(spec.index, mutable.ListBuffer.empty) += readOr(
-              read,
-              raw,
-              display
-            )
-            isSet(spec.index) = true
-
-      def setFlag(spec: OptSpec): Unit =
-        flagCounts(spec.index) += 1
+      def isFlag(spec: OptSpec): Boolean = spec.mode match
+        case Mode.Flag(_, _) => true
+        case _               => false
 
       def handleFree(tok: String): Unit =
         cmd.sub match
@@ -76,9 +68,7 @@ private[flagged] object Engine:
             g.cases.find(_.name == tok) match
               case Some(sc) =>
                 // .ok propagates the subcommand's Help/Failure to our caller unchanged
-                val v = run(sc.command, prog, path :+ sc.name, rest).ok
-                values(g.index) = if g.optional then Some(v) else v
-                isSet(g.index) = true
+                subValue = Some(run(sc.command, prog, path :+ sc.name, rest).ok)
                 rest = Nil
               case None =>
                 val sug = Runtime
@@ -89,18 +79,12 @@ private[flagged] object Engine:
           case None =>
             if posIdx >= cmd.positionals.length then fail(s"unexpected argument '$tok'")
             val p = cmd.positionals(posIdx)
+            occs(p.index) += Occ.Val(tok, s"<${p.name}>")
             p.mode match
-              case Mode.Repeated(read, _) =>
-                collected.getOrElseUpdate(p.index, mutable.ListBuffer.empty) +=
-                  readOr(read, tok, s"<${p.name}>")
-                isSet(p.index) = true
-              case Mode.Single(read, optional) =>
-                val v = readOr(read, tok, s"<${p.name}>")
-                values(p.index) = if optional then Some(v) else v
-                isSet(p.index) = true
-                posIdx += 1
-              case Mode.Flag(_, _) =>
-                fail(s"unexpected argument '$tok'") // positionals are never flags
+              case Mode.Repeated(_, _) => () // keep filling the last positional
+              case _                   => posIdx += 1
+
+      // ---- phase 1: routing ---------------------------------------------------
 
       while rest.nonEmpty do
         val tok = rest.head
@@ -115,9 +99,7 @@ private[flagged] object Engine:
             case Some(t) =>
               // divert everything after `--` to the trailing field, verbatim
               t.build(rest) match
-                case Ok(v) =>
-                  values(t.index) = if t.optional then Some(v) else v
-                  isSet(t.index) = true
+                case Ok(v)    => trailValue = Some(v)
                 case Err(msg) => fail(s"invalid arguments after '--': $msg")
               rest = Nil
             case None => noMoreOpts = true
@@ -135,14 +117,12 @@ private[flagged] object Engine:
                 .getOrElse("")
               fail(s"unknown option '--$nm'$sug")
             case Some(spec) =>
-              spec.mode match
-                case Mode.Flag(_, _) =>
-                  inlineValue match
-                    case None    => setFlag(spec)
-                    case Some(v) => setParsed(spec, v, s"--$nm")
-                case _ =>
-                  val raw = inlineValue.getOrElse(takeValue(s"--$nm"))
-                  setParsed(spec, raw, s"--$nm")
+              occs(spec.index) += {
+                inlineValue match
+                  case Some(v)              => Occ.Val(v, s"--$nm")
+                  case None if isFlag(spec) => Occ.Bare
+                  case None                 => Occ.Val(takeValue(s"--$nm"), s"--$nm")
+              }
         else
           // short option cluster: -v, -abc, -o value, -ovalue, -o=value
           var i             = 1
@@ -153,105 +133,91 @@ private[flagged] object Engine:
             shortOf(c) match
               case None =>
                 fail(s"unknown option '-$c'")
+              case Some(spec) if isFlag(spec) =>
+                occs(spec.index) += Occ.Bare
+                i += 1
               case Some(spec) =>
-                spec.mode match
-                  case Mode.Flag(_, _) =>
-                    setFlag(spec)
-                    i += 1
-                  case _ =>
-                    val attached = tok.drop(i + 1)
-                    val raw      =
-                      if attached.nonEmpty then
-                        if attached.startsWith("=") then attached.drop(1) else attached
-                      else takeValue(s"-$c")
-                    setParsed(spec, raw, s"-$c")
-                    consumedValue = true
+                val attached = tok.drop(i + 1)
+                val raw      =
+                  if attached.nonEmpty then
+                    if attached.startsWith("=") then attached.drop(1) else attached
+                  else takeValue(s"-$c")
+                occs(spec.index) += Occ.Val(raw, s"-$c")
+                consumedValue = true
 
-      def combineRepeated(
+      // ---- phase 2: finishing ---------------------------------------------------
+
+      def orFail[A](display: String)(r: Result[A, String]): A = r match
+        case Ok(v)    => v
+        case Err(msg) => fail(s"invalid value for '$display': $msg")
+
+      /** Interpret one spec's occurrences; `None` means a required value is missing. */
+      def finishSpec(
           display: String,
-          fromList: List[Any] => Result[Any, String],
-          elems: List[Any]
-      ): Any =
-        fromList(elems) match
-          case Ok(v)    => v
-          case Err(msg) => fail(s"invalid value for '$display': $msg")
+          mode: Mode,
+          default: Option[() => Any],
+          occurrences: List[Occ]
+      ): Option[Any] =
+        mode match
+          case Mode.Flag(fromCount, fromValue) =>
+            occurrences.collect { case v: Occ.Val => v }.lastOption match
+              case Some(v) =>
+                fromValue match
+                  case Some(f) => Some(orFail(v.display)(f(v.raw)))
+                  case None    => fail(s"flag '${v.display}' does not take a value")
+              case None if occurrences.nonEmpty =>
+                Some(orFail(display)(fromCount(occurrences.length)))
+              case None =>
+                Some(default.map(_()).getOrElse(orFail(display)(fromCount(0))))
+          case Mode.Single(read, optional) =>
+            occurrences.lastOption match
+              case Some(Occ.Val(raw, disp)) =>
+                val v = orFail(disp)(read(raw))
+                Some(if optional then Some(v) else v)
+              case _ =>
+                default.map(d => Some(d())).getOrElse(if optional then Some(None) else None)
+          case Mode.Repeated(read, fromList) =>
+            val vals = occurrences.collect { case Occ.Val(raw, disp) => orFail(disp)(read(raw)) }
+            if vals.nonEmpty then Some(orFail(display)(fromList(vals)))
+            else default.map(d => Some(d())).getOrElse(Some(orFail(display)(fromList(Nil))))
 
-      // materialize repeated values
-      collected.foreach { (idx, buf) =>
-        val entry = cmd.opts
-          .find(_.index == idx)
-          .map(o => (s"--${o.long}", o.mode))
-          .orElse(cmd.positionals.find(_.index == idx).map(p => (s"<${p.name}>", p.mode)))
-        entry match
-          case Some((display, Mode.Repeated(_, fromList))) =>
-            values(idx) = combineRepeated(display, fromList, buf.toList)
-          case _ =>
-            values(idx) = buf.toList
-      }
-
-      def countedFlag(display: String, fromCount: Int => Result[Any, String], n: Int): Any =
-        fromCount(n) match
-          case Ok(v)    => v
-          case Err(msg) => fail(s"invalid value for '$display': $msg")
-
-      // apply defaults, collect missing
       val missing = mutable.ListBuffer.empty[String]
+
       cmd.opts.foreach { o =>
-        if !isSet(o.index) then
-          o.mode match
-            case Mode.Flag(fromCount, _) =>
-              // occurrences beat the field default; absent means count 0
-              val n = flagCounts(o.index)
-              values(o.index) =
-                if n > 0 then countedFlag(s"--${o.long}", fromCount, n)
-                else o.default.map(_()).getOrElse(countedFlag(s"--${o.long}", fromCount, 0))
-            case _ =>
-              o.default match
-                case Some(d) => values(o.index) = d()
-                case None    =>
-                  o.mode match
-                    case Mode.Single(_, true)       => values(o.index) = None
-                    case Mode.Single(_, false)      => missing += s"--${o.long}"
-                    case Mode.Repeated(_, fromList) =>
-                      values(o.index) = combineRepeated(s"--${o.long}", fromList, Nil)
-                    case Mode.Flag(_, _) => () // handled above
+        finishSpec(s"--${o.long}", o.mode, o.default, occs(o.index).toList) match
+          case Some(v) => values(o.index) = v
+          case None    => missing += s"--${o.long}"
       }
       cmd.positionals.foreach { p =>
-        if !isSet(p.index) then
-          p.default match
-            case Some(d) => values(p.index) = d()
-            case None    =>
-              p.mode match
-                case Mode.Single(_, true)       => values(p.index) = None
-                case Mode.Single(_, false)      => missing += s"<${p.name}>"
-                case Mode.Repeated(_, fromList) =>
-                  values(p.index) = combineRepeated(s"<${p.name}>", fromList, Nil)
-                case Mode.Flag(fromCount, _) =>
-                  values(p.index) = countedFlag(s"<${p.name}>", fromCount, 0)
+        finishSpec(s"<${p.name}>", p.mode, p.default, occs(p.index).toList) match
+          case Some(v) => values(p.index) = v
+          case None    => missing += s"<${p.name}>"
       }
       if missing.nonEmpty then
         val what = if missing.sizeIs == 1 then "argument" else "arguments"
         fail(s"missing required $what: ${missing.mkString(", ")}")
 
       cmd.trailing.foreach { t =>
-        if !isSet(t.index) then
-          t.default match
-            case Some(d) => values(t.index) = d()
-            case None    =>
-              if t.optional then values(t.index) = None
+        values(t.index) = trailValue match
+          case Some(v) => if t.optional then Some(v) else v
+          case None    =>
+            t.default.map(_()).getOrElse {
+              if t.optional then None
               else
                 t.build(Nil) match
-                  case Ok(v)    => values(t.index) = v
+                  case Ok(v)    => v
                   case Err(msg) => fail(s"missing arguments after '--': $msg")
+            }
       }
 
       cmd.sub.foreach { g =>
-        if !isSet(g.index) then
-          g.default match
-            case Some(d)            => values(g.index) = d()
-            case None if g.optional => values(g.index) = None
-            case None               =>
-              fail(s"missing command (expected one of: ${g.cases.map(_.name).mkString(", ")})")
+        values(g.index) = subValue match
+          case Some(v) => if g.optional then Some(v) else v
+          case None    =>
+            g.default.map(_()).getOrElse {
+              if g.optional then None
+              else fail(s"missing command (expected one of: ${g.cases.map(_.name).mkString(", ")})")
+            }
       }
 
       cmd.finish(values) match

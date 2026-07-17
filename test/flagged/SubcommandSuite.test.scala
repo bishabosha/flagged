@@ -1,7 +1,7 @@
 package flagged
 
 @help("A tiny git-like tool")
-enum Git derives Parser:
+enum Git derives Parser.Command:
   @help("Clone a repository")
   case Clone(
       @positional @help("Repository URL") repo: String,
@@ -13,13 +13,13 @@ enum Git derives Parser:
   @help("Show status")
   case Status
 
-enum RemoteAction derives Parser:
+enum RemoteAction derives Parser.Command:
   @help("Add a remote")
   case Add(@positional name: String, @positional url: String)
   @help("Remove a remote")
   case Remove(@positional name: String)
 
-enum SimpleCmd derives Parser:
+enum SimpleCmd derives Parser.Command:
   case Start
   case Stop
 
@@ -27,15 +27,15 @@ enum SimpleCmd derives Parser:
 enum Color derives Parser.Enumerated:
   case Red, Green, DeepBlue
 
-case class Paint(color: Color = Color.Red, @positional what: String = "wall") derives Parser
+case class Paint(color: Color = Color.Red, @positional what: String = "wall") derives Parser.Command
 
 // optional subcommand
 case class Tool(
     @short('v') verbose: Boolean = false,
     action: Option[SimpleAction] = None
-) derives Parser
+) derives Parser.Command
 
-enum SimpleAction derives Parser:
+enum SimpleAction derives Parser.Command:
   case Run(@short('j') jobs: Int = 1)
   case Clean
 
@@ -136,7 +136,7 @@ class SubcommandSuite extends munit.FunSuite:
   }
 
   test("subcommand result via sealed trait") {
-    sealed trait Op derives Parser
+    sealed trait Op derives Parser.Command
     object Op:
       case class Add(@positional x: Int, @positional y: Int) extends Op
       case object Noop                                       extends Op
@@ -149,13 +149,13 @@ class SubcommandSuite extends munit.FunSuite:
 
   test("derivation reuses a Parser given in scope for a subcommand field") {
     // hand-modified parser for RemoteAction: every command name gets an "x-" prefix
-    val base    = Parser.derived[RemoteAction].command
+    val base    = Parser.Command.derived[RemoteAction].parser.command
     val renamed =
       base.sub.get.copy(cases = base.sub.get.cases.map(c => c.copy(name = s"x-${c.name}")))
     given custom: Parser[RemoteAction] =
       Parser.make(base.copy(sub = Some(renamed)), "remote-action")
 
-    case class Wrap(action: RemoteAction) derives Parser
+    case class Wrap(action: RemoteAction) derives Parser.Command
     // the derived Wrap parser must embed the custom instance, not re-derive structurally
     assertEquals(
       ok(Flagged.parse[Wrap](Seq("x-add", "origin", "https://x.git"))),
@@ -166,13 +166,15 @@ class SubcommandSuite extends munit.FunSuite:
   }
 
   test("a nested subcommand enum without its own Parser instance is a compile error") {
-    val errors = compileErrors("case class Root(action: NoDerive) derives Parser")
+    val errors = compileErrors("case class Root(action: NoDerive) derives Parser.Command")
     assert(errors.contains("No given Parser[flagged.NoDerive] found"), errors)
-    assert(errors.contains("derives Parser"), errors)
+    assert(errors.contains("derives Parser.Command"), errors)
   }
 
   test("structural misconfiguration reported when the parser is constructed") {
-    case class Dup(@name("x") a: Int = 0, @name("x") b: Int = 0)
-    val e = intercept[IllegalArgumentException](Parser.derived[Dup])
-    assert(e.getMessage.contains("duplicate option name '--x'"), e.getMessage)
+    // a label-derived name collides only after kebab-casing, which is value-level:
+    // this stays a construction-time error (constant @name collisions are static now)
+    case class Dup(maxRetries: Int = 0, @name("max-retries") b: Int = 0)
+    val e = intercept[IllegalArgumentException](Parser.Command.derived[Dup])
+    assert(e.getMessage.contains("duplicate option name '--max-retries'"), e.getMessage)
   }

@@ -4,9 +4,9 @@ package flagged
 case class LogOpts(
     @short('q') @help("Operate quietly") quiet: Boolean = false,
     @help("Log level") logLevel: String = "info"
-) derives Parser
+) derives Parser.Command
 
-case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser
+case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser.Command
 
 class SpliceSuite extends munit.FunSuite:
 
@@ -40,8 +40,8 @@ class SpliceSuite extends munit.FunSuite:
   }
 
   test("required options of a spliced group are enforced") {
-    case class Auth(@help("API token") token: String) derives Parser
-    case class App(url: String = "http://localhost", auth: Auth) derives Parser
+    case class Auth(@help("API token") token: String) derives Parser.Command
+    case class App(url: String = "http://localhost", auth: Auth) derives Parser.Command
     val m = err(Flagged.parse[App](Nil))
     assert(m.contains("--token"), m)
     assertEquals(
@@ -51,9 +51,9 @@ class SpliceSuite extends munit.FunSuite:
   }
 
   test("splices nest") {
-    case class Inner(a: Int = 1) derives Parser
-    case class Mid(b: Int = 2, inner: Inner = Inner()) derives Parser
-    case class Outer(c: Int = 3, mid: Mid = Mid()) derives Parser
+    case class Inner(a: Int = 1) derives Parser.Command
+    case class Mid(b: Int = 2, inner: Inner = Inner()) derives Parser.Command
+    case class Outer(c: Int = 3, mid: Mid = Mid()) derives Parser.Command
     assertEquals(
       ok(Flagged.parse[Outer](Seq("--a", "10", "--b", "20", "--c", "30"))),
       Outer(30, Mid(20, Inner(10)))
@@ -70,8 +70,9 @@ class SpliceSuite extends munit.FunSuite:
 
   test("emap composes over a command parser (cross-field validation)") {
     case class Range(lo: Int = 0, hi: Int = 10)
-    val p = Parser
+    val p = Parser.Command
       .derived[Range]
+      .parser
       .emap(r => if r.lo <= r.hi then Ok(r) else Err(s"lo (${r.lo}) must not exceed hi (${r.hi})"))
     assertEquals(ok(p.parse(Seq("--lo", "3"))), Range(3, 10))
     p.parse(Seq("--lo", "5", "--hi", "3")) match
@@ -81,10 +82,11 @@ class SpliceSuite extends munit.FunSuite:
 
   test("a validated options group keeps its validation when spliced") {
     case class Window(min: Int = 0, max: Int = 100)
-    given Parser[Window] = Parser
+    given Parser[Window] = Parser.Command
       .derived[Window]
+      .parser
       .emap(w => if w.min <= w.max then Ok(w) else Err("min must not exceed max"))
-    case class App(label: String = "", window: Window = Window()) derives Parser
+    case class App(label: String = "", window: Window = Window()) derives Parser.Command
     assertEquals(ok(Flagged.parse[App](Seq("--min", "5"))), App("", Window(5, 100)))
     val m = err(Flagged.parse[App](Seq("--min", "7", "--max", "2")))
     assert(m.contains("min must not exceed max"), m)
@@ -92,24 +94,24 @@ class SpliceSuite extends munit.FunSuite:
 
   test("a name collision between parent and spliced group is a construction error") {
     case class Clash(@short('q') quick: Boolean = false, logging: LogOpts = LogOpts())
-    val e = intercept[IllegalArgumentException](Parser.derived[Clash])
+    val e = intercept[IllegalArgumentException](Parser.Command.derived[Clash])
     assert(e.getMessage.contains("duplicate short option '-q'"), e.getMessage)
     assert(e.getMessage.contains("options group 'logging'"), e.getMessage)
   }
 
   test("Option of a spliced group is rejected") {
     case class Bad(logging: Option[LogOpts] = None)
-    val e = intercept[IllegalArgumentException](Parser.derived[Bad])
+    val e = intercept[IllegalArgumentException](Parser.Command.derived[Bad])
     assert(e.getMessage.contains("Option of a spliced options group"), e.getMessage)
   }
 
   test("a spliced group with positionals is rejected") {
-    case class WithPos(@positional input: String = "-") derives Parser
+    case class WithPos(@positional input: String = "-") derives Parser.Command
     case class Bad(files: WithPos = WithPos())
-    val e = intercept[IllegalArgumentException](Parser.derived[Bad])
+    val e = intercept[IllegalArgumentException](Parser.Command.derived[Bad])
     assert(e.getMessage.contains("cannot contain positional fields"), e.getMessage)
   }
 
-enum Deploy derives Parser:
+enum Deploy derives Parser.Command:
   case Run(logging: LogOpts = LogOpts())
   case Stop

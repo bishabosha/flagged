@@ -13,7 +13,7 @@ import flagged.internal.{Assemble, Engine, HelpFmt}
 final case class Count(value: Int)
 
 object Count:
-  given Parser[Count] = Parser.flag(n => Ok(Count(n)))
+  given Parser.Aux[Count, Parser.Shape.Flag] = Parser.flag(n => Ok(Count(n)))
 
 /** The raw arguments after `--`, collected verbatim (no option parsing). Empty when no `--` is
   * given; use `Option[Trailing]` to distinguish an absent `--` from a present-but-empty one.
@@ -21,7 +21,7 @@ object Count:
 final case class Trailing(args: List[String])
 
 object Trailing:
-  given Parser[Trailing] = Parser.trailing(l => Ok(Trailing(l)))
+  given Parser.Aux[Trailing, Parser.Shape.Trailing] = Parser.trailing(l => Ok(Trailing(l)))
 
 /** Describes how command-line input becomes an `A`. The underlying [[Parser.Schema]] encodes the
   * *shape*:
@@ -39,13 +39,21 @@ object Trailing:
   */
 @scala.annotation.implicitNotFound(
   "No given Parser[${A}] found.\n" +
-    "For a subcommand enum or a spliceable options group, add `derives Parser` to its definition;\n" +
+    "For a subcommand enum or a spliceable options group, add `derives Parser.Command` to its definition;\n" +
     "for an enum parsed by case name, add `derives Parser.Enumerated`;\n" +
     "for other value types provide one with Parser.of / Parser.flag / Parser.repeated."
 )
 sealed trait Parser[A]:
   self =>
   def schema: Parser.Schema[A]
+
+  /** The parser's shape at the type level. Library constructors, given instances, and the
+    * derivation witnesses (`Parser.Command`, `Parser.Enumerated`) refine this member (see
+    * [[Parser.Aux]]), letting derivation reject invalid shape/annotation combinations at compile
+    * time. Instances that reach a use site unrefined — a given explicitly ascribed to plain
+    * `Parser[A]` — are validated when the command is constructed instead.
+    */
+  type ShapeT <: Parser.Shape
 
   /** The help metavar for value shapes; the program name for command shapes. */
   final def typeName: String = schema match
@@ -67,12 +75,12 @@ sealed trait Parser[A]:
     case Parser.Schema.Command(_, prog)         =>
       Err(s"'$s': '$prog' is a command parser, not a single value")
 
-  final def map[B](f: A => B): Parser[B] = emap(a => Ok(f(a)))
+  final def map[B](f: A => B): Parser.Aux[B, ShapeT] = emap(a => Ok(f(a)))
 
   /** Validate/transform the parsed value. On command shapes this composes after the command is
     * built — parse-time cross-field validation.
     */
-  final def emap[B](f: A => Result[B, String]): Parser[B] = Parser.fromSchema:
+  final def emap[B](f: A => Result[B, String]): Parser.Aux[B, ShapeT] = Parser.mk[B, ShapeT]:
     schema match
       case Parser.Schema.Value(name, parse) => Parser.Schema.Value(name, s => parse(s).flatMap(f))
       case Parser.Schema.Flag(fromCount, fromValue) =>
@@ -88,7 +96,7 @@ sealed trait Parser[A]:
         )
 
   /** Rename the metavar (value shapes) or the default program name (command shapes). */
-  final def withTypeName(name: String): Parser[A] = Parser.fromSchema:
+  final def withTypeName(name: String): Parser.Aux[A, ShapeT] = Parser.mk[A, ShapeT]:
     schema match
       case Parser.Schema.Value(_, parse)          => Parser.Schema.Value(name, parse)
       case flag: Parser.Schema.Flag[A]            => flag
@@ -134,6 +142,27 @@ sealed trait Parser[A]:
 object Parser:
   def apply[A](using p: Parser[A]): Parser[A] = p
 
+  /** Type-level counterpart of [[Schema]]'s cases, carried by [[Parser.Aux]]. */
+  sealed trait Shape
+  object Shape:
+    sealed trait Value extends Shape
+    sealed trait Flag  extends Shape
+
+    /** A flag that also accepts the explicit `--flag=value` form (and is therefore usable
+      * positionally and inside `Option`).
+      */
+    sealed trait ValuedFlag extends Flag
+    sealed trait Repeated   extends Shape
+    sealed trait Trailing   extends Shape
+    sealed trait Command    extends Shape
+
+  /** A parser whose shape is visible in its type. */
+  type Aux[A, S <: Shape] = Parser[A] { type ShapeT = S }
+
+  private[flagged] def mk[A, S <: Shape](s: Schema[A]): Aux[A, S] = new Parser[A]:
+    type ShapeT = S
+    def schema = s
+
   /** The shape of a parser. */
   enum Schema[A]:
     /** One token per occurrence. */
@@ -160,18 +189,15 @@ object Parser:
     /** A full command grammar: named options, positionals, subcommands, splices. */
     case Command[T](impl: flagged.internal.Command, prog: String) extends Schema[T]
 
-  def fromSchema[A](s: Schema[A]): Parser[A] = new Parser[A]:
-    def schema = s
-
   /** Build a single-value parser from a name and a parse function. */
-  def of[A](name: String)(f: String => Result[A, String]): Parser[A] =
-    fromSchema(Schema.Value(name, f))
+  def of[A](name: String)(f: String => Result[A, String]): Aux[A, Shape.Value] =
+    mk(Schema.Value(name, f))
 
   /** Opt `A` into flag shape: the field takes no value and is built from the number of occurrences
     * on the command line.
     */
-  def flag[A](fromCount: Int => Result[A, String]): Parser[A] =
-    fromSchema(Schema.Flag(fromCount, None))
+  def flag[A](fromCount: Int => Result[A, String]): Aux[A, Shape.Flag] =
+    mk(Schema.Flag(fromCount, None))
 
   /** A flag that additionally accepts the explicit `--flag=value` form (which also makes it usable
     * positionally and inside `Option`).
@@ -179,98 +205,105 @@ object Parser:
   def flag[A](
       fromCount: Int => Result[A, String],
       fromValue: String => Result[A, String]
-  ): Parser[A] =
-    fromSchema(Schema.Flag(fromCount, Some(fromValue)))
+  ): Aux[A, Shape.ValuedFlag] =
+    mk(Schema.Flag(fromCount, Some(fromValue)))
 
   /** Opt `A` into repeated shape: each occurrence is parsed with the element's parser, and the
     * collected elements are combined with `build`.
     */
-  def repeated[E, A](build: List[E] => Result[A, String])(using element: Parser[E]): Parser[A] =
-    fromSchema(Schema.Repeated(element, build))
+  def repeated[E, A](build: List[E] => Result[A, String])(
+      using element: Parser[E]
+  ): Aux[A, Shape.Repeated] =
+    mk(Schema.Repeated(element, build))
 
   /** Opt `A` into trailing shape: it is built from the raw arguments after `--`. */
-  def trailing[A](build: List[String] => Result[A, String]): Parser[A] =
-    fromSchema(Schema.Trailing(build))
+  def trailing[A](build: List[String] => Result[A, String]): Aux[A, Shape.Trailing] =
+    mk(Schema.Trailing(build))
 
   /** Called by derivation. Not intended for direct use. */
-  def make[A](cmd: flagged.internal.Command, prog: String): Parser[A] =
-    fromSchema(Schema.Command(cmd, prog))
+  def make[A](cmd: flagged.internal.Command, prog: String): Aux[A, Shape.Command] =
+    mk(Schema.Command(cmd, prog))
 
-  /** Derivation entry point for `derives Parser` clauses; also usable directly:
-    * `given Parser[Config] = Parser.derived`.
-    *
-    * Derivation is `Mirror`-based and compositional: fields use the `Parser` given for their type —
-    * command-shaped instances become subcommands (sums) or spliced option groups (products);
-    * value-shaped instances parse as option values.
-    */
-  inline def derived[A](using Mirror.Of[A]): Parser[A] = internal.Derive.of[A]
+  final class Command[A](val parser: Parser.Aux[A, Shape.Command])
+  object Command:
+    /** Derivation entry point for `derives Parser.Command` clauses; also usable directly:
+      * `given Parser.Command[Config] = Parser.Command.derived`.
+      *
+      * Derivation is `Mirror`-based and compositional: fields use the `Parser` given for their type
+      * — command-shaped instances become subcommands (sums) or spliced option groups (products);
+      * value-shaped instances parse as option values.
+      */
+    inline def derived[A](using m: Mirror.Of[A]): Command[A] = new Command[A](internal.Derive.of[A])
 
   /** A parser for an enum whose cases are all parameterless, matched by kebab-cased case name,
     * case-insensitively. Usable directly or via `derives Parser.Enumerated`.
     */
-  inline def enumerated[A](using Mirror.SumOf[A]): Parser[A] = internal.Derive.enumParser[A]
+  inline def enumerated[A](using Mirror.SumOf[A]): Aux[A, Shape.Value] =
+    internal.Derive.enumParser[A]
 
   /** Derivation-flavor witness enabling `enum Color derives Parser.Enumerated`: the enum's parser
     * parses *values* by case name instead of becoming subcommands.
     */
-  final class Enumerated[A](val parser: Parser[A])
+  final class Enumerated[A](val parser: Parser.Aux[A, Parser.Shape.Value])
 
   object Enumerated:
     inline def derived[A](using Mirror.SumOf[A]): Parser.Enumerated[A] =
       Parser.Enumerated(enumerated[A])
 
-  given fromEnum[A](using e: Parser.Enumerated[A]): Parser[A] = e.parser
+  given fromEnum[A](using e: Parser.Enumerated[A]): Aux[A, Shape.Value]   = e.parser
+  given fromCommand[A](using e: Parser.Command[A]): Aux[A, Shape.Command] = e.parser
 
-  given [A](using Parser[A]): Parser[List[A]]   = repeated[A, List[A]](l => Ok(l))
-  given [A](using Parser[A]): Parser[Vector[A]] = repeated[A, Vector[A]](l => Ok(l.toVector))
-  given [A](using Parser[A]): Parser[Seq[A]]    = repeated[A, Seq[A]](l => Ok(l))
+  given [A](using Parser[A]): Aux[List[A], Shape.Repeated]   = repeated[A, List[A]](l => Ok(l))
+  given [A](using Parser[A]): Aux[Vector[A], Shape.Repeated] =
+    repeated[A, Vector[A]](l => Ok(l.toVector))
+  given [A](using Parser[A]): Aux[Seq[A], Shape.Repeated] = repeated[A, Seq[A]](l => Ok(l))
 
-  private def numeric[A](name: String)(f: String => A): Parser[A] =
+  private def numeric[A](name: String)(f: String => A): Aux[A, Shape.Value] =
     of(name)(s =>
       try Ok(f(s.trim))
       catch case _: NumberFormatException => Err(s"'$s' is not a valid $name")
     )
 
-  given Parser[String]     = of("string")(Ok(_))
-  given Parser[Int]        = numeric("int")(_.toInt)
-  given Parser[Long]       = numeric("long")(_.toLong)
-  given Parser[Short]      = numeric("short")(_.toShort)
-  given Parser[Byte]       = numeric("byte")(_.toByte)
-  given Parser[Float]      = numeric("float")(_.toFloat)
-  given Parser[Double]     = numeric("double")(_.toDouble)
-  given Parser[BigInt]     = numeric("integer")(BigInt(_))
-  given Parser[BigDecimal] = numeric("decimal")(BigDecimal(_))
+  given Aux[String, Shape.Value]     = of("string")(Ok(_))
+  given Aux[Int, Shape.Value]        = numeric("int")(_.toInt)
+  given Aux[Long, Shape.Value]       = numeric("long")(_.toLong)
+  given Aux[Short, Shape.Value]      = numeric("short")(_.toShort)
+  given Aux[Byte, Shape.Value]       = numeric("byte")(_.toByte)
+  given Aux[Float, Shape.Value]      = numeric("float")(_.toFloat)
+  given Aux[Double, Shape.Value]     = numeric("double")(_.toDouble)
+  given Aux[BigInt, Shape.Value]     = numeric("integer")(BigInt(_))
+  given Aux[BigDecimal, Shape.Value] = numeric("decimal")(BigDecimal(_))
 
-  given Parser[Boolean] = flag(n => Ok(n > 0), internal.Runtime.parseBool)
+  given Aux[Boolean, Shape.ValuedFlag] = flag(n => Ok(n > 0), internal.Runtime.parseBool)
 
-  given Parser[Char] = of("char")(s =>
+  given Aux[Char, Shape.Value] = of("char")(s =>
     if s.length == 1 then Ok(s.charAt(0)) else Err(s"'$s' is not a single character")
   )
 
-  given Parser[Path] = of("path")(s =>
+  given Aux[Path, Shape.Value] = of("path")(s =>
     try Ok(Paths.get(s))
     catch case _: InvalidPathException => Err(s"'$s' is not a valid path")
   )
 
-  given Parser[File] = of("file")(s => Ok(new File(s)))
+  given Aux[File, Shape.Value] = of("file")(s => Ok(new File(s)))
 
-  given Parser[UUID] = of("uuid")(s =>
+  given Aux[UUID, Shape.Value] = of("uuid")(s =>
     try Ok(UUID.fromString(s.trim))
     catch case _: IllegalArgumentException => Err(s"'$s' is not a valid UUID")
   )
 
-  private def temporal[A](name: String)(f: String => A): Parser[A] =
+  private def temporal[A](name: String)(f: String => A): Aux[A, Shape.Value] =
     of(name)(s =>
       try Ok(f(s.trim))
       catch case _: DateTimeParseException => Err(s"'$s' is not a valid $name")
     )
 
-  given Parser[LocalDate]     = temporal("date")(LocalDate.parse)
-  given Parser[LocalTime]     = temporal("time")(LocalTime.parse)
-  given Parser[LocalDateTime] = temporal("date-time")(LocalDateTime.parse)
-  given Parser[Instant]       = temporal("instant")(Instant.parse)
+  given Aux[LocalDate, Shape.Value]     = temporal("date")(LocalDate.parse)
+  given Aux[LocalTime, Shape.Value]     = temporal("time")(LocalTime.parse)
+  given Aux[LocalDateTime, Shape.Value] = temporal("date-time")(LocalDateTime.parse)
+  given Aux[Instant, Shape.Value]       = temporal("instant")(Instant.parse)
 
-  given Parser[FiniteDuration] = of("duration")(s =>
+  given Aux[FiniteDuration, Shape.Value] = of("duration")(s =>
     try
       Duration(s.trim) match
         case fd: FiniteDuration => Ok(fd)

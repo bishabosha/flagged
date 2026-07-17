@@ -5,28 +5,28 @@ case class Basic(
     @short('o') @help("Output file") output: String = "out.txt",
     @help("Number of retries") maxRetries: Int = 3,
     tag: Option[String] = None
-) derives Parser
+) derives Parser.Command
 
 case class Required(
     host: String,
     port: Int = 8080
-) derives Parser
+) derives Parser.Command
 
 case class Collections(
     @short('f') file: List[String] = Nil,
     nums: Vector[Int] = Vector.empty
-) derives Parser
+) derives Parser.Command
 
 case class WithPositionals(
     @positional @help("Input path") input: String,
     @positional output: Option[String] = None,
     @short('n') dryRun: Boolean = false
-) derives Parser
+) derives Parser.Command
 
 case class VarargPositionals(
     @short('v') verbose: Boolean = false,
     @positional files: List[String] = Nil
-) derives Parser
+) derives Parser.Command
 
 class OptionsSuite extends munit.FunSuite:
 
@@ -195,7 +195,7 @@ class OptionsSuite extends munit.FunSuite:
         @short('a') alpha: Boolean = false,
         @short('b') beta: Boolean = false,
         @short('c') gamma: Boolean = false
-    ) derives Parser
+    ) derives Parser.Command
     assertEquals(ok(Flagged.parse[Flags](Seq("-abc"))), Flags(true, true, true))
   }
 
@@ -203,31 +203,95 @@ class OptionsSuite extends munit.FunSuite:
     case class Mixed(
         @short('v') verbose: Boolean = false,
         @short('o') output: String = ""
-    ) derives Parser
+    ) derives Parser.Command
     assertEquals(ok(Flagged.parse[Mixed](Seq("-vo", "x"))), Mixed(true, "x"))
     assertEquals(ok(Flagged.parse[Mixed](Seq("-vox"))), Mixed(true, "x"))
   }
 
   test("negative numbers are values, not options") {
-    case class Neg(@positional n: Int, offset: Int = 0) derives Parser
+    case class Neg(@positional n: Int, offset: Int = 0) derives Parser.Command
     assertEquals(ok(Flagged.parse[Neg](Seq("-5", "--offset", "-3"))), Neg(-5, -3))
   }
 
   test("single dash is a positional value") {
-    case class Dash(@positional input: String) derives Parser
+    case class Dash(@positional input: String) derives Parser.Command
     assertEquals(ok(Flagged.parse[Dash](Seq("-"))), Dash("-"))
   }
 
   test("@name overrides the long name") {
-    case class Named(@name("out") @help("x") outputFileName: String = "a") derives Parser
+    case class Named(@name("out") @help("x") outputFileName: String = "a") derives Parser.Command
     assertEquals(ok(Flagged.parse[Named](Seq("--out", "b"))), Named("b"))
     val m = err(Flagged.parse[Named](Seq("--output-file-name", "b")))
     assert(m.contains("unknown option"), m)
   }
 
+  test("conflicting annotations are compile errors") {
+    val e = compileErrors("case class C(@positional @short('x') a: Int = 0) derives Parser.Command")
+    assert(e.contains("@short cannot be combined with @positional"), e)
+  }
+
+  test("shape/annotation conflicts are compile errors for shape-refined instances") {
+    val e1 = compileErrors("case class C(x: Option[List[Int]]) derives Parser.Command")
+    assert(e1.contains("Option of a repeated Parser"), e1)
+    val e2 =
+      compileErrors("case class C(@positional t: Trailing = Trailing(Nil)) derives Parser.Command")
+    assert(e2.contains("@positional cannot be combined with a trailing field"), e2)
+    val e3 =
+      compileErrors("case class C(@short('t') t: Trailing = Trailing(Nil)) derives Parser.Command")
+    assert(e3.contains("@short cannot be combined with a trailing field"), e3)
+    // the Parser.Command witness keeps derived instances shape-refined, so this is
+    // static too — a derives clause no longer erases the shape
+    val e4 =
+      compileErrors("case class C(@positional action: SimpleAction) derives Parser.Command")
+    assert(e4.contains("@positional cannot be combined with a command-shaped Parser"), e4)
+  }
+
+  test("bare flags are rejected statically in Option and positional position") {
+    val e1 = compileErrors("case class C(v: Option[Count] = None) derives Parser.Command")
+    assert(e1.contains("cannot be used inside Option"), e1)
+    val e2 = compileErrors("case class C(@positional v: Count = Count(0)) derives Parser.Command")
+    assert(e2.contains("cannot be used positionally"), e2)
+    // Boolean has the explicit-value form, so Option[Boolean] stays legal
+    case class D(dry: Option[Boolean] = None) derives Parser.Command
+    assertEquals(ok(Flagged.parse[D](Seq("--dry", "true"))), D(Some(true)))
+  }
+
+  test("reserved names are compile errors when given as constants") {
+    val e1 = compileErrors("case class C(@short('h') x: Int = 0) derives Parser.Command")
+    assert(e1.contains("short option 'h' is reserved for help"), e1)
+    val e2 = compileErrors("case class C(@name(\"help\") x: Int = 0) derives Parser.Command")
+    assert(e2.contains("option name 'help' is reserved"), e2)
+  }
+
+  test("cross-field rules with static shapes are compile errors") {
+    val e1 = compileErrors(
+      "case class C(a: Trailing = Trailing(Nil), b: Trailing = Trailing(Nil)) derives Parser.Command"
+    )
+    assert(e1.contains("only one trailing field is supported per command"), e1)
+    val e2 = compileErrors(
+      "case class C(@positional xs: List[Int] = Nil, @positional y: Int = 0) derives Parser.Command"
+    )
+    assert(e2.contains("a repeated positional must be the last positional field"), e2)
+  }
+
+  test("duplicate constant names are compile errors (union-membership as subtyping)") {
+    val e1 = compileErrors(
+      "case class C(@short('v') a: Int = 0, @short('v') b: Int = 0) derives Parser.Command"
+    )
+    assert(e1.contains("duplicate short option"), e1)
+    val e2 = compileErrors(
+      "case class C(@name(\"x\") a: Int = 0, @name(\"x\") b: Int = 0) derives Parser.Command"
+    )
+    assert(e2.contains("duplicate option name"), e2)
+    // an option and a positional may share a name: separate namespaces
+    case class Ok2(@positional input: String = "-", @name("input") o: Int = 0)
+        derives Parser.Command
+    assertEquals(ok(Flagged.parse[Ok2](Seq("--input", "3", "f"))), Ok2("f", 3))
+  }
+
   test("a Trailing field collects the raw arguments after --") {
     case class Exec(@short('v') verbose: Boolean = false, rest: Trailing = Trailing(Nil))
-        derives Parser
+        derives Parser.Command
     assertEquals(
       ok(Flagged.parse[Exec](Seq("-v", "--", "-x", "--weird", "--"))),
       Exec(verbose = true, rest = Trailing(List("-x", "--weird", "--")))
@@ -236,7 +300,7 @@ class OptionsSuite extends munit.FunSuite:
   }
 
   test("Option[Trailing] distinguishes absent -- from present-but-empty") {
-    case class Exec(cmd: String = "sh", rest: Option[Trailing] = None) derives Parser
+    case class Exec(cmd: String = "sh", rest: Option[Trailing] = None) derives Parser.Command
     assertEquals(ok(Flagged.parse[Exec](Nil)).rest, None)
     assertEquals(ok(Flagged.parse[Exec](Seq("--"))).rest, Some(Trailing(Nil)))
     assertEquals(ok(Flagged.parse[Exec](Seq("--", "a"))).rest, Some(Trailing(List("a"))))
@@ -247,7 +311,7 @@ class OptionsSuite extends munit.FunSuite:
     given Parser[Cmdline] = Parser.trailing(l =>
       if l.isEmpty then Err("expected a command after '--'") else Ok(Cmdline(l))
     )
-    case class Run(image: String = "img", cmd: Cmdline) derives Parser
+    case class Run(image: String = "img", cmd: Cmdline) derives Parser.Command
     assertEquals(ok(Flagged.parse[Run](Seq("--", "echo", "hi"))).cmd, Cmdline(List("echo", "hi")))
     val m = err(Flagged.parse[Run](Nil))
     assert(m.contains("expected a command after '--'"), m)
@@ -263,7 +327,7 @@ class OptionsSuite extends munit.FunSuite:
 
   test("trailing fields appear in usage and help") {
     case class Exec(@help("Command to run in the container") rest: Trailing = Trailing(Nil))
-        derives Parser
+        derives Parser.Command
     Flagged.parse[Exec](Seq("--help")) match
       case Err(ParseError.Help(t)) =>
         assert(t.contains("[-- <args>]"), t)
