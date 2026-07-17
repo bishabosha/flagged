@@ -1,6 +1,5 @@
 package flagged
 
-
 @help("A tiny git-like tool")
 enum Git derives Parser:
   @help("Clone a repository")
@@ -48,9 +47,9 @@ enum NoDerive:
 class SubcommandSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
-    case Ok(a)                          => a
-    case Err(ParseError.Help(t))        => fail(s"expected success, got help:\n$t")
-    case Err(ParseError.Failure(m, _))  => fail(s"expected success, got failure: $m")
+    case Ok(a)                         => a
+    case Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
+    case Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
 
   def err[A](r: ParseResult[A]): String = r match
     case Err(ParseError.Failure(m, _)) => m
@@ -103,7 +102,10 @@ class SubcommandSuite extends munit.FunSuite:
 
   test("an enum field with a by-name Parser parses as a value") {
     assertEquals(ok(Flagged.parse[Paint](Seq("--color", "green"))), Paint(Color.Green))
-    assertEquals(ok(Flagged.parse[Paint](Seq("--color", "deep-blue", "fence"))), Paint(Color.DeepBlue, "fence"))
+    assertEquals(
+      ok(Flagged.parse[Paint](Seq("--color", "deep-blue", "fence"))),
+      Paint(Color.DeepBlue, "fence")
+    )
   }
 
   test("enum value is matched case-insensitively and errors list alternatives") {
@@ -137,16 +139,21 @@ class SubcommandSuite extends munit.FunSuite:
     sealed trait Op derives Parser
     object Op:
       case class Add(@positional x: Int, @positional y: Int) extends Op
-      case object Noop extends Op
-    assertEquals(Flagged.parse[Op](Seq("add", "1", "2"))(using summon[Parser[Op]]), Ok(Op.Add(1, 2)))
+      case object Noop                                       extends Op
+    assertEquals(
+      Flagged.parse[Op](Seq("add", "1", "2"))(using summon[Parser[Op]]),
+      Ok(Op.Add(1, 2))
+    )
     assertEquals(Flagged.parse[Op](Seq("noop"))(using summon[Parser[Op]]), Ok(Op.Noop))
   }
 
   test("derivation reuses a Parser given in scope for a subcommand field") {
     // hand-modified parser for RemoteAction: every command name gets an "x-" prefix
-    val base = Parser.derived[RemoteAction].command
-    val renamed = base.sub.get.copy(cases = base.sub.get.cases.map(c => c.copy(name = s"x-${c.name}")))
-    given custom: Parser[RemoteAction] = Parser.make(base.copy(sub = Some(renamed)), "remote-action")
+    val base    = Parser.derived[RemoteAction].command
+    val renamed =
+      base.sub.get.copy(cases = base.sub.get.cases.map(c => c.copy(name = s"x-${c.name}")))
+    given custom: Parser[RemoteAction] =
+      Parser.make(base.copy(sub = Some(renamed)), "remote-action")
 
     case class Wrap(action: RemoteAction) derives Parser
     // the derived Wrap parser must embed the custom instance, not re-derive structurally

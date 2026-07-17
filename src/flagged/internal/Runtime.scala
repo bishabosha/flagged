@@ -9,9 +9,9 @@ object Runtime:
 
   def parseBool(s: String): Result[Boolean, String] =
     s.trim.toLowerCase match
-      case "true" | "yes" | "on" | "1"   => Ok(true)
-      case "false" | "no" | "off" | "0"  => Ok(false)
-      case other                         => Err(s"'$other' is not a valid bool (expected true/false)")
+      case "true" | "yes" | "on" | "1"  => Ok(true)
+      case "false" | "no" | "off" | "0" => Ok(false)
+      case other => Err(s"'$other' is not a valid bool (expected true/false)")
 
   /** Value parser for enums whose cases are all parameterless, matching kebab-cased names. */
   def enumParser[A](name: String, pairs: Vector[(String, A)]): Parser[A] =

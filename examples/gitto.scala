@@ -2,8 +2,8 @@ package examples
 
 import flagged.*
 
-/** Options shared by several commands: a case class with a Parser splices its
-  * options into whichever command declares a field of this type.
+/** Options shared by several commands: a case class with a Parser splices its options into
+  * whichever command declares a field of this type.
   */
 case class Output(
     @short('q') @help("Operate quietly") quiet: Boolean = false,
@@ -24,7 +24,10 @@ enum Gitto derives Parser:
   @help("Manage the set of tracked repositories")
   case Remote(action: RemoteAction)
   @help("Show the working tree status")
-  case Status(@short('s') @help("Give output in short format") short: Boolean = false, output: Output = Output())
+  case Status(
+      @short('s') @help("Give output in short format") short: Boolean = false,
+      output: Output = Output()
+  )
 
 enum RemoteAction derives Parser:
   @help("Add a remote named <name> for the repository at <url>")
@@ -42,7 +45,7 @@ enum RemoteAction derives Parser:
   Flagged.parseOrExit[Gitto](args) match
     case Gitto.Clone(repo, dir, depth, out) =>
       val where = dir.getOrElse(repo.split('/').last.stripSuffix(".git"))
-      val how = depth.map(d => s" (depth $d)").getOrElse("")
+      val how   = depth.map(d => s" (depth $d)").getOrElse("")
       if out.verbose.value > 1 then println(s"[debug] resolved target directory: $where")
       if !out.quiet then println(s"Cloning '$repo' into '$where'$how ...")
     case Gitto.Remote(RemoteAction.Add(name, url, fetch)) =>

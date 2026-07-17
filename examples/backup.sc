@@ -8,6 +8,6 @@ case class Backup(
     @positional @help("Directories to back up") sources: List[String] = Nil
 ) derives Parser
 
-val cfg = Flagged.parseOrExit[Backup](args.toSeq, prog = "backup")
+val cfg  = Flagged.parseOrExit[Backup](args.toSeq, prog = "backup")
 val verb = if cfg.dryRun then "Would copy" else "Copying"
 cfg.sources.foreach(src => println(s"$verb $src -> ${cfg.dest}"))

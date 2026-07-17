@@ -1,13 +1,12 @@
 package flagged
 
-/** flagged uses [[steps.result.Result]] (lampepfl/steps) as its error channel.
-  * Re-exported here so `import flagged.*` is enough to pattern-match parse results.
+/** flagged uses [[steps.result.Result]] (lampepfl/steps) as its error channel. Re-exported here so
+  * `import flagged.*` is enough to pattern-match parse results.
   */
 export steps.result.Result
 export steps.result.Result.{Ok, Err}
 
-/** The error channel of a parse: either the user asked for help, or the
-  * arguments were invalid.
+/** The error channel of a parse: either the user asked for help, or the arguments were invalid.
   */
 enum ParseError:
   /** The user asked for `--help` / `-h`; `text` is the rendered help screen. */

@@ -5,7 +5,7 @@ private[flagged] object HelpFmt:
 
   def render(cmd: Command, prog: String, path: List[String]): String =
     val full = (prog :: path).mkString(" ")
-    val b = new StringBuilder
+    val b    = new StringBuilder
 
     if cmd.description.nonEmpty then
       b ++= cmd.description
@@ -50,9 +50,9 @@ private[flagged] object HelpFmt:
     parts += "[options]"
     cmd.positionals.foreach { p =>
       p.mode match
-        case Mode.Repeated(_, _)     => parts += s"[<${p.name}>...]"
-        case _ if isRequiredPos(p)   => parts += s"<${p.name}>"
-        case _                       => parts += s"[<${p.name}>]"
+        case Mode.Repeated(_, _)   => parts += s"[<${p.name}>...]"
+        case _ if isRequiredPos(p) => parts += s"<${p.name}>"
+        case _                     => parts += s"[<${p.name}>]"
     }
     cmd.sub.foreach { g =>
       parts += (if g.optional || g.default.nonEmpty then "[<command>]" else "<command>")
@@ -63,15 +63,14 @@ private[flagged] object HelpFmt:
   private def isRequiredPos(p: PosSpec): Boolean =
     p.default.isEmpty && (p.mode match
       case Mode.Single(_, optional) => !optional
-      case _                        => false
-    )
+      case _                        => false)
 
   private def optLeft(o: OptSpec): String =
     val short = o.short.map(c => s"-$c, ").getOrElse("    ")
     val value = o.mode match
-      case Mode.Flag(_, _)      => ""
-      case Mode.Single(_, _)    => s" <${o.metavar}>"
-      case Mode.Repeated(_, _)  => s" <${o.metavar}>"
+      case Mode.Flag(_, _)     => ""
+      case Mode.Single(_, _)   => s" <${o.metavar}>"
+      case Mode.Repeated(_, _) => s" <${o.metavar}>"
     s"$short--${o.long}$value"
 
   private def optExtras(o: OptSpec): List[String] =
@@ -102,12 +101,12 @@ private[flagged] object HelpFmt:
 
   /** Human-friendly rendering of a default value; `None` means "don't show". */
   private def fmtDefault(v: Any): Option[String] = v match
-    case None                     => None
-    case Some(x)                  => Some(x.toString)
-    case false                    => None
-    case s: Seq[?] if s.isEmpty   => None
-    case s: Seq[?]                => Some(s.mkString(","))
-    case other                    => Some(other.toString)
+    case None                   => None
+    case Some(x)                => Some(x.toString)
+    case false                  => None
+    case s: Seq[?] if s.isEmpty => None
+    case s: Seq[?]              => Some(s.mkString(","))
+    case other                  => Some(other.toString)
 
   private def withExtras(help: String, extras: List[String]): String =
     if extras.isEmpty then help

@@ -1,6 +1,5 @@
 package flagged
 
-
 case class Basic(
     @short('v') @help("Increase verbosity") verbose: Boolean = false,
     @short('o') @help("Output file") output: String = "out.txt",
@@ -32,9 +31,9 @@ case class VarargPositionals(
 class OptionsSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
-    case Ok(a)                          => a
-    case Err(ParseError.Help(t))        => fail(s"expected success, got help:\n$t")
-    case Err(ParseError.Failure(m, _))  => fail(s"expected success, got failure: $m")
+    case Ok(a)                         => a
+    case Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
+    case Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
 
   def err[A](r: ParseResult[A]): String = r match
     case Err(ParseError.Failure(m, _)) => m
@@ -227,7 +226,8 @@ class OptionsSuite extends munit.FunSuite:
   }
 
   test("a Trailing field collects the raw arguments after --") {
-    case class Exec(@short('v') verbose: Boolean = false, rest: Trailing = Trailing(Nil)) derives Parser
+    case class Exec(@short('v') verbose: Boolean = false, rest: Trailing = Trailing(Nil))
+        derives Parser
     assertEquals(
       ok(Flagged.parse[Exec](Seq("-v", "--", "-x", "--weird", "--"))),
       Exec(verbose = true, rest = Trailing(List("-x", "--weird", "--")))
@@ -262,7 +262,8 @@ class OptionsSuite extends munit.FunSuite:
   }
 
   test("trailing fields appear in usage and help") {
-    case class Exec(@help("Command to run in the container") rest: Trailing = Trailing(Nil)) derives Parser
+    case class Exec(@help("Command to run in the container") rest: Trailing = Trailing(Nil))
+        derives Parser
     Flagged.parse[Exec](Seq("--help")) match
       case Err(ParseError.Help(t)) =>
         assert(t.contains("[-- <args>]"), t)

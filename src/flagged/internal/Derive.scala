@@ -11,8 +11,8 @@ import flagged.meta.Defaults
   * across type boundaries — each enum or options group in a command tree provides its own instance.
   *
   * The only macro-backed pieces are [[Defaults]] (term-level: default values are arbitrary
-  * expressions) and [[flagged.meta.AnnotMirror]] (type-level: annotations reduced to singleton types, extracted
-  * here via [[flagged.meta.AnnotMirror.find]] into typed [[Annots]]).
+  * expressions) and [[flagged.meta.AnnotMirror]] (type-level: annotations reduced to singleton
+  * types, extracted here via [[flagged.meta.AnnotMirror.find]] into typed [[Annots]]).
   */
 object Derive:
 

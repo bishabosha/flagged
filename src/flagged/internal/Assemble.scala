@@ -61,7 +61,8 @@ object Assemble:
       case Parser.Schema.Repeated(element, build) =>
         Mode.Repeated(readFn(element), build.asInstanceOf[List[Any] => Result[Any, String]])
       case Parser.Schema.Trailing(build) =>
-        val spec = TrailingSpec(0, "", build.asInstanceOf[List[String] => Result[Any, String]], false, None)
+        val spec =
+          TrailingSpec(0, "", build.asInstanceOf[List[String] => Result[Any, String]], false, None)
         return Command(
           "",
           Vector.empty,
@@ -112,15 +113,15 @@ object Assemble:
       annots: Annots.Product[?],
       build: Array[Any] => Result[Any, String]
   ): Command =
-    val n                          = labels.length
-    val opts                       = Vector.newBuilder[OptSpec]
-    val poss                       = Vector.newBuilder[PosSpec]
-    var subGroup: Option[SubGroup]      = None
-    var trailing: Option[TrailingSpec]  = None
-    val splices                    = List.newBuilder[Splice]
-    var storage                    = n // spliced children's specs live past the parent's own slots
-    val longSeen                   = mutable.Set.empty[String]
-    val shortSeen                  = mutable.Set.empty[Char]
+    val n                              = labels.length
+    val opts                           = Vector.newBuilder[OptSpec]
+    val poss                           = Vector.newBuilder[PosSpec]
+    var subGroup: Option[SubGroup]     = None
+    var trailing: Option[TrailingSpec] = None
+    val splices                        = List.newBuilder[Splice]
+    var storage   = n // spliced children's specs live past the parent's own slots
+    val longSeen  = mutable.Set.empty[String]
+    val shortSeen = mutable.Set.empty[Char]
     // (name, kind) where kind is "required" | "optional" | "repeated"
     val posKinds = mutable.ListBuffer.empty[(String, String)]
 
@@ -211,7 +212,13 @@ object Assemble:
             invalid(s"field '$label': @short cannot be combined with a trailing field")
           if trailing.nonEmpty then invalid("only one trailing field is supported per command")
           trailing = Some(
-            TrailingSpec(i, help, buildList.asInstanceOf[List[String] => Result[Any, String]], optional, default)
+            TrailingSpec(
+              i,
+              help,
+              buildList.asInstanceOf[List[String] => Result[Any, String]],
+              optional,
+              default
+            )
           )
 
         case Parser.Schema.Repeated(element, buildList) =>

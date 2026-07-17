@@ -11,6 +11,6 @@ case class Greet(
 ) derives Parser
 
 @main def greetMain(args: String*): Unit =
-  val cfg = Flagged.parseOrExit[Greet](args)
+  val cfg    = Flagged.parseOrExit[Greet](args)
   val suffix = if cfg.excited then "!" else "."
   (1 to cfg.repeat).foreach(_ => println(s"Hello, ${cfg.name}$suffix"))

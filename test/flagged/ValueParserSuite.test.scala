@@ -35,7 +35,7 @@ class ValueParserSuite extends munit.FunSuite:
   }
 
   test("built-in readers: path, duration, double, uuid") {
-    val id = java.util.UUID.randomUUID()
+    val id  = java.util.UUID.randomUUID()
     val cfg = ok(
       Flagged.parse[ValueConfig](
         Seq("--path", "/tmp/x", "--timeout", "5s", "--ratio", "0.25", "--id", id.toString)
@@ -98,9 +98,8 @@ class ValueParserSuite extends munit.FunSuite:
 
   test("a flag reader can bound the occurrence count") {
     case class Verbosity(n: Int)
-    given Parser[Verbosity] = Parser.flag(n =>
-      if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)")
-    )
+    given Parser[Verbosity] =
+      Parser.flag(n => if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)"))
     case class C(@short('v') verbose: Verbosity = Verbosity(0)) derives Parser
     assertEquals(ok(Flagged.parse[C](Seq("-vv"))).verbose, Verbosity(2))
     Flagged.parse[C](Seq("-vvvv")) match
@@ -124,7 +123,10 @@ class ValueParserSuite extends munit.FunSuite:
       if l.isEmpty then Err("expected at least one occurrence") else Ok(AtLeastOne(l))
     )
     case class Cfg(num: AtLeastOne) derives Parser
-    assertEquals(ok(Flagged.parse[Cfg](Seq("--num", "1", "--num", "2"))), Cfg(AtLeastOne(List(1, 2))))
+    assertEquals(
+      ok(Flagged.parse[Cfg](Seq("--num", "1", "--num", "2"))),
+      Cfg(AtLeastOne(List(1, 2)))
+    )
     Flagged.parse[Cfg](Nil) match
       case Err(ParseError.Failure(m, _)) =>
         assert(m.contains("--num") && m.contains("expected at least one"), m)
@@ -132,7 +134,8 @@ class ValueParserSuite extends munit.FunSuite:
   }
 
   test("emap composes over a repeated reader") {
-    given Parser[Int] = Parser.of[Int]("int")(s => s.toIntOption.fold(Err(s"'$s' not an int"))(Ok(_)))
+    given Parser[Int] =
+      Parser.of[Int]("int")(s => s.toIntOption.fold(Err(s"'$s' not an int"))(Ok(_)))
     given Parser[List[Int]] =
       Parser[List[Int]](using Parser.repeated[Int, List[Int]](l => Ok(l))).emap(l =>
         if l.sum > 10 then Err("sum too large") else Ok(l)

@@ -70,9 +70,9 @@ class SpliceSuite extends munit.FunSuite:
 
   test("emap composes over a command parser (cross-field validation)") {
     case class Range(lo: Int = 0, hi: Int = 10)
-    val p = Parser.derived[Range].emap(r =>
-      if r.lo <= r.hi then Ok(r) else Err(s"lo (${r.lo}) must not exceed hi (${r.hi})")
-    )
+    val p = Parser
+      .derived[Range]
+      .emap(r => if r.lo <= r.hi then Ok(r) else Err(s"lo (${r.lo}) must not exceed hi (${r.hi})"))
     assertEquals(ok(p.parse(Seq("--lo", "3"))), Range(3, 10))
     p.parse(Seq("--lo", "5", "--hi", "3")) match
       case Err(ParseError.Failure(m, _)) => assert(m.contains("must not exceed"), m)
@@ -81,9 +81,9 @@ class SpliceSuite extends munit.FunSuite:
 
   test("a validated options group keeps its validation when spliced") {
     case class Window(min: Int = 0, max: Int = 100)
-    given Parser[Window] = Parser.derived[Window].emap(w =>
-      if w.min <= w.max then Ok(w) else Err("min must not exceed max")
-    )
+    given Parser[Window] = Parser
+      .derived[Window]
+      .emap(w => if w.min <= w.max then Ok(w) else Err("min must not exceed max"))
     case class App(label: String = "", window: Window = Window()) derives Parser
     assertEquals(ok(Flagged.parse[App](Seq("--min", "5"))), App("", Window(5, 100)))
     val m = err(Flagged.parse[App](Seq("--min", "7", "--max", "2")))
