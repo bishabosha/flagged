@@ -1,6 +1,7 @@
 package claw.internal
 
 import claw.Parser
+import claw.meta.Defaults
 import steps.result.Result
 import scala.collection.mutable
 
@@ -10,8 +11,8 @@ enum SubEntry:
   case Node(parser: () => Parser[?])
 
 /** Builds the runtime `Command` model from what inline derivation collected — one
-  * `(Parser, optional)` pair per field, dispatched on the parser's schema.
-  * Structural validation happens here, when the `Parser` instance is constructed.
+  * `(Parser, optional)` pair per field, dispatched on the parser's schema. Structural validation
+  * happens here, when the `Parser` instance is constructed.
   */
 object Assemble:
 
@@ -44,7 +45,7 @@ object Assemble:
     val names = caseLabels.zipWithIndex.map { (l, i) =>
       perCase.lift(i).flatMap(_.name).getOrElse(kebab(l))
     }
-    val joined = names.mkString("|")
+    val joined   = names.mkString("|")
     val typeName = if joined.length <= 40 then joined else kebab(typeLabel)
     Runtime.enumParser(typeName, names.zip(values).toVector)
 
@@ -61,13 +62,21 @@ object Assemble:
         Mode.Repeated(readFn(element), build.asInstanceOf[List[Any] => Result[Any, String]])
       case Parser.Schema.Command(impl, _) =>
         return impl
-    Command("", Vector.empty, Vector(PosSpec("value", "", p.typeName, 0, mode, None)), None, Nil, arr => arr(0), 1)
+    Command(
+      "",
+      Vector.empty,
+      Vector(PosSpec("value", "", p.typeName, 0, mode, None)),
+      None,
+      Nil,
+      arr => arr(0),
+      1
+    )
 
   def sum(caseLabels: List[String], annots: Annots.Sum[?], entries: List[SubEntry]): Command =
     val cases = entries.zipWithIndex.map { (e, i) =>
       val anns = annots.perCase.lift(i).getOrElse(TargetAnnots.empty)
       val help = anns.help.getOrElse("")
-      val cmd = e match
+      val cmd  = e match
         case SubEntry.Leaf(v) => Command.leaf(v, help)
         case SubEntry.Node(p) => p().command
       SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd)
@@ -89,36 +98,38 @@ object Assemble:
       annots: Annots.Product[?],
       build: Array[Any] => Any
   ): Command =
-    val n = labels.length
-    val opts = Vector.newBuilder[OptSpec]
-    val poss = Vector.newBuilder[PosSpec]
+    val n                          = labels.length
+    val opts                       = Vector.newBuilder[OptSpec]
+    val poss                       = Vector.newBuilder[PosSpec]
     var subGroup: Option[SubGroup] = None
-    val splices = List.newBuilder[Splice]
-    var storage = n // spliced children's specs live past the parent's own slots
-    val longSeen = mutable.Set.empty[String]
-    val shortSeen = mutable.Set.empty[Char]
+    val splices                    = List.newBuilder[Splice]
+    var storage                    = n // spliced children's specs live past the parent's own slots
+    val longSeen                   = mutable.Set.empty[String]
+    val shortSeen                  = mutable.Set.empty[Char]
     // (name, kind) where kind is "required" | "optional" | "repeated"
     val posKinds = mutable.ListBuffer.empty[(String, String)]
 
     for i <- 0 until n do
-      val anns = annots.perField.lift(i).getOrElse(FieldAnnots.empty)
-      val label = labels(i)
-      val long = anns.name.getOrElse(kebab(label))
-      val help = anns.help.getOrElse("")
-      val short = anns.short
+      val anns                       = annots.perField.lift(i).getOrElse(FieldAnnots.empty)
+      val label                      = labels(i)
+      val long                       = anns.name.getOrElse(kebab(label))
+      val help                       = anns.help.getOrElse("")
+      val short                      = anns.short
       val default: Option[() => Any] =
         if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None
       val (fieldParser, optional) = fields(i)
 
       def addOpt(metavar: String, mode: Mode): Unit =
         if long == "help" then invalid(s"field '$label': option name 'help' is reserved")
-        if short.contains('h') then invalid(s"field '$label': short option 'h' is reserved for help")
+        if short.contains('h') then
+          invalid(s"field '$label': short option 'h' is reserved for help")
         if !longSeen.add(long) then invalid(s"duplicate option name '--$long'")
         short.foreach(c => if !shortSeen.add(c) then invalid(s"duplicate short option '-$c'"))
         opts += OptSpec(long, short, help, metavar, i, mode, default)
 
       def addPos(metavar: String, mode: Mode, kind: String): Unit =
-        if short.nonEmpty then invalid(s"field '$label': @short cannot be combined with @positional")
+        if short.nonEmpty then
+          invalid(s"field '$label': @short cannot be combined with @positional")
         posKinds += ((long, kind))
         poss += PosSpec(long, help, metavar, i, mode, default)
 
@@ -129,7 +140,8 @@ object Assemble:
           inner.sub match
             case Some(group) =>
               // sum-shaped: nested subcommands
-              if subGroup.nonEmpty then invalid("only one subcommand field is supported per command")
+              if subGroup.nonEmpty then
+                invalid("only one subcommand field is supported per command")
               subGroup = Some(SubGroup(i, optional, default, group.cases))
             case None =>
               // product-shaped: splice the group's options into this command
@@ -164,22 +176,27 @@ object Assemble:
               case Some(f) =>
                 val mode = Mode.Single(f, optional)
                 if anns.positional then
-                  addPos("value", mode, if optional || default.nonEmpty then "optional" else "required")
+                  addPos(
+                    "value",
+                    mode,
+                    if optional || default.nonEmpty then "optional" else "required"
+                  )
                 else addOpt("value", mode)
               case None =>
                 val where = if optional then "inside Option" else "positionally"
-                invalid(s"field '$label': a flag Parser without a value parser cannot be used $where")
+                invalid(
+                  s"field '$label': a flag Parser without a value parser cannot be used $where"
+                )
           else addOpt("", Mode.Flag(fc, fv))
 
         case Parser.Schema.Repeated(element, buildList) =>
-          if optional then
-            invalid(s"field '$label': Option of a repeated Parser is not supported")
+          if optional then invalid(s"field '$label': Option of a repeated Parser is not supported")
           element.schema match
             case _: Parser.Schema.Value[?] => ()
-            case _ =>
+            case _                         =>
               invalid(s"field '$label': repeated Parsers require a single-value element Parser")
           val fromList = buildList.asInstanceOf[List[Any] => Result[Any, String]]
-          val mode = Mode.Repeated(readFn(element), fromList)
+          val mode     = Mode.Repeated(readFn(element), fromList)
           if anns.positional then addPos(element.typeName, mode, "repeated")
           else addOpt(element.typeName, mode)
     end for

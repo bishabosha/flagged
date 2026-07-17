@@ -1,12 +1,13 @@
 package claw
 
-import claw.internal.{Ann, AnnotMirror, Derive, FieldAnnots, TargetAnnots}
+import claw.meta.{Ann, AnnotMirror}
+import claw.internal.{Derive, FieldAnnots, TargetAnnots}
 import scala.deriving.Mirror
 import scala.annotation.targetName
 
 // test annotation with default arguments, for the named-args/defaults tests
 final case class tagged(label: String = "none", level: Int = 1)
-    extends scala.annotation.StaticAnnotation derives internal.Defaults
+    extends scala.annotation.StaticAnnotation derives meta.Defaults
 
 class MetaSuite extends munit.FunSuite:
 
@@ -22,7 +23,7 @@ class MetaSuite extends munit.FunSuite:
 
   test("Defaults is an index switch that throws on invalid indices") {
     case class Partial(a: Int, b: Int = 2, c: String = "x")
-    val d = internal.Defaults.derived[Partial]
+    val d = meta.Defaults.derived[Partial]
     assert(!d.hasDefault(0))
     assert(d.hasDefault(1) && d.hasDefault(2))
     assertEquals(d.defaultArgument(1), 2)

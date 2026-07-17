@@ -1,15 +1,15 @@
 package claw
 
 import scala.annotation.StaticAnnotation
-import claw.internal.Defaults
+import claw.meta.Defaults
 
 // Annotations are case classes so they can be rebuilt from an
 // `claw.internal.AnnotMirror` via their `Mirror.ProductOf`, and derive `Defaults`
 // so materialisation shares one defaults mirror per annotation type.
 
-/** Override the derived long name of an option, the name of a subcommand, or
-  * the default program name when placed on the top-level type.
-  * Derived names are the kebab-cased field/case name (`maxDepth` → `--max-depth`).
+/** Override the derived long name of an option, the name of a subcommand, or the default program
+  * name when placed on the top-level type. Derived names are the kebab-cased field/case name
+  * (`maxDepth` → `--max-depth`).
   */
 final case class name(value: String) extends StaticAnnotation derives Defaults
 

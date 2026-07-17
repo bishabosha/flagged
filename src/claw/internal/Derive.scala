@@ -3,16 +3,16 @@ package claw.internal
 import scala.compiletime.*
 import scala.deriving.Mirror
 import claw.Parser
+import claw.meta.{Defaults, AnnotMirror}
 
-/** `Mirror`-based derivation. Structure and construction come from `Mirror`; field
-  * semantics are the field parser's schema: command-shaped instances become nested
-  * subcommands (sums) or spliced option groups (products), value shapes parse as
-  * option or positional values. Nothing is derived across type boundaries — each
-  * enum or options group in a command tree provides its own instance.
+/** `Mirror`-based derivation. Structure and construction come from `Mirror`; field semantics are
+  * the field parser's schema: command-shaped instances become nested subcommands (sums) or spliced
+  * option groups (products), value shapes parse as option or positional values. Nothing is derived
+  * across type boundaries — each enum or options group in a command tree provides its own instance.
   *
-  * The only macro-backed pieces are [[Defaults]] (term-level: default values are
-  * arbitrary expressions) and [[AnnotMirror]] (type-level: annotations reduced to
-  * singleton types, extracted here via [[AnnotMirror.find]] into typed [[Annots]]).
+  * The only macro-backed pieces are [[Defaults]] (term-level: default values are arbitrary
+  * expressions) and [[AnnotMirror]] (type-level: annotations reduced to singleton types, extracted
+  * here via [[AnnotMirror.find]] into typed [[Annots]]).
   */
 object Derive:
 
@@ -67,7 +67,7 @@ object Derive:
 
   inline def product[A](using m: Mirror.ProductOf[A]): Parser[A] =
     val annots = productAnnots[A]
-    val cmd = Assemble.product(
+    val cmd    = Assemble.product(
       labelsOf[m.MirroredElemLabels],
       fieldsOf[m.MirroredElemTypes],
       Defaults.derived[A],
@@ -97,8 +97,8 @@ object Derive:
   inline def labelsOf[L <: Tuple]: List[String] =
     constValueTuple[L].toList.asInstanceOf[List[String]]
 
-  /** The single field rule: summon the field type's `Parser`; `Option[_]` marks it
-    * optional. The parser's schema decides everything else at assembly.
+  /** The single field rule: summon the field type's `Parser`; `Option[_]` marks it optional. The
+    * parser's schema decides everything else at assembly.
     */
   inline def fieldsOf[T <: Tuple]: List[(Parser[?], Boolean)] =
     inline erasedValue[T] match
@@ -123,9 +123,9 @@ object Derive:
       case _: NonEmptyTuple =>
         entryOf[Tuple.Head[T & NonEmptyTuple]] :: entriesOf[Tuple.Tail[T & NonEmptyTuple]]
 
-  /** One case of the sum being derived. Singleton and product cases belong to the
-    * sum's own declaration and are handled in place; a case that is itself a sum is a
-    * separate hierarchy and must provide its own `Parser` instance.
+  /** One case of the sum being derived. Singleton and product cases belong to the sum's own
+    * declaration and are handled in place; a case that is itself a sum is a separate hierarchy and
+    * must provide its own `Parser` instance.
     */
   inline def entryOf[H]: SubEntry =
     summonFrom:
@@ -144,4 +144,6 @@ object Derive:
           case v: ValueOf[Tuple.Head[T & NonEmptyTuple]] =>
             v.value :: singletonValues[Tuple.Tail[T & NonEmptyTuple]]
           case _ =>
-            error("Parser.Enumerated requires an enum (or sealed trait) whose cases are all parameterless")
+            error(
+              "Parser.Enumerated requires an enum (or sealed trait) whose cases are all parameterless"
+            )
