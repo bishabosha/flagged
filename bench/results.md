@@ -126,8 +126,12 @@ Scala.js and 4–6× on Native versus the JVM; the WebAssembly backend is broadl
 the JavaScript one on these workloads (somewhat faster for case-app, a wash for flagged).
 
 Why Native trails both: ablation on `simple — flagged` shows `release-full` recovers ~17% and
-disabling the GC outright (`--native-gc none`) ~14%, so neither static-optimization headroom
-nor collection cost explains the gap. The remainder is the absence of runtime profile-guided
+disabling the GC outright (`--native-gc none`) ~14% individually — but the full configuration
+`--native-mode release-full --native-lto thin --native-gc none` reaches 750 ns (−35%), ahead
+of Scala.js: thin LTO lets LLVM inline across module boundaries into the Scala Native runtime,
+and for a parse-once-and-exit CLI binary, no-GC-plus-process-teardown is a sound memory
+strategy, not a benchmark trick. That configuration is the recommended release build for
+Native CLIs. The remainder is the absence of runtime profile-guided
 optimization: the parse path dispatches through parser subtypes and `Result` combinators,
 which HotSpot and V8 speculatively devirtualize, inline, and escape-analyze after profiling
 (eliminating most of the short-lived allocation), while an ahead-of-time build keeps every
