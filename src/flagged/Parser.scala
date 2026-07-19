@@ -102,7 +102,7 @@ object Parser:
 
   /** One token per occurrence. */
   sealed trait Value[A] extends Parser[A]:
-    def parse: String => Result[A, String]
+    def parse(s: String): Result[A, String]
     def emap[B](f: A => Result[B, String]): Value[B] = of(typeName)(s => parse(s).flatMap(f))
     def withTypeName(name: String): Value[A]         = of(name)(parse)
 
@@ -117,7 +117,7 @@ object Parser:
     * → 0).
     */
   sealed trait Flag[A] extends Parser[A]:
-    def fromCount: Int => Result[A, String]
+    def fromCount(n: Int): Result[A, String]
     final def typeName: String                      = "flag"
     def emap[B](f: A => Result[B, String]): Flag[B] = flag(n => fromCount(n).flatMap(f))
 
@@ -125,7 +125,7 @@ object Parser:
     * positionally and inside `Option`).
     */
   sealed trait ValuedFlag[A] extends Flag[A]:
-    def fromValue: String => Result[A, String]
+    def fromValue(s: String): Result[A, String]
     override def emap[B](f: A => Result[B, String]): ValuedFlag[B] =
       flag(n => fromCount(n).flatMap(f), s => fromValue(s).flatMap(f))
 
@@ -136,16 +136,19 @@ object Parser:
   sealed trait Repeated[A] extends Parser[A]:
     type Elem
     def element: Value[Elem]
-    def build: List[Elem] => Result[A, String]
+    def build(l: List[Elem]): Result[A, String]
     final def typeName: String                          = element.typeName
     def emap[B](f: A => Result[B, String]): Repeated[B] =
       repeated[Elem, B](l => build(l).flatMap(f))(using element)
+    private[flagged] final def parseElem(s: String): Result[Any, String]    = element.parse(s)
+    private[flagged] final def buildErased(l: List[Any]): Result[A, String] =
+      build(l.asInstanceOf[List[Elem]])
 
   /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with `Nil`
     * when no `--` is given — return `Err` to require one).
     */
   sealed trait Trailing[A] extends Parser[A]:
-    def build: List[String] => Result[A, String]
+    def build(l: List[String]): Result[A, String]
     final def typeName: String                          = "args"
     def emap[B](f: A => Result[B, String]): Trailing[B] = trailing(l => build(l).flatMap(f))
 
@@ -176,27 +179,31 @@ object Parser:
 
   /** Build a single-value parser from a name and a parse function. */
   def of[A](name: String)(f: String => Result[A, String]): Value[A] = new Value[A]:
-    def typeName = name
-    def parse    = f
+    def typeName         = name
+    def parse(s: String) = f(s)
 
-  private[flagged] def enumeratedOf[A](name: String)(
-      f: String => Result[A, String]
-  ): Enumerated[A] =
+  private[flagged] def enumeratedOf[A](name: String, pairs: Vector[(String, A)]): Enumerated[A] =
     new Enumerated[A]:
-      def typeName = name
-      def parse    = f
+      def typeName         = name
+      def parse(s: String) =
+        val key = s.trim
+        var i   = 0
+        while i < pairs.length do
+          if pairs(i)._1.equalsIgnoreCase(key) then return Ok(pairs(i)._2)
+          i += 1
+        Err(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")
 
   /** Opt `A` into flag shape: the field takes no value and is built from the number of occurrences
     * on the command line.
     */
   def flag[A](count: Int => Result[A, String]): Flag[A] = new Flag[A]:
-    def fromCount = count
+    def fromCount(n: Int) = count(n)
 
   /** A flag that additionally accepts the explicit `--flag=value` form. */
   def flag[A](count: Int => Result[A, String], value: String => Result[A, String]): ValuedFlag[A] =
     new ValuedFlag[A]:
-      def fromCount = count
-      def fromValue = value
+      def fromCount(n: Int)    = count(n)
+      def fromValue(s: String) = value(s)
 
   /** Opt `A` into repeated shape: each occurrence is parsed with the element's (single-value)
     * parser, and the collected elements are combined with `combine`.
@@ -204,12 +211,12 @@ object Parser:
   def repeated[E, A](combine: List[E] => Result[A, String])(using elem: Value[E]): Repeated[A] =
     new Repeated[A]:
       type Elem = E
-      def element = elem
-      def build   = combine
+      def element           = elem
+      def build(l: List[E]) = combine(l)
 
   /** Opt `A` into trailing shape: it is built from the raw arguments after `--`. */
   def trailing[A](combine: List[String] => Result[A, String]): Trailing[A] = new Trailing[A]:
-    def build = combine
+    def build(l: List[String]) = combine(l)
 
   /** Called by derivation. Not intended for direct use. */
   def make[A](cmd: flagged.internal.Command, name: String): Command[A] = new Command[A]:
@@ -241,36 +248,49 @@ object Parser:
     )
     repeated[(K, V), Map[K, V]](l => Ok(l.toMap))
 
-  private def numeric[A](name: String)(f: String => A): Value[A] =
-    of(name)(s =>
-      try Ok(f(s.trim))
-      catch case _: NumberFormatException => Err(s"'$s' is not a valid $name")
-    )
+  // built-in instances implement `parse` directly (an abstract `convert` method rather than a
+  // stored function), so the default path is plain virtual dispatch with no closures; only
+  // user-constructed parsers (`of`, `emap`, ...) go through a function value
+  private abstract class Num[A](val typeName: String) extends Value[A]:
+    protected def convert(s: String): A
+    final def parse(s: String): Result[A, String] =
+      try Ok(convert(s.trim))
+      catch case _: NumberFormatException => Err(s"'$s' is not a valid $typeName")
 
-  given Value[String]     = of("string")(Ok(_))
-  given Value[Int]        = numeric("int")(_.toInt)
-  given Value[Long]       = numeric("long")(_.toLong)
-  given Value[Short]      = numeric("short")(_.toShort)
-  given Value[Byte]       = numeric("byte")(_.toByte)
-  given Value[Float]      = numeric("float")(_.toFloat)
-  given Value[Double]     = numeric("double")(_.toDouble)
-  given Value[BigInt]     = numeric("integer")(BigInt(_))
-  given Value[BigDecimal] = numeric("decimal")(BigDecimal(_))
+  given Value[String] = new Value[String]:
+    def typeName         = "string"
+    def parse(s: String) = Ok(s)
+
+  given Value[Int]    = new Num[Int]("int") { protected def convert(s: String) = s.toInt }
+  given Value[Long]   = new Num[Long]("long") { protected def convert(s: String) = s.toLong }
+  given Value[Short]  = new Num[Short]("short") { protected def convert(s: String) = s.toShort }
+  given Value[Byte]   = new Num[Byte]("byte") { protected def convert(s: String) = s.toByte }
+  given Value[Float]  = new Num[Float]("float") { protected def convert(s: String) = s.toFloat }
+  given Value[Double] = new Num[Double]("double") { protected def convert(s: String) = s.toDouble }
+  given Value[BigInt] = new Num[BigInt]("integer") { protected def convert(s: String) = BigInt(s) }
+  given Value[BigDecimal] =
+    new Num[BigDecimal]("decimal") { protected def convert(s: String) = BigDecimal(s) }
 
   // repetition policy belongs to the flag's count parser: repeating a Boolean flag replaces the
   // previous value (the last mention wins, like value options); counting is opt-in via Count
-  given ValuedFlag[Boolean] = flag(n => Ok(n > 0), internal.Runtime.parseBool)
+  given ValuedFlag[Boolean] = new ValuedFlag[Boolean]:
+    def fromCount(n: Int)    = Ok(n > 0)
+    def fromValue(s: String) = internal.Runtime.parseBool(s)
 
-  given Value[Char] = of("char")(s =>
-    if s.length == 1 then Ok(s.charAt(0)) else Err(s"'$s' is not a single character")
-  )
+  given Value[Char] = new Value[Char]:
+    def typeName         = "char"
+    def parse(s: String) =
+      if s.length == 1 then Ok(s.charAt(0)) else Err(s"'$s' is not a single character")
 
-  given Value[File] = of("file")(s => Ok(new File(s)))
+  given Value[File] = new Value[File]:
+    def typeName         = "file"
+    def parse(s: String) = Ok(new File(s))
 
-  given Value[UUID] = of("uuid")(s =>
-    try Ok(UUID.fromString(s.trim))
-    catch case _: IllegalArgumentException => Err(s"'$s' is not a valid UUID")
-  )
+  given Value[UUID] = new Value[UUID]:
+    def typeName         = "uuid"
+    def parse(s: String) =
+      try Ok(UUID.fromString(s.trim))
+      catch case _: IllegalArgumentException => Err(s"'$s' is not a valid UUID")
 
   // platform-dependent value instances (java.nio.file.Path is unavailable on Scala.js,
   // java.time outside the JVM); exported so they stay in this companion's implicit scope

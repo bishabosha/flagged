@@ -6,25 +6,22 @@ import steps.result.Result
   * sites must reference these types; not intended for direct use.
   */
 enum Mode:
-  /** Flag: takes no token; built from the occurrence count. `fromValue`, when available, handles
-    * the explicit `--flag=value` form. If `optional` the field is an `Option[_]`: absent means
-    * `None`, any presence wraps the built value in `Some`.
+  /** Flag: takes no token; built from the occurrence count (a [[flagged.Parser.ValuedFlag]]
+    * additionally handles the explicit `--flag=value` form). If `optional` the field is an
+    * `Option[_]`: absent means `None`, any presence wraps the built value in `Some`.
     */
-  case Flag(
-      fromCount: Int => Result[Any, String],
-      fromValue: Option[String => Result[Any, String]],
-      optional: Boolean
-  )
+  case Flag(parser: flagged.Parser.Flag[?], optional: Boolean)
 
   /** Option taking one value. If `optional` the field is an `Option[_]` and the parsed value is
     * wrapped in `Some`.
     */
-  case Single(read: String => Result[Any, String], optional: Boolean)
+  case Single(parser: flagged.Parser[?], optional: Boolean)
 
-  /** Option that may appear multiple times; collected values are combined with `fromList` (also
-    * invoked with `Nil` when absent; may fail, e.g. to require at least one occurrence).
+  /** Option that may appear multiple times; elements are parsed with the parser's element and
+    * combined with its build (also invoked with `Nil` when absent; may fail, e.g. to require at
+    * least one occurrence).
     */
-  case Repeated(read: String => Result[Any, String], fromList: List[Any] => Result[Any, String])
+  case Repeated(parser: flagged.Parser.Repeated[?])
 
 final case class OptSpec(
     long: String,
@@ -81,10 +78,12 @@ final case class Splice(
 final case class TrailingSpec(
     index: Int,
     help: String,
-    build: List[String] => Result[Any, String],
+    parser: flagged.Parser.Trailing[?],
     optional: Boolean,
     default: Option[() => Any]
-)
+):
+  def build(l: List[String]): Result[Any, String] =
+    parser.build(l).asInstanceOf[Result[Any, String]]
 
 final case class Command(
     description: String,
@@ -97,6 +96,12 @@ final case class Command(
     arity: Int,                    // value-storage size: own fields plus spliced children's storage
     version: Option[String] = None // printed by --version and in the help header
 ):
+  // per-token lookups go through these instead of per-token scans with predicate closures
+  lazy val longIndex: Map[String, OptSpec] =
+    opts.iterator.flatMap(o => (o.long :: o.aliases).iterator.map(_ -> o)).toMap
+  lazy val shortIndex: Map[Char, OptSpec] =
+    opts.iterator.flatMap(o => o.short.iterator.map(_ -> o)).toMap
+
   /** Build spliced children from their storage slices, then build this command's value; the first
     * failing build (e.g. an `emap` validation) short-circuits. `occupied` reports whether the value
     * slot at an index (relative to this command's storage) saw any command-line occurrence: an

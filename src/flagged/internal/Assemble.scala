@@ -76,9 +76,6 @@ object Assemble:
   def progName(label: String, onType: TargetAnnots): String =
     onType.name.getOrElse(kebab(label))
 
-  private def readFn(p: Parser[?]): String => Result[Any, String] =
-    s => p.asInstanceOf[Parser[Any]].read(s)
-
   private def invalid(msg: String): Nothing =
     throw new IllegalArgumentException(s"flagged: invalid CLI definition: $msg")
 
@@ -99,19 +96,15 @@ object Assemble:
   /** The command view of a value-shaped parser: one positional argument. */
   def singleValueCommand(p: Parser[?]): Command =
     val mode = p match
-      case _: Parser.Value[?]       => Mode.Single(readFn(p), false)
-      case vf: Parser.ValuedFlag[?] =>
-        Mode.Single(vf.fromValue.asInstanceOf[String => Result[Any, String]], false)
-      case _: Parser.Flag[?] =>
+      case _: Parser.Value[?]      => Mode.Single(p, false)
+      case _: Parser.ValuedFlag[?] => Mode.Single(p, false)
+      case _: Parser.Flag[?]       =>
         invalid("a flag parser without a value parser cannot be run standalone")
       case r: Parser.Repeated[?] =>
-        Mode.Repeated(
-          s => r.element.parse(s),
-          r.build.asInstanceOf[List[Any] => Result[Any, String]]
-        )
+        Mode.Repeated(r)
       case t: Parser.Trailing[?] =>
         val spec =
-          TrailingSpec(0, "", t.build, false, None)
+          TrailingSpec(0, "", t, false, None)
         return Command(
           "",
           Vector.empty,
@@ -235,31 +228,23 @@ object Assemble:
         Plan.Grouped(f.index, f.label, f.nameAnn, f.group, f.optional, f.default, inner)
 
       case vf: Parser.ValuedFlag[?] =>
-        val fv = vf.fromValue.asInstanceOf[String => Result[Any, String]]
-        if f.positional then positional("value", Mode.Single(fv, f.optional), posKind)
-        else
-          named(
-            "",
-            Mode.Flag(vf.fromCount.asInstanceOf[Int => Result[Any, String]], Some(fv), f.optional)
-          )
+        if f.positional then positional("value", Mode.Single(vf, f.optional), posKind)
+        else named("", Mode.Flag(vf, f.optional))
 
       case fl: Parser.Flag[?] =>
-        named("", Mode.Flag(fl.fromCount.asInstanceOf[Int => Result[Any, String]], None, false))
+        named("", Mode.Flag(fl, false))
 
       case v: Parser.Value[?] =>
-        val mode = Mode.Single(readFn(f.parser), f.optional)
+        val mode = Mode.Single(v, f.optional)
         if f.positional then positional(v.typeName, mode, posKind) else named(v.typeName, mode)
 
       case r: Parser.Repeated[?] =>
-        val mode = Mode.Repeated(
-          s => r.element.parse(s),
-          r.build.asInstanceOf[List[Any] => Result[Any, String]]
-        )
+        val mode = Mode.Repeated(r)
         if f.positional then positional(r.typeName, mode, PosKind.Repeated)
         else named(r.typeName, mode)
 
       case t: Parser.Trailing[?] =>
-        Plan.Rest(TrailingSpec(f.index, f.help, t.build, f.optional, f.default))
+        Plan.Rest(TrailingSpec(f.index, f.help, t, f.optional, f.default))
 
   /** Cross-field aggregation: name uniqueness, at-most-one subcommand/trailing field, positional
     * ordering, splice storage layout.

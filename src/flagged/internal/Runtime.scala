@@ -15,11 +15,7 @@ object Runtime:
 
   /** Value parser for enums whose cases are all parameterless, matching kebab-cased names. */
   def enumParser[A](name: String, pairs: Vector[(String, A)]): Parser.Enumerated[A] =
-    Parser.enumeratedOf[A](name)(s =>
-      pairs.collectFirst { case (n, v) if n.equalsIgnoreCase(s.trim) => v } match
-        case Some(v) => Ok(v)
-        case None    => Err(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")
-    )
+    Parser.enumeratedOf(name, pairs)
 
   private def levenshtein(a: String, b: String): Int =
     val d = Array.tabulate(a.length + 1, b.length + 1) { (i, j) =>

@@ -46,8 +46,8 @@ private[flagged] object Engine:
       var posIdx     = 0
       var noMoreOpts = false
 
-      def longOf(n: String) = cmd.opts.find(o => o.long == n || o.aliases.contains(n))
-      def shortOf(c: Char)  = cmd.opts.find(_.short.contains(c))
+      def longOf(n: String) = cmd.longIndex.get(n)
+      def shortOf(c: Char)  = cmd.shortIndex.get(c)
 
       def isNegativeNumber(s: String): Boolean =
         s.length > 1 && s(0) == '-' &&
@@ -67,8 +67,8 @@ private[flagged] object Engine:
             None
 
       def isFlag(spec: OptSpec): Boolean = spec.mode match
-        case Mode.Flag(_, _, _) => true
-        case _                  => false
+        case Mode.Flag(_, _) => true
+        case _               => false
 
       /** With a `@default` command and no own options, unrecognized tokens are its arguments. */
       def defaultSub: Option[SubCase] =
@@ -101,8 +101,8 @@ private[flagged] object Engine:
               val p = cmd.positionals(posIdx)
               occs(p.index) += Occ.Val(tok, s"<${p.name}>")
               p.mode match
-                case Mode.Repeated(_, _) => () // keep filling the last positional
-                case _                   => posIdx += 1
+                case Mode.Repeated(_) => () // keep filling the last positional
+                case _                => posIdx += 1
 
       // ---- phase 1: routing ---------------------------------------------------
 
@@ -195,42 +195,43 @@ private[flagged] object Engine:
           occurrences: List[Occ]
       ): Option[Any] =
         mode match
-          case Mode.Flag(fromCount, fromValue, optional) =>
+          case Mode.Flag(parser, optional) =>
             def wrap(v: Any): Any     = if optional then Some(v) else v
             def fromBare: Option[Any] =
-              fromCount(occurrences.length) match
+              parser.fromCount(occurrences.length) match
                 case Ok(v)    => Some(wrap(v))
                 case Err(msg) =>
                   report(s"flag '$display': $msg")
                   Some(null)
-            fromValue match
-              case None =>
+            def absent: Option[Any] =
+              if optional then Some(default.map(_()).getOrElse(None))
+              else Some(default.map(_()).getOrElse(orReport(display)(parser.fromCount(0))))
+            parser match
+              case vf: flagged.Parser.ValuedFlag[?] =>
+                // the last mention wins, bare or valued
+                occurrences.lastOption match
+                  case Some(Occ.Val(raw, disp)) => Some(wrap(orReport(disp)(vf.fromValue(raw))))
+                  case Some(Occ.Bare)           => fromBare
+                  case None                     => absent
+              case _ =>
                 // a pure flag rejects an explicit value wherever it appears
                 occurrences.collectFirst { case v: Occ.Val => v } match
                   case Some(v) =>
                     report(s"flag '${v.display}' does not take a value")
                     Some(null)
                   case None if occurrences.nonEmpty => fromBare
-                  case None if optional             => Some(default.map(_()).getOrElse(None))
-                  case None => Some(default.map(_()).getOrElse(orReport(display)(fromCount(0))))
-              case Some(f) =>
-                // the last mention wins, bare or valued
-                occurrences.lastOption match
-                  case Some(Occ.Val(raw, disp)) => Some(wrap(orReport(disp)(f(raw))))
-                  case Some(Occ.Bare)           => fromBare
-                  case None if optional         => Some(default.map(_()).getOrElse(None))
-                  case None => Some(default.map(_()).getOrElse(orReport(display)(fromCount(0))))
-          case Mode.Single(read, optional) =>
+                  case None                         => absent
+          case Mode.Single(parser, optional) =>
             occurrences.lastOption match
               case Some(Occ.Val(raw, disp)) =>
-                val v = orReport(disp)(read(raw))
+                val v = orReport(disp)(parser.asInstanceOf[flagged.Parser[Any]].read(raw))
                 Some(if optional then Some(v) else v)
               case _ =>
                 default.map(d => Some(d())).getOrElse(if optional then Some(None) else None)
-          case Mode.Repeated(read, fromList) =>
+          case Mode.Repeated(parser) =>
             var bad  = false
             val vals = occurrences.collect { case Occ.Val(raw, disp) =>
-              read(raw) match
+              parser.parseElem(raw) match
                 case Ok(v)    => v
                 case Err(msg) =>
                   report(s"invalid value for '$disp': $msg")
@@ -238,8 +239,11 @@ private[flagged] object Engine:
                   null
             }
             if bad then Some(null) // reported: the parse fails before anything is built
-            else if vals.nonEmpty then Some(orReport(display)(fromList(vals)))
-            else default.map(d => Some(d())).getOrElse(Some(orReport(display)(fromList(Nil))))
+            else if vals.nonEmpty then Some(orReport(display)(parser.buildErased(vals)))
+            else
+              default
+                .map(d => Some(d()))
+                .getOrElse(Some(orReport(display)(parser.buildErased(Nil))))
 
       val missing = mutable.ListBuffer.empty[String]
 
