@@ -3,6 +3,7 @@ package flagged.internal
 import scala.compiletime.*
 import scala.compiletime.ops.int./
 import scala.compiletime.ops.int.{BitwiseOr, BitwiseAnd}
+import scala.compiletime.ops.any.{==, !=}
 import scala.deriving.Mirror
 import flagged.Parser
 import flagged.meta.{Ann, AnnotMirror, Defaults}
@@ -114,25 +115,20 @@ object Derive:
   inline def plainRes(fields: List[(Parser[?], Boolean, FieldAnnots)]) =
     resOf[0, EmptyTuple, EmptyTuple](fields)
 
-  inline def isZero[M <: Int]: Boolean =
-    inline erasedValue[M] match
-      case _: 0 => true
-      case _    => false
-
+  inline def isZero[M <: Int]: Boolean           = constValue[M == 0]
   inline def hasBit[M <: Int, B <: Int]: Boolean =
-    inline erasedValue[BitwiseAnd[M, B]] match
-      case _: 0 => false
-      case _    => true
+    constValue[BitwiseAnd[M, B] != 0]
 
   type HalfN[T <: Tuple] = Tuple.Size[T] / 2
 
   /** Whether the field's annotation slot is empty — the common case; lets every per-field
     * annotation check and name collection collapse to nothing.
     */
-  inline def noAnns[Anns]: Boolean =
-    inline erasedValue[Anns] match
-      case _: EmptyTuple => true
-      case _             => false
+  type IsEmptyT[Anns] <: Boolean = Anns match
+    case EmptyTuple => true
+    case _          => false
+
+  inline def noAnns[Anns]: Boolean = constValue[IsEmptyT[Anns]]
 
   private transparent inline def walk[Types <: Tuple, Slots <: Tuple]: FieldsRes =
     inline erasedValue[Types] match
@@ -351,48 +347,41 @@ object Derive:
     case _ *: t                          => LongsOf[t]
     case EmptyTuple                      => EmptyTuple
 
-  /** The union of a tuple's elements, for membership-as-subtyping tests. */
-  type FoldU[T <: Tuple] = T match
-    case EmptyTuple => Nothing
-    case h *: t     => h | FoldU[t]
+  /** Whether the two constant-name tuples share an element. */
+  type OverlapsT[A <: Tuple, B <: Tuple] <: Boolean = B match
+    case EmptyTuple => false
+    case h *: t     =>
+      Tuple.Contains[A, h] match
+        case true  => true
+        case false => OverlapsT[A, t]
 
   inline def checkDisjointShorts[A <: Tuple, B <: Tuple]: Unit =
-    inline erasedValue[A] match
-      case _: EmptyTuple => ()
-      case _             =>
-        inline erasedValue[B] match
-          case _: EmptyTuple => ()
-          case _: (h *: t)   =>
-            inline erasedValue[h] match
-              case _: FoldU[A] => error("duplicate short option")
-              case _           => checkDisjointShorts[A, t]
+    inline if constValue[OverlapsT[A, B]] then error("duplicate short option") else ()
 
   inline def checkDisjointLongs[A <: Tuple, B <: Tuple]: Unit =
-    inline erasedValue[A] match
-      case _: EmptyTuple => ()
-      case _             =>
-        inline erasedValue[B] match
-          case _: EmptyTuple => ()
-          case _: (h *: t)   =>
-            inline erasedValue[h] match
-              case _: FoldU[A] => error("duplicate option name")
-              case _           => checkDisjointLongs[A, t]
+    inline if constValue[OverlapsT[A, B]] then error("duplicate option name") else ()
 
-  /** Whether annotation slot `Anns` contains an `A` — a compile-time constant. */
+  /** Whether annotation slot `Anns` contains an `A` — a compile-time constant. Match types rather
+    * than inline-match recursion: reduction happens in the (cached) type domain instead of one
+    * inline expansion per slot element.
+    */
+  type HasAnnT[A <: scala.annotation.Annotation, Anns] <: Boolean = Anns match
+    case EmptyTuple        => false
+    case Ann[A, ?, ?] *: _ => true
+    case _ *: t            => HasAnnT[A, t]
+
   inline def hasAnn[A <: scala.annotation.Annotation, Anns]: Boolean =
-    inline erasedValue[Anns] match
-      case _: EmptyTuple          => false
-      case _: (Ann[A, ?, ?] *: _) => true
-      case _: (_ *: t)            => hasAnn[A, t]
+    constValue[HasAnnT[A, Anns]]
 
   /** Whether the slot contains a specific annotation *application*, e.g. `@short('h')` — decidable
     * because `Ann` is invariant with constant arguments.
     */
-  inline def hasAnnApplied[Applied, Anns]: Boolean =
-    inline erasedValue[Anns] match
-      case _: EmptyTuple     => false
-      case _: (Applied *: _) => true
-      case _: (_ *: t)       => hasAnnApplied[Applied, t]
+  type HasAppliedT[Applied, Anns] <: Boolean = Anns match
+    case EmptyTuple   => false
+    case Applied *: _ => true
+    case _ *: t       => HasAppliedT[Applied, t]
+
+  inline def hasAnnApplied[Applied, Anns]: Boolean = constValue[HasAppliedT[Applied, Anns]]
 
   // ---- sums -----------------------------------------------------------------
 
