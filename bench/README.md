@@ -1,5 +1,7 @@
 # Benchmarks
 
+Results from the last full run are in [`results.md`](results.md).
+
 JMH benchmarks comparing flagged with [mainargs](https://github.com/com-lihaoyi/mainargs) and
 [case-app](https://github.com/alexarchambault/case-app), on both derivation compile time and
 parse latency/allocation. This module is excluded from the main build (`//> using exclude` in the
