@@ -1,6 +1,7 @@
 package flagged.internal
 
 import scala.compiletime.*
+import scala.compiletime.ops.int./
 import scala.deriving.Mirror
 import flagged.Parser
 import flagged.meta.{Ann, AnnotMirror, Defaults}
@@ -56,156 +57,211 @@ object Derive:
     constValueTuple[L].toList.asInstanceOf[List[String]]
 
   /** The single field rule: summon the field type's `Parser`; `Option[_]` marks it optional. The
-    * parser's schema decides everything else at assembly — except that combinations already visible
-    * in types (the field's annotations, `Option` wrapping, and the shape of shape-refined
-    * instances, see [[Parser.Aux]]) are rejected here, at compile time. Shape-erased instances fall
-    * back to construction-time validation.
+    * parser's shape (its `Parser` subtype, which derivation requires to be statically known)
+    * decides everything else; combinations visible in types are rejected here, at compile time.
     */
   inline def fieldsOf[Types <: Tuple, Slots <: Tuple, Labels <: Tuple]: List[(Parser[?], Boolean)] =
-    fieldsRec[Types, Slots, Labels, Nothing, Nothing](
-      seenTrailing = false,
-      seenRepeatedPos = false,
-      seenGroup = false,
-      seenPositional = false
-    )
-
-  /** The field walk. Each field costs exactly one implicit search (the instance selection); every
-    * compile-time question — annotation combinations, the shape of the found instance,
-    * duplicate-name membership — is answered by inline matches over types already at hand.
-    * Cross-field state travels as inline booleans and as union types (claimed constant names,
-    * membership tested as subtyping). A field whose instance's shape cannot be determined
-    * statically is rejected: ascribe custom givens to `Parser.Aux[...]` (or build them without an
-    * ascription).
-    */
-  inline def fieldsRec[Types <: Tuple, Slots <: Tuple, Labels <: Tuple, Shorts, Longs](
-      inline seenTrailing: Boolean,
-      inline seenRepeatedPos: Boolean,
-      inline seenGroup: Boolean,
-      inline seenPositional: Boolean
-  ): List[(Parser[?], Boolean)] =
+    // one destructuring match per tuple so the walk's match types (`Take`/`Drop`/`Size`) operate
+    // on concrete tuple types: the mirror members arrive as abstract paths (`am.MirroredAnnotations`)
+    // that inline-match reduction resolves but match-type reduction alone does not
     inline erasedValue[Types] match
       case _: EmptyTuple => Nil
-      case _: (f *: ft)  =>
+      case _: (t0 *: tr) =>
         inline erasedValue[Slots] match
-          case _: (a *: at) =>
+          case _: (s0 *: sr) =>
             inline erasedValue[Labels] match
-              case _: (l *: lt) =>
-                // annotation-only checks need no instance
-                inline if hasAnnApplied[Ann[flagged.short, 'h' *: EmptyTuple, ?], a] then
-                  error("short option 'h' is reserved for help")
-                else ()
-                inline if hasAnn[flagged.positional, a] then
-                  inline if hasAnn[flagged.short, a] then
-                    error("@short cannot be combined with @positional")
-                  else inline if seenRepeatedPos then
-                    error("a repeated positional must be the last positional field")
-                  else inline if seenGroup then
-                    error(
-                      "mixing positional fields with a subcommand field is ambiguous and not supported"
-                    )
-                  else ()
-                else inline if hasAnnApplied[Ann[flagged.name, "help" *: EmptyTuple, ?], a] then
-                  error("option name 'help' is reserved")
-                else ()
-                inline erasedValue[f] match
-                  case _: Option[e] =>
-                    step[e, ft, at, lt, a, l, Shorts, Longs](
-                      optional = true,
-                      seenTrailing = seenTrailing,
-                      seenRepeatedPos = seenRepeatedPos,
-                      seenGroup = seenGroup,
-                      seenPositional = seenPositional
-                    )
-                  case _ =>
-                    step[f, ft, at, lt, a, l, Shorts, Longs](
-                      optional = false,
-                      seenTrailing = seenTrailing,
-                      seenRepeatedPos = seenRepeatedPos,
-                      seenGroup = seenGroup,
-                      seenPositional = seenPositional
-                    )
+              case _: (l0 *: lr) =>
+                walk[
+                  t0 *: tr,
+                  s0 *: sr,
+                  l0 *: lr,
+                  false,
+                  false,
+                  false,
+                  false,
+                  Nothing,
+                  Nothing
+                ].fields
 
-  /** One field: select the instance (the field's single implicit search), dispatch on its
-    * statically known shape for the shape x annotation checks and name folding, and recurse.
+  /** Compile-time state of the field walk, carried in the *type* of a transparent inline result:
+    * the trailing / repeated-positional / subcommand / positional markers, and the unions of
+    * claimed constant names (membership tested as subtyping). Carrying it in the result type lets
+    * [[walk]] split the field tuple in halves — the left half's result type supplies the right
+    * half's type arguments — so inline depth grows with the logarithm of the field count instead of
+    * the count itself, while the checks stay strictly left-to-right.
     */
-  inline def step[E, Ft <: Tuple, At <: Tuple, Lt <: Tuple, Anns, L, Shorts, Longs](
-      inline optional: Boolean,
-      inline seenTrailing: Boolean,
-      inline seenRepeatedPos: Boolean,
-      inline seenGroup: Boolean,
-      inline seenPositional: Boolean
-  ): List[(Parser[?], Boolean)] =
+  final class FieldsRes(val fields: List[(Parser[?], Boolean)]):
+    type SeenTrailing <: Boolean
+    type SeenRepeatedPos <: Boolean
+    type SeenGroup <: Boolean
+    type SeenPositional <: Boolean
+    type Shorts
+    type Longs
+
+  type ResOf[ST <: Boolean, SR <: Boolean, SG <: Boolean, SP <: Boolean, Sh, Lo] =
+    FieldsRes {
+      type SeenTrailing    = ST
+      type SeenRepeatedPos = SR
+      type SeenGroup       = SG
+      type SeenPositional  = SP
+      type Shorts          = Sh
+      type Longs           = Lo
+    }
+
+  inline def resOf[ST <: Boolean, SR <: Boolean, SG <: Boolean, SP <: Boolean, Sh, Lo](
+      fields: List[(Parser[?], Boolean)]
+  ): ResOf[ST, SR, SG, SP, Sh, Lo] =
+    new FieldsRes(fields).asInstanceOf[ResOf[ST, SR, SG, SP, Sh, Lo]]
+
+  type HalfN[T <: Tuple] = Tuple.Size[T] / 2
+
+  /** Read a type-level boolean via type-test rather than `constValue`: the walk's state types
+    * arrive as pattern-bound variables that inline-match reduction resolves where `constValue`
+    * cannot.
+    */
+  transparent inline def isTrue[B <: Boolean]: Boolean =
+    inline erasedValue[B] match
+      case _: true  => true
+      case _: false => false
+
+  transparent inline def walk[
+      Types <: Tuple,
+      Slots <: Tuple,
+      Labels <: Tuple,
+      ST <: Boolean,
+      SR <: Boolean,
+      SG <: Boolean,
+      SP <: Boolean,
+      Shorts,
+      Longs
+  ]: FieldsRes =
+    inline erasedValue[Types] match
+      case _: EmptyTuple        => resOf[ST, SR, SG, SP, Shorts, Longs](Nil)
+      case _: (? *: EmptyTuple) =>
+        one[
+          Tuple.Head[Types & NonEmptyTuple],
+          Tuple.Head[Slots & NonEmptyTuple],
+          Tuple.Head[Labels & NonEmptyTuple],
+          ST,
+          SR,
+          SG,
+          SP,
+          Shorts,
+          Longs
+        ]
+      case _: NonEmptyTuple =>
+        walk[
+          Tuple.Take[Types, HalfN[Types]],
+          Tuple.Take[Slots, HalfN[Types]],
+          Tuple.Take[Labels, HalfN[Types]],
+          ST,
+          SR,
+          SG,
+          SP,
+          Shorts,
+          Longs
+        ].andRight[Types, Slots, Labels]
+
+  /** Continuations for the split: the receiver / parameter types are inferred as the arguments'
+    * *precise* refined types (a `val` or pattern binder would fix the type before expansion, losing
+    * the refinement), so the right half reads the left half's final state off the left result's
+    * type members.
+    */
+  extension [L <: FieldsRes](l: L)
+    transparent inline def andRight[Types <: Tuple, Slots <: Tuple, Labels <: Tuple]: FieldsRes =
+      afterRight(
+        l,
+        walk[
+          Tuple.Drop[Types, HalfN[Types]],
+          Tuple.Drop[Slots, HalfN[Types]],
+          Tuple.Drop[Labels, HalfN[Types]],
+          l.SeenTrailing,
+          l.SeenRepeatedPos,
+          l.SeenGroup,
+          l.SeenPositional,
+          l.Shorts,
+          l.Longs
+        ]
+      )
+
+  transparent inline def afterRight[L <: FieldsRes, R <: FieldsRes](l: L, r: R): FieldsRes =
+    resOf[r.SeenTrailing, r.SeenRepeatedPos, r.SeenGroup, r.SeenPositional, r.Shorts, r.Longs](
+      l.fields ++ r.fields
+    )
+
+  /** One field: annotation-only checks, `Option` unwrapping, then shape dispatch. */
+  transparent inline def one[
+      F,
+      Anns,
+      L,
+      ST <: Boolean,
+      SR <: Boolean,
+      SG <: Boolean,
+      SP <: Boolean,
+      Shorts,
+      Longs
+  ]: FieldsRes =
+    inline if hasAnnApplied[Ann[flagged.short, 'h' *: EmptyTuple, ?], Anns] then
+      error("short option 'h' is reserved for help")
+    else ()
+    inline if hasAnn[flagged.positional, Anns] then
+      inline if hasAnn[flagged.short, Anns] then error("@short cannot be combined with @positional")
+      else inline if isTrue[SR] then
+        error("a repeated positional must be the last positional field")
+      else inline if isTrue[SG] then
+        error("mixing positional fields with a subcommand field is ambiguous and not supported")
+      else ()
+    else inline if hasAnnApplied[Ann[flagged.name, "help" *: EmptyTuple, ?], Anns] then
+      error("option name 'help' is reserved")
+    else ()
+    inline erasedValue[F] match
+      case _: Option[e] => shape[e, Anns, L, ST, SR, SG, SP, Shorts, Longs](optional = true)
+      case _            => shape[F, Anns, L, ST, SR, SG, SP, Shorts, Longs](optional = false)
+
+  /** Select the instance (the field's single implicit search) and dispatch on its statically known
+    * shape for the shape x annotation checks and name folding.
+    */
+  transparent inline def shape[
+      E,
+      Anns,
+      L,
+      ST <: Boolean,
+      SR <: Boolean,
+      SG <: Boolean,
+      SP <: Boolean,
+      Shorts,
+      Longs
+  ](inline optional: Boolean): FieldsRes =
     summonFrom:
       case p: Parser[E] =>
         inline p match
           case _: Parser.ValuedFlag[?] =>
-            named[Ft, At, Lt, Anns, L, Shorts, Longs](
-              p,
-              optional,
-              seenTrailing,
-              seenRepeatedPos,
-              seenGroup,
-              seenPositional
-            )
+            namedRes[Anns, L, ST, SR, SG, SP, Shorts, Longs](p, optional)
           case _: Parser.Flag[?] =>
             inline if optional then
               error("a flag Parser without a value parser cannot be used inside Option")
             else inline if hasAnn[flagged.positional, Anns] then
               error("a flag Parser without a value parser cannot be used positionally")
-            else
-              named[Ft, At, Lt, Anns, L, Shorts, Longs](
-                p,
-                optional,
-                seenTrailing,
-                seenRepeatedPos,
-                seenGroup,
-                seenPositional
-              )
+            else namedRes[Anns, L, ST, SR, SG, SP, Shorts, Longs](p, optional)
           case _: Parser.Value[?] =>
-            named[Ft, At, Lt, Anns, L, Shorts, Longs](
-              p,
-              optional,
-              seenTrailing,
-              seenRepeatedPos,
-              seenGroup,
-              seenPositional
-            )
+            namedRes[Anns, L, ST, SR, SG, SP, Shorts, Longs](p, optional)
           case _: Parser.Repeated[?] =>
             inline if optional then
               error(
                 "Option of a repeated Parser is not supported: the plain type is empty when absent"
               )
             else inline if hasAnn[flagged.positional, Anns] then
-              (p, optional) :: fieldsRec[Ft, At, Lt, Shorts, Longs](
-                seenTrailing = seenTrailing,
-                seenRepeatedPos = true,
-                seenGroup = seenGroup,
-                seenPositional = true
-              )
-            else
-              named[Ft, At, Lt, Anns, L, Shorts, Longs](
-                p,
-                optional,
-                seenTrailing,
-                seenRepeatedPos,
-                seenGroup,
-                seenPositional
-              )
+              resOf[ST, true, SG, true, Shorts, Longs](List((p, optional)))
+            else namedRes[Anns, L, ST, SR, SG, SP, Shorts, Longs](p, optional)
           case _: Parser.Trailing[?] =>
-            inline if seenTrailing then error("only one trailing field is supported per command")
+            inline if isTrue[ST] then error("only one trailing field is supported per command")
             else inline if hasAnn[flagged.positional, Anns] then
               error("@positional cannot be combined with a trailing field")
             else inline if hasAnn[flagged.short, Anns] then
               error("@short cannot be combined with a trailing field")
             else inline if hasAnn[flagged.name, Anns] then
               error("@name has no effect on a trailing field")
-            else
-              (p, optional) :: fieldsRec[Ft, At, Lt, Shorts, Longs](
-                seenTrailing = true,
-                seenRepeatedPos = seenRepeatedPos,
-                seenGroup = seenGroup,
-                seenPositional = seenPositional
-              )
+            else resOf[true, SR, SG, SP, Shorts, Longs](List((p, optional)))
           case _: Parser.CommandGroup[?] =>
             inline if hasAnn[flagged.positional, Anns] then
               error("@positional cannot be combined with a subcommand field")
@@ -215,19 +271,13 @@ object Derive:
               error("@name has no effect on a subcommand field (command names come from the cases)")
             else inline if hasAnn[flagged.help, Anns] then
               error("@help has no effect on a subcommand field (put it on the enum or its cases)")
-            else inline if seenGroup then
+            else inline if isTrue[SG] then
               error("only one subcommand field is supported per command")
-            else inline if seenPositional then
+            else inline if isTrue[SP] then
               error(
                 "mixing positional fields with a subcommand field is ambiguous and not supported"
               )
-            else
-              (p, optional) :: fieldsRec[Ft, At, Lt, Shorts, Longs](
-                seenTrailing = seenTrailing,
-                seenRepeatedPos = seenRepeatedPos,
-                seenGroup = true,
-                seenPositional = seenPositional
-              )
+            else resOf[ST, SR, true, SP, Shorts, Longs](List((p, optional)))
           case _: Parser.Command[?] =>
             inline if hasAnn[flagged.positional, Anns] then
               error("@positional cannot be combined with a command-shaped Parser")
@@ -240,47 +290,35 @@ object Derive:
               )
             else inline if hasAnn[flagged.help, Anns] then
               error("@help has no effect on a spliced options group")
-            else
-              (p, optional) :: fieldsRec[Ft, At, Lt, Shorts, Longs](
-                seenTrailing = seenTrailing,
-                seenRepeatedPos = seenRepeatedPos,
-                seenGroup = seenGroup,
-                seenPositional = seenPositional
-              )
+            else resOf[ST, SR, SG, SP, Shorts, Longs](List((p, optional)))
           case _ =>
             error(
               "the shape of this field's Parser is not statically known: give the given a shape type such as Parser.Value[X], or build it with the Parser constructors / derivation clauses"
             )
       case _ =>
         // fails with Parser's missing-instance guidance
-        (summonInline[Parser[E]], optional) :: Nil
+        resOf[ST, SR, SG, SP, Shorts, Longs](List((summonInline[Parser[E]], optional)))
 
   /** A field that surely becomes a named option: fold its constant names (if not positional) into
     * the claimed-name unions, testing membership first.
     */
-  inline def named[Ft <: Tuple, At <: Tuple, Lt <: Tuple, Anns, L, Shorts, Longs](
-      p: Parser[?],
-      inline optional: Boolean,
-      inline seenTrailing: Boolean,
-      inline seenRepeatedPos: Boolean,
-      inline seenGroup: Boolean,
-      inline seenPositional: Boolean
-  ): List[(Parser[?], Boolean)] =
+  transparent inline def namedRes[
+      Anns,
+      L,
+      ST <: Boolean,
+      SR <: Boolean,
+      SG <: Boolean,
+      SP <: Boolean,
+      Shorts,
+      Longs
+  ](p: Parser[?], inline optional: Boolean): FieldsRes =
     inline if hasAnn[flagged.positional, Anns] then
-      (p, optional) :: fieldsRec[Ft, At, Lt, Shorts, Longs](
-        seenTrailing = seenTrailing,
-        seenRepeatedPos = seenRepeatedPos,
-        seenGroup = seenGroup,
-        seenPositional = true
-      )
+      resOf[ST, SR, SG, true, Shorts, Longs](List((p, optional)))
     else
       checkNewShort[Anns, Shorts]
       checkNewLong[Anns, L, Longs]
-      (p, optional) :: fieldsRec[Ft, At, Lt, Shorts | ShortIn[Anns], Longs | EffLong[Anns, L]](
-        seenTrailing = seenTrailing,
-        seenRepeatedPos = seenRepeatedPos,
-        seenGroup = seenGroup,
-        seenPositional = seenPositional
+      resOf[ST, SR, SG, SP, Shorts | ShortIn[Anns], Longs | EffLong[Anns, L]](
+        List((p, optional))
       )
 
   /** The `@short` character claimed by the slot, or `Nothing`. */
