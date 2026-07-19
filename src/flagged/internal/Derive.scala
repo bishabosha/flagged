@@ -89,15 +89,25 @@ object Derive:
     * count.
     */
   final class FieldsRes(val fields: List[(Parser[?], Boolean, FieldAnnots)]):
-    type Marks <: Int // bitmask: 1 trailing, 2 rep. positional, 4 positional, 8 subcommand, 16 names
+    type Marks <: Int    // bitmask of TrailBit | RepBit | PosBit | GroupBit | NamesBit
     type Shorts <: Tuple // constant `@short` characters claimed by named options
     type Longs <: Tuple  // constant `@name` names (primary and aliases) claimed by named options
 
-  final val TrailBit = 1
-  final val RepBit   = 2
-  final val PosBit   = 4
-  final val GroupBit = 8
-  final val NamesBit = 16 // the field claims constant names (@short / @name)
+  type NoMarks  = 0
+  type TrailBit = 1
+  type RepBit   = 2
+  type PosBit   = 4
+  type GroupBit = 8
+  type NamesBit = 16 // the field claims constant names (@short / @name)
+
+  // shape codes for the field dispatch
+  type ValueShape      = 1
+  type FlagShape       = 2
+  type ValuedFlagShape = 3
+  type RepeatedShape   = 4
+  type TrailingShape   = 5
+  type CommandShape    = 6 // a spliced options group
+  type GroupShape      = 7 // a subcommand group
 
   type ResOf[M <: Int, Sh <: Tuple, Lo <: Tuple] =
     FieldsRes {
@@ -113,7 +123,7 @@ object Derive:
 
   /** A plain named option's summary: nothing special, no constant names. */
   inline def plainRes(fields: List[(Parser[?], Boolean, FieldAnnots)]) =
-    resOf[0, EmptyTuple, EmptyTuple](fields)
+    resOf[NoMarks, EmptyTuple, EmptyTuple](fields)
 
   inline def isZero[M <: Int]: Boolean           = constValue[M == 0]
   inline def hasBit[M <: Int, B <: Int]: Boolean =
@@ -179,31 +189,31 @@ object Derive:
     * expands): each cross-field rule involves two fields, one in each half at exactly one merge.
     */
   private transparent inline def crossChecks[L <: FieldsRes, R <: FieldsRes](l: L, r: R): Unit =
-    inline if hasBit[l.Marks, NamesBit.type] then
-      inline if hasBit[r.Marks, NamesBit.type] then
+    inline if hasBit[l.Marks, NamesBit] then
+      inline if hasBit[r.Marks, NamesBit] then
         checkDisjointShorts[l.Shorts, r.Shorts]
         checkDisjointLongs[l.Longs, r.Longs]
       else ()
     else ()
-    inline if hasBit[l.Marks, TrailBit.type] then
-      inline if hasBit[r.Marks, TrailBit.type] then
+    inline if hasBit[l.Marks, TrailBit] then
+      inline if hasBit[r.Marks, TrailBit] then
         error("only one trailing field is supported per command")
       else ()
     else ()
-    inline if hasBit[l.Marks, GroupBit.type] then
-      inline if hasBit[r.Marks, GroupBit.type] then
+    inline if hasBit[l.Marks, GroupBit] then
+      inline if hasBit[r.Marks, GroupBit] then
         error("only one subcommand field is supported per command")
-      else inline if hasBit[r.Marks, PosBit.type] then
+      else inline if hasBit[r.Marks, PosBit] then
         error("mixing positional fields with a subcommand field is ambiguous and not supported")
       else ()
     else ()
-    inline if hasBit[r.Marks, GroupBit.type] then
-      inline if hasBit[l.Marks, PosBit.type] then
+    inline if hasBit[r.Marks, GroupBit] then
+      inline if hasBit[l.Marks, PosBit] then
         error("mixing positional fields with a subcommand field is ambiguous and not supported")
       else ()
     else ()
-    inline if hasBit[l.Marks, RepBit.type] then
-      inline if hasBit[r.Marks, PosBit.type] then
+    inline if hasBit[l.Marks, RepBit] then
+      inline if hasBit[r.Marks, PosBit] then
         error("a repeated positional must be the last positional field")
       else ()
     else ()
@@ -250,16 +260,16 @@ object Derive:
                       case false => ShapeErr[S, Anns, Opt]
 
   type ShapeErr[S <: Int, Anns, Opt <: Boolean] <: String = S match
-    case 1 => ""
-    case 3 => ""
-    case 2 =>
+    case ValueShape      => ""
+    case ValuedFlagShape => ""
+    case FlagShape       =>
       Opt match
         case true  => "a flag Parser without a value parser cannot be used inside Option"
         case false =>
           HasAnnT[flagged.positional, Anns] match
             case true  => "a flag Parser without a value parser cannot be used positionally"
             case false => ""
-    case 4 =>
+    case RepeatedShape =>
       Opt match
         case true =>
           "Option of a repeated Parser is not supported: the plain type is empty when absent"
@@ -280,7 +290,7 @@ object Derive:
                       HasAnnT[flagged.group, Anns] match
                         case true  => "@group has no effect on a trailing field"
                         case false => ""
-    case 7 =>
+    case GroupShape =>
       HasAnnT[flagged.positional, Anns] match
         case true  => "@positional cannot be combined with a subcommand field"
         case false =>
@@ -302,7 +312,7 @@ object Derive:
                           HasAnnT[flagged.group, Anns] match
                             case true  => "@group has no effect on a subcommand field"
                             case false => ""
-    case 6 =>
+    case CommandShape =>
       HasAnnT[flagged.positional, Anns] match
         case true  => "@positional cannot be combined with a command-shaped Parser"
         case false =>
@@ -323,27 +333,27 @@ object Derive:
 
   /** The [[FieldsRes.Marks]] contribution of a field of shape `S` with annotations `Anns`. */
   type MarksOf[S <: Int, Anns] <: Int = S match
-    case 5 => 1 // trailing
-    case 7 => 8 // subcommand group
-    case 6 => 0 // spliced group
-    case _ =>
+    case TrailingShape => TrailBit
+    case GroupShape    => GroupBit
+    case CommandShape  => NoMarks
+    case _             =>
       HasAnnT[flagged.positional, Anns] match
         case true =>
           S match
-            case 4 => 6 // repeated positional (also positional)
-            case _ => 4 // positional
+            case RepeatedShape => BitwiseOr[RepBit, PosBit]
+            case _             => PosBit
         case false =>
           HasNamesT[Anns] match
-            case true  => 16 // claims constant names
-            case false => 0
+            case true  => NamesBit
+            case false => NoMarks
 
   type ShortsIf[S <: Int, Anns] <: Tuple = MarksOf[S, Anns] match
-    case 16 => ShortsOf[Anns]
-    case _  => EmptyTuple
+    case NamesBit => ShortsOf[Anns]
+    case _        => EmptyTuple
 
   type LongsIf[S <: Int, Anns] <: Tuple = MarksOf[S, Anns] match
-    case 16 => LongsOf[Anns]
-    case _  => EmptyTuple
+    case NamesBit => LongsOf[Anns]
+    case _        => EmptyTuple
 
   /** A field either fails with its match-type-computed error or constructs exactly one summary. */
   private transparent inline def fin[S <: Int, F, Anns](p: Parser[?]): FieldsRes =
@@ -362,13 +372,13 @@ object Derive:
     summonFrom:
       case p: Parser[Unwrap[F]] =>
         inline p match
-          case _: Parser.Value[?]        => fin[1, F, Anns](p)
-          case _: Parser.ValuedFlag[?]   => fin[3, F, Anns](p)
-          case _: Parser.Flag[?]         => fin[2, F, Anns](p)
-          case _: Parser.Repeated[?]     => fin[4, F, Anns](p)
-          case _: Parser.Trailing[?]     => fin[5, F, Anns](p)
-          case _: Parser.CommandGroup[?] => fin[7, F, Anns](p)
-          case _: Parser.Command[?]      => fin[6, F, Anns](p)
+          case _: Parser.Value[?]        => fin[ValueShape, F, Anns](p)
+          case _: Parser.ValuedFlag[?]   => fin[ValuedFlagShape, F, Anns](p)
+          case _: Parser.Flag[?]         => fin[FlagShape, F, Anns](p)
+          case _: Parser.Repeated[?]     => fin[RepeatedShape, F, Anns](p)
+          case _: Parser.Trailing[?]     => fin[TrailingShape, F, Anns](p)
+          case _: Parser.CommandGroup[?] => fin[GroupShape, F, Anns](p)
+          case _: Parser.Command[?]      => fin[CommandShape, F, Anns](p)
           case _                         =>
             error(
               "the shape of this field's Parser is not statically known: give the given a shape type such as Parser.Value[X], or build it with the Parser constructors / derivation clauses"
