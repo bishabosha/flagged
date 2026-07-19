@@ -246,11 +246,21 @@ class ParitySuite extends munit.FunSuite:
     )
   }
 
-  test("repeating a boolean flag is an error (mainargs, case-app: same; Count accumulates)") {
-    val msg = err(Flagged.parse[ParityBasic](Seq("--verbose", "--verbose")))
-    assert(msg.contains("flag '--verbose': specified 2 times"), msg)
-    val bundled = err(Flagged.parse[ParityBasic](Seq("-vv")))
-    assert(bundled.contains("specified 2 times"), bundled)
+  test("repeating a boolean flag replaces the value (mainargs, case-app: error)") {
+    assertEquals(
+      ok(Flagged.parse[ParityBasic](Seq("--verbose", "--verbose"))),
+      ParityBasic(verbose = true)
+    )
+    assertEquals(ok(Flagged.parse[ParityBasic](Seq("-vv"))), ParityBasic(verbose = true))
+    // the last mention wins, bare or valued
+    assertEquals(
+      ok(Flagged.parse[ParityBasic](Seq("--verbose", "--verbose=false"))),
+      ParityBasic(verbose = false)
+    )
+    assertEquals(
+      ok(Flagged.parse[ParityBasic](Seq("--verbose=false", "--verbose"))),
+      ParityBasic(verbose = true)
+    )
     assertEquals(ok(Flagged.parse[ParityCount](Seq("-vvv"))), ParityCount(Count(3)))
   }
 

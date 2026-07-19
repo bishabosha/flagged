@@ -19,7 +19,7 @@ across the three libraries live in `bench/` (see `bench/README.md`).
 | `--` end of options | yes (plus typed `Trailing`) | no (`--` is a plain value) | yes (raw `unparsed`) |
 | Flags | `Boolean` (accepts `=value`), `Count`, custom via `Parser.flag` | `Flag` (no `=value`) | `Boolean` (`=value` only), `Int @@ Counter` |
 | Counting flags | `Count` | no | `Int @@ Counter`, `List[Unit]` |
-| Repetition of scalar options | values: last wins; flags: error (`Count` accumulates) | error unless `allowRepeats` | error unless `Last[T]` |
+| Repetition of scalar options | last wins (values and flags; `Count` accumulates) | error unless `allowRepeats` | error unless `Last[T]` |
 | Collections | `List`, `Vector`, `Seq`, `Map[K,V]`, any via `Parser.repeated` | `Seq`, any `Iterable`, `Map[K,V]` | `List`, `Vector` only |
 | `Map[K,V]` (`k=v`) | yes | yes | no |
 | `Option[T]` | yes | yes | yes |
@@ -52,11 +52,11 @@ across the three libraries live in `bench/` (see `bench/README.md`).
 
 ## Deliberate differences (kept, covered by ParitySuite)
 
-- **Last-wins for repeated value options.** Both libraries error on repetition by default.
-  Last-wins matches common Unix tooling and makes shell aliases composable (`alias ll='ls -l'`
-  style overriding); accumulation is opt-in through collection types. Boolean flags are the
-  exception and error when repeated, as in both libraries — a repeated flag is more likely a
-  mistake than an override, and counting is opt-in via `Count`.
+- **Last-wins for repeated options, flags included.** Both libraries error on repetition by
+  default. Last-wins matches common Unix tooling and makes shell aliases composable
+  (`alias ll='ls -l'` style overriding): a repeated boolean flag replaces the previous value,
+  so `--verbose=false --verbose` is true. Accumulation is opt-in through collection types and
+  `Count`.
 - **Only kebab-case names match.** mainargs also accepts the raw `camelCase` spelling; accepting
   both doubles the effective namespace and hides collisions. Explicit `@name` values are matched
   verbatim in all three libraries.

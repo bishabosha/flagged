@@ -196,24 +196,30 @@ private[flagged] object Engine:
       ): Option[Any] =
         mode match
           case Mode.Flag(fromCount, fromValue, optional) =>
-            def wrap(v: Any): Any = if optional then Some(v) else v
-            occurrences.collect { case v: Occ.Val => v }.lastOption match
-              case Some(v) =>
-                fromValue match
-                  case Some(f) => Some(wrap(orReport(v.display)(f(v.raw))))
-                  case None    =>
+            def wrap(v: Any): Any     = if optional then Some(v) else v
+            def fromBare: Option[Any] =
+              fromCount(occurrences.length) match
+                case Ok(v)    => Some(wrap(v))
+                case Err(msg) =>
+                  report(s"flag '$display': $msg")
+                  Some(null)
+            fromValue match
+              case None =>
+                // a pure flag rejects an explicit value wherever it appears
+                occurrences.collectFirst { case v: Occ.Val => v } match
+                  case Some(v) =>
                     report(s"flag '${v.display}' does not take a value")
                     Some(null)
-              case None if occurrences.nonEmpty =>
-                fromCount(occurrences.length) match
-                  case Ok(v)    => Some(wrap(v))
-                  case Err(msg) =>
-                    report(s"flag '$display': $msg")
-                    Some(null)
-              case None if optional =>
-                Some(default.map(_()).getOrElse(None))
-              case None =>
-                Some(default.map(_()).getOrElse(orReport(display)(fromCount(0))))
+                  case None if occurrences.nonEmpty => fromBare
+                  case None if optional             => Some(default.map(_()).getOrElse(None))
+                  case None => Some(default.map(_()).getOrElse(orReport(display)(fromCount(0))))
+              case Some(f) =>
+                // the last mention wins, bare or valued
+                occurrences.lastOption match
+                  case Some(Occ.Val(raw, disp)) => Some(wrap(orReport(disp)(f(raw))))
+                  case Some(Occ.Bare)           => fromBare
+                  case None if optional         => Some(default.map(_()).getOrElse(None))
+                  case None => Some(default.map(_()).getOrElse(orReport(display)(fromCount(0))))
           case Mode.Single(read, optional) =>
             occurrences.lastOption match
               case Some(Occ.Val(raw, disp)) =>

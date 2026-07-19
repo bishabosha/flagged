@@ -261,12 +261,9 @@ object Parser:
   given Value[BigInt]     = numeric("integer")(BigInt(_))
   given Value[BigDecimal] = numeric("decimal")(BigDecimal(_))
 
-  // repetition policy belongs to the flag's count parser: Boolean is at-most-once
-  // (accumulation is opt-in via Count or a custom Parser.flag)
-  given ValuedFlag[Boolean] = flag(
-    n => if n > 1 then Err(s"specified $n times") else Ok(n > 0),
-    internal.Runtime.parseBool
-  )
+  // repetition policy belongs to the flag's count parser: repeating a Boolean flag replaces the
+  // previous value (the last mention wins, like value options); counting is opt-in via Count
+  given ValuedFlag[Boolean] = flag(n => Ok(n > 0), internal.Runtime.parseBool)
 
   given Value[Char] = of("char")(s =>
     if s.length == 1 then Ok(s.charAt(0)) else Err(s"'$s' is not a single character")
