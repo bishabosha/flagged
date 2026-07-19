@@ -124,12 +124,6 @@ object Derive:
   /** Whether the field's annotation slot is empty — the common case; lets every per-field
     * annotation check and name collection collapse to nothing.
     */
-  type IsEmptyT[Anns] <: Boolean = Anns match
-    case EmptyTuple => true
-    case _          => false
-
-  inline def noAnns[Anns]: Boolean = constValue[IsEmptyT[Anns]]
-
   private transparent inline def walk[Types <: Tuple, Slots <: Tuple]: FieldsRes =
     inline erasedValue[Types] match
       case _: EmptyTuple         => plainRes(Nil)
@@ -223,118 +217,165 @@ object Derive:
     case Option[?] => true
     case _         => false
 
-  /** One field: annotation-only checks, instance selection (the field's single implicit search),
-    * and dispatch on the instance's statically known shape. The field's extracted [[FieldAnnots]]
-    * ride along in the value, so no separate annotation walk is needed.
+  /** Shape codes for the dispatch below: 1 Value, 2 Flag, 3 ValuedFlag, 4 Repeated, 5 Trailing, 6
+    * Command (splice), 7 CommandGroup. Everything a field contributes — its error verdict, its
+    * [[FieldsRes.Marks]] bits, and the constant names it claims — is a match type over
+    * `(code, annotations, optionality)`, so fields with the same combination share one cached
+    * reduction.
+    */
+  type FieldErr[S <: Int, Anns, Opt <: Boolean] <: String =
+    HasAppliedT[Ann[flagged.short, 'h' *: EmptyTuple, ?], Anns] match
+      case true  => "short option 'h' is reserved for help"
+      case false =>
+        HasAnnT[flagged.version, Anns] match
+          case true  => "@version has no effect on a field (put it on the top-level type)"
+          case false =>
+            HasAnnT[flagged.default, Anns] match
+              case true => "@default has no effect on a field (put it on a command-group enum case)"
+              case false =>
+                HasAnnT[flagged.positional, Anns] match
+                  case true =>
+                    HasAnnT[flagged.hidden, Anns] match
+                      case true  => "@hidden cannot be combined with @positional"
+                      case false =>
+                        HasAnnT[flagged.group, Anns] match
+                          case true  => "@group cannot be combined with @positional"
+                          case false =>
+                            HasAnnT[flagged.short, Anns] match
+                              case true  => "@short cannot be combined with @positional"
+                              case false => ShapeErr[S, Anns, Opt]
+                  case false =>
+                    HasAppliedT[Ann[flagged.name, "help" *: EmptyTuple, ?], Anns] match
+                      case true  => "option name 'help' is reserved"
+                      case false => ShapeErr[S, Anns, Opt]
+
+  type ShapeErr[S <: Int, Anns, Opt <: Boolean] <: String = S match
+    case 1 => ""
+    case 3 => ""
+    case 2 =>
+      Opt match
+        case true  => "a flag Parser without a value parser cannot be used inside Option"
+        case false =>
+          HasAnnT[flagged.positional, Anns] match
+            case true  => "a flag Parser without a value parser cannot be used positionally"
+            case false => ""
+    case 4 =>
+      Opt match
+        case true =>
+          "Option of a repeated Parser is not supported: the plain type is empty when absent"
+        case false => ""
+    case 5 =>
+      HasAnnT[flagged.positional, Anns] match
+        case true  => "@positional cannot be combined with a trailing field"
+        case false =>
+          HasAnnT[flagged.short, Anns] match
+            case true  => "@short cannot be combined with a trailing field"
+            case false =>
+              HasAnnT[flagged.name, Anns] match
+                case true  => "@name has no effect on a trailing field"
+                case false =>
+                  HasAnnT[flagged.hidden, Anns] match
+                    case true  => "@hidden has no effect on a trailing field"
+                    case false =>
+                      HasAnnT[flagged.group, Anns] match
+                        case true  => "@group has no effect on a trailing field"
+                        case false => ""
+    case 7 =>
+      HasAnnT[flagged.positional, Anns] match
+        case true  => "@positional cannot be combined with a subcommand field"
+        case false =>
+          HasAnnT[flagged.short, Anns] match
+            case true  => "@short has no effect on a subcommand field"
+            case false =>
+              HasAnnT[flagged.name, Anns] match
+                case true =>
+                  "@name has no effect on a subcommand field (command names come from the cases)"
+                case false =>
+                  HasAnnT[flagged.help, Anns] match
+                    case true =>
+                      "@help has no effect on a subcommand field (put it on the enum or its cases)"
+                    case false =>
+                      HasAnnT[flagged.hidden, Anns] match
+                        case true =>
+                          "@hidden has no effect on a subcommand field (put it on the enum cases)"
+                        case false =>
+                          HasAnnT[flagged.group, Anns] match
+                            case true  => "@group has no effect on a subcommand field"
+                            case false => ""
+    case 6 =>
+      HasAnnT[flagged.positional, Anns] match
+        case true  => "@positional cannot be combined with a command-shaped Parser"
+        case false =>
+          HasAnnT[flagged.short, Anns] match
+            case true  => "@short has no effect on a spliced options group"
+            case false =>
+              HasAnnT[flagged.help, Anns] match
+                case true  => "@help has no effect on a spliced options group"
+                case false =>
+                  HasAnnT[flagged.hidden, Anns] match
+                    case true =>
+                      "@hidden has no effect on a spliced options group (put it on the group's fields)"
+                    case false => ""
+
+  type HasNamesT[Anns] <: Boolean = HasAnnT[flagged.name, Anns] match
+    case true  => true
+    case false => HasAnnT[flagged.short, Anns]
+
+  /** The [[FieldsRes.Marks]] contribution of a field of shape `S` with annotations `Anns`. */
+  type MarksOf[S <: Int, Anns] <: Int = S match
+    case 5 => 1 // trailing
+    case 7 => 8 // subcommand group
+    case 6 => 0 // spliced group
+    case _ =>
+      HasAnnT[flagged.positional, Anns] match
+        case true =>
+          S match
+            case 4 => 6 // repeated positional (also positional)
+            case _ => 4 // positional
+        case false =>
+          HasNamesT[Anns] match
+            case true  => 16 // claims constant names
+            case false => 0
+
+  type ShortsIf[S <: Int, Anns] <: Tuple = MarksOf[S, Anns] match
+    case 16 => ShortsOf[Anns]
+    case _  => EmptyTuple
+
+  type LongsIf[S <: Int, Anns] <: Tuple = MarksOf[S, Anns] match
+    case 16 => LongsOf[Anns]
+    case _  => EmptyTuple
+
+  /** A field either fails with its match-type-computed error or constructs exactly one summary. */
+  private transparent inline def fin[S <: Int, F, Anns](p: Parser[?]): FieldsRes =
+    inline if constValue[FieldErr[S, Anns, IsOpt[F]] == ""] then ()
+    else error(constValue[FieldErr[S, Anns, IsOpt[F]]])
+    resOf[MarksOf[S, Anns], ShortsIf[S, Anns], LongsIf[S, Anns]](
+      List((p, constValue[IsOpt[F]], Annots.fieldAnnotsOf[Anns]))
+    )
+
+  /** One field: instance selection (the field's single implicit search) and shape dispatch — the
+    * only parts that are inherently term-level. The dispatch must be an inline match on the
+    * instance *tree*: a summonFrom binder's static type is the pattern type, so the precise subtype
+    * is invisible to match types.
     */
   private transparent inline def fieldRes[F, Anns]: FieldsRes =
-    inline if noAnns[Anns] then () // nothing to check, and none of the cascades below expand
-    else
-      inline if hasAnnApplied[Ann[flagged.short, 'h' *: EmptyTuple, ?], Anns] then
-        error("short option 'h' is reserved for help")
-      else ()
-      inline if hasAnn[flagged.version, Anns] then
-        error("@version has no effect on a field (put it on the top-level type)")
-      else ()
-      inline if hasAnn[flagged.default, Anns] then
-        error("@default has no effect on a field (put it on a command-group enum case)")
-      else ()
-      inline if hasAnn[flagged.positional, Anns] then
-        inline if hasAnn[flagged.hidden, Anns] then
-          error("@hidden cannot be combined with @positional")
-        else inline if hasAnn[flagged.group, Anns] then
-          error("@group cannot be combined with @positional")
-        else inline if hasAnn[flagged.short, Anns] then
-          error("@short cannot be combined with @positional")
-        else ()
-      else inline if hasAnnApplied[Ann[flagged.name, "help" *: EmptyTuple, ?], Anns] then
-        error("option name 'help' is reserved")
-      else ()
     summonFrom:
       case p: Parser[Unwrap[F]] =>
         inline p match
-          case _: Parser.Value[?] =>
-            inline if noAnns[Anns] then plainRes(List((p, constValue[IsOpt[F]], FieldAnnots.empty)))
-            else namedRes[Anns](p, constValue[IsOpt[F]])
-          case _: Parser.ValuedFlag[?] =>
-            inline if noAnns[Anns] then plainRes(List((p, constValue[IsOpt[F]], FieldAnnots.empty)))
-            else namedRes[Anns](p, constValue[IsOpt[F]])
-          case _: Parser.Flag[?] =>
-            inline if constValue[IsOpt[F]] then
-              error("a flag Parser without a value parser cannot be used inside Option")
-            else inline if hasAnn[flagged.positional, Anns] then
-              error("a flag Parser without a value parser cannot be used positionally")
-            else namedRes[Anns](p, constValue[IsOpt[F]])
-          case _: Parser.Repeated[?] =>
-            inline if constValue[IsOpt[F]] then
-              error(
-                "Option of a repeated Parser is not supported: the plain type is empty when absent"
-              )
-            else inline if hasAnn[flagged.positional, Anns] then
-              // rep-pos + pos
-              resOf[6, EmptyTuple, EmptyTuple](List((p, false, Annots.fieldAnnotsOf[Anns])))
-            else namedRes[Anns](p, constValue[IsOpt[F]])
-          case _: Parser.Trailing[?] =>
-            inline if hasAnn[flagged.positional, Anns] then
-              error("@positional cannot be combined with a trailing field")
-            else inline if hasAnn[flagged.short, Anns] then
-              error("@short cannot be combined with a trailing field")
-            else inline if hasAnn[flagged.name, Anns] then
-              error("@name has no effect on a trailing field")
-            else inline if hasAnn[flagged.hidden, Anns] then
-              error("@hidden has no effect on a trailing field")
-            else inline if hasAnn[flagged.group, Anns] then
-              error("@group has no effect on a trailing field")
-            else // trailing
-              resOf[1, EmptyTuple, EmptyTuple](
-                List((p, constValue[IsOpt[F]], Annots.fieldAnnotsOf[Anns]))
-              )
-          case _: Parser.CommandGroup[?] =>
-            inline if hasAnn[flagged.positional, Anns] then
-              error("@positional cannot be combined with a subcommand field")
-            else inline if hasAnn[flagged.short, Anns] then
-              error("@short has no effect on a subcommand field")
-            else inline if hasAnn[flagged.name, Anns] then
-              error("@name has no effect on a subcommand field (command names come from the cases)")
-            else inline if hasAnn[flagged.help, Anns] then
-              error("@help has no effect on a subcommand field (put it on the enum or its cases)")
-            else inline if hasAnn[flagged.hidden, Anns] then
-              error("@hidden has no effect on a subcommand field (put it on the enum cases)")
-            else inline if hasAnn[flagged.group, Anns] then
-              error("@group has no effect on a subcommand field")
-            else // subcommand group
-              resOf[8, EmptyTuple, EmptyTuple](
-                List((p, constValue[IsOpt[F]], Annots.fieldAnnotsOf[Anns]))
-              )
-          case _: Parser.Command[?] =>
-            inline if hasAnn[flagged.positional, Anns] then
-              error("@positional cannot be combined with a command-shaped Parser")
-            else inline if hasAnn[flagged.short, Anns] then
-              error("@short has no effect on a spliced options group")
-            else inline if hasAnn[flagged.help, Anns] then
-              error("@help has no effect on a spliced options group")
-            else inline if hasAnn[flagged.hidden, Anns] then
-              error(
-                "@hidden has no effect on a spliced options group (put it on the group's fields)"
-              )
-            else plainRes(List((p, constValue[IsOpt[F]], Annots.fieldAnnotsOf[Anns])))
-          case _ =>
+          case _: Parser.Value[?]        => fin[1, F, Anns](p)
+          case _: Parser.ValuedFlag[?]   => fin[3, F, Anns](p)
+          case _: Parser.Flag[?]         => fin[2, F, Anns](p)
+          case _: Parser.Repeated[?]     => fin[4, F, Anns](p)
+          case _: Parser.Trailing[?]     => fin[5, F, Anns](p)
+          case _: Parser.CommandGroup[?] => fin[7, F, Anns](p)
+          case _: Parser.Command[?]      => fin[6, F, Anns](p)
+          case _                         =>
             error(
               "the shape of this field's Parser is not statically known: give the given a shape type such as Parser.Value[X], or build it with the Parser constructors / derivation clauses"
             )
       case _ =>
         // fails with Parser's missing-instance guidance
         plainRes(List((summonInline[Parser[Unwrap[F]]], constValue[IsOpt[F]], FieldAnnots.empty)))
-
-  /** A field that surely becomes a named option: claim its constant names (if not positional). */
-  private transparent inline def namedRes[Anns](p: Parser[?], inline optional: Boolean): FieldsRes =
-    inline if noAnns[Anns] then plainRes(List((p, optional, FieldAnnots.empty)))
-    else inline if hasAnn[flagged.positional, Anns] then
-      resOf[4, EmptyTuple, EmptyTuple](List((p, optional, Annots.fieldAnnotsOf[Anns]))) // pos
-    else
-      resOf[NamesBit.type, ShortsOf[Anns], LongsOf[Anns]](
-        List((p, optional, Annots.fieldAnnotsOf[Anns]))
-      )
 
   /** The constant `@short` characters / `@name` names a slot claims, as tuples. */
   type ShortsOf[Anns] <: Tuple = Anns match
@@ -370,9 +411,6 @@ object Derive:
     case Ann[A, ?, ?] *: _ => true
     case _ *: t            => HasAnnT[A, t]
 
-  inline def hasAnn[A <: scala.annotation.Annotation, Anns]: Boolean =
-    constValue[HasAnnT[A, Anns]]
-
   /** Whether the slot contains a specific annotation *application*, e.g. `@short('h')` — decidable
     * because `Ann` is invariant with constant arguments.
     */
@@ -380,8 +418,6 @@ object Derive:
     case EmptyTuple   => false
     case Applied *: _ => true
     case _ *: t       => HasAppliedT[Applied, t]
-
-  inline def hasAnnApplied[Applied, Anns]: Boolean = constValue[HasAppliedT[Applied, Anns]]
 
   // ---- sums -----------------------------------------------------------------
 
