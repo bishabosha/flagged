@@ -79,14 +79,16 @@ object Derive:
       case _: EmptyTuple => Nil
       case _: (t0 *: tr) =>
         inline erasedValue[Slots] match
-          case _: (s0 *: sr) => walk[t0 *: tr, s0 *: sr].fields
+          case _: (s0 *: sr) =>
+            checkDupNames[s0 *: sr]
+            walk[t0 *: tr, s0 *: sr].fields
 
-  /** Per-subtree summary of the field walk, carried in the *type* of a transparent inline result:
-    * which special shapes the subtree contains, and the constant names it claims (as tuples, so a
-    * merge can iterate them). Summaries are computed bottom-up and combined in [[merge]], where
-    * every cross-field rule is checked — no state flows *into* a subtree, so the two halves of a
-    * split are independent, type arguments stay small, and inline depth is logarithmic in the field
-    * count.
+  /** Per-subtree summary of the field walk — a single marks bitmask, carried in the *type* of a
+    * transparent inline result. Summaries are computed bottom-up and combined in [[merge]], where
+    * the shape-dependent cross-field rules are checked — no state flows *into* a subtree, so the
+    * two halves of a split are independent, type arguments stay small, and inline depth is
+    * logarithmic in the field count. (Duplicate constant names are shape-independent and checked
+    * once per product in [[checkDupNames]] instead.)
     */
   final class FieldsRes(val fields: List[(Parser[?], Boolean, FieldAnnots)]):
     type Marks <: Int    // bitmask of TrailBit | RepBit | PosBit | GroupBit | NamesBit
@@ -98,7 +100,6 @@ object Derive:
   type RepBit   = 2
   type PosBit   = 4
   type GroupBit = 8
-  type NamesBit = 16 // the field claims constant names (@short / @name)
 
   // shape codes for the field dispatch
   type ValueShape      = 1
@@ -109,21 +110,16 @@ object Derive:
   type CommandShape    = 6 // a spliced options group
   type GroupShape      = 7 // a subcommand group
 
-  type ResOf[M <: Int, Sh <: Tuple, Lo <: Tuple] =
-    FieldsRes {
-      type Marks  = M
-      type Shorts = Sh
-      type Longs  = Lo
-    }
+  type ResOf[M <: Int] = FieldsRes { type Marks = M }
 
-  inline def resOf[M <: Int, Sh <: Tuple, Lo <: Tuple](
+  inline def resOf[M <: Int](
       fields: List[(Parser[?], Boolean, FieldAnnots)]
-  ): ResOf[M, Sh, Lo] =
-    new FieldsRes(fields).asInstanceOf[ResOf[M, Sh, Lo]]
+  ): ResOf[M] =
+    new FieldsRes(fields).asInstanceOf[ResOf[M]]
 
-  /** A plain named option's summary: nothing special, no constant names. */
+  /** A plain named option's summary: nothing special. */
   inline def plainRes(fields: List[(Parser[?], Boolean, FieldAnnots)]) =
-    resOf[NoMarks, EmptyTuple, EmptyTuple](fields)
+    resOf[NoMarks](fields)
 
   inline def isZero[M <: Int]: Boolean           = constValue[M == 0]
   inline def hasBit[M <: Int, B <: Int]: Boolean =
@@ -163,11 +159,7 @@ object Derive:
   private transparent inline def merge[L <: FieldsRes, R <: FieldsRes](l: L, r: R): FieldsRes =
     inline if isZero[BitwiseOr[l.Marks, r.Marks]] then () // one gate: reduction is reused below
     else crossChecks(l, r)
-    resOf[
-      BitwiseOr[l.Marks, r.Marks],
-      Tuple.Concat[l.Shorts, r.Shorts],
-      Tuple.Concat[l.Longs, r.Longs]
-    ](l.fields ++ r.fields)
+    resOf[BitwiseOr[l.Marks, r.Marks]](l.fields ++ r.fields)
 
   /** Four-way merge for unrolled leaf groups: the all-plain fast path is a single gate; anything
     * special delegates to nested pairwise merges (identical semantics: the summary is associative
@@ -189,12 +181,6 @@ object Derive:
     * expands): each cross-field rule involves two fields, one in each half at exactly one merge.
     */
   private transparent inline def crossChecks[L <: FieldsRes, R <: FieldsRes](l: L, r: R): Unit =
-    inline if hasBit[l.Marks, NamesBit] then
-      inline if hasBit[r.Marks, NamesBit] then
-        checkDisjointShorts[l.Shorts, r.Shorts]
-        checkDisjointLongs[l.Longs, r.Longs]
-      else ()
-    else ()
     inline if hasBit[l.Marks, TrailBit] then
       inline if hasBit[r.Marks, TrailBit] then
         error("only one trailing field is supported per command")
@@ -327,10 +313,6 @@ object Derive:
                       "@hidden has no effect on a spliced options group (put it on the group's fields)"
                     case false => ""
 
-  type HasNamesT[Anns] <: Boolean = HasAnnT[flagged.name, Anns] match
-    case true  => true
-    case false => HasAnnT[flagged.short, Anns]
-
   /** The [[FieldsRes.Marks]] contribution of a field of shape `S` with annotations `Anns`. */
   type MarksOf[S <: Int, Anns] <: Int = S match
     case TrailingShape => TrailBit
@@ -342,24 +324,13 @@ object Derive:
           S match
             case RepeatedShape => BitwiseOr[RepBit, PosBit]
             case _             => PosBit
-        case false =>
-          HasNamesT[Anns] match
-            case true  => NamesBit
-            case false => NoMarks
-
-  type ShortsIf[S <: Int, Anns] <: Tuple = MarksOf[S, Anns] match
-    case NamesBit => ShortsOf[Anns]
-    case _        => EmptyTuple
-
-  type LongsIf[S <: Int, Anns] <: Tuple = MarksOf[S, Anns] match
-    case NamesBit => LongsOf[Anns]
-    case _        => EmptyTuple
+        case false => NoMarks
 
   /** A field either fails with its match-type-computed error or constructs exactly one summary. */
   private transparent inline def fin[S <: Int, F, Anns](p: Parser[?]): FieldsRes =
     inline if constValue[FieldErr[S, Anns, IsOpt[F]] == ""] then ()
     else error(constValue[FieldErr[S, Anns, IsOpt[F]]])
-    resOf[MarksOf[S, Anns], ShortsIf[S, Anns], LongsIf[S, Anns]](
+    resOf[MarksOf[S, Anns]](
       List((p, constValue[IsOpt[F]], Annots.fieldAnnotsOf[Anns]))
     )
 
@@ -406,11 +377,35 @@ object Derive:
         case true  => true
         case false => OverlapsT[A, t]
 
-  inline def checkDisjointShorts[A <: Tuple, B <: Tuple]: Unit =
-    inline if constValue[OverlapsT[A, B]] then error("duplicate short option") else ()
+  /** Duplicate constant names across the whole product, one fold over the annotation slots. A
+    * field's constant names participate unless it is positional (positional fields claim no option
+    * names); no shape knowledge is needed — a name annotation on a shape that could not claim it is
+    * already a [[FieldErr]] error.
+    */
+  type SlotShorts[S] <: Tuple = HasAnnT[flagged.positional, S] match
+    case true  => EmptyTuple
+    case false => ShortsOf[S]
 
-  inline def checkDisjointLongs[A <: Tuple, B <: Tuple]: Unit =
-    inline if constValue[OverlapsT[A, B]] then error("duplicate option name") else ()
+  type SlotLongs[S] <: Tuple = HasAnnT[flagged.positional, S] match
+    case true  => EmptyTuple
+    case false => LongsOf[S]
+
+  type DupNameErr[Slots <: Tuple] = DupNameErrAcc[Slots, EmptyTuple, EmptyTuple]
+
+  type DupNameErrAcc[Slots <: Tuple, Sh <: Tuple, Lo <: Tuple] <: String = Slots match
+    case EmptyTuple => ""
+    case s *: t     =>
+      OverlapsT[Sh, SlotShorts[s]] match
+        case true  => "duplicate short option"
+        case false =>
+          OverlapsT[Lo, SlotLongs[s]] match
+            case true  => "duplicate option name"
+            case false =>
+              DupNameErrAcc[t, Tuple.Concat[Sh, SlotShorts[s]], Tuple.Concat[Lo, SlotLongs[s]]]
+
+  inline def checkDupNames[Slots <: Tuple]: Unit =
+    inline if constValue[DupNameErr[Slots] == ""] then ()
+    else error(constValue[DupNameErr[Slots]])
 
   /** Whether annotation slot `Anns` contains an `A` — a compile-time constant. Match types rather
     * than inline-match recursion: reduction happens in the (cached) type domain instead of one
