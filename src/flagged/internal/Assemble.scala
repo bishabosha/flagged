@@ -32,6 +32,7 @@ private final case class Field(
     short: Option[Char],
     help: String,
     positional: Boolean,
+    hidden: Boolean,
     optional: Boolean,
     default: Option[() => Any],
     parser: Parser[?]
@@ -130,7 +131,7 @@ object Assemble:
       val cmd  = e match
         case SubEntry.Leaf(v) => Command.leaf(v, help)
         case SubEntry.Node(p) => p().command
-      SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd)
+      SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden)
     }
     Command(
       annots.onType.help.getOrElse(""),
@@ -164,6 +165,7 @@ object Assemble:
           short = anns.short,
           help = anns.help.getOrElse(""),
           positional = anns.positional,
+          hidden = anns.hidden,
           optional = opt,
           default =
             if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None,
@@ -186,7 +188,7 @@ object Assemble:
       if f.optional || f.default.nonEmpty then PosKind.Optional else PosKind.Required
     def named(metavar: String, mode: Mode): Plan =
       if f.long == "help" then bad("option name 'help' is reserved")
-      Plan.Named(OptSpec(f.long, f.short, f.help, metavar, f.index, mode, f.default))
+      Plan.Named(OptSpec(f.long, f.short, f.help, metavar, f.index, mode, f.default, f.hidden))
     def positional(metavar: String, mode: Mode, kind: PosKind): Plan =
       Plan.Positional(PosSpec(f.long, f.help, metavar, f.index, mode, f.default), kind)
 

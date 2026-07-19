@@ -205,7 +205,10 @@ object Derive:
       error("short option 'h' is reserved for help")
     else ()
     inline if hasAnn[flagged.positional, Anns] then
-      inline if hasAnn[flagged.short, Anns] then error("@short cannot be combined with @positional")
+      inline if hasAnn[flagged.hidden, Anns] then
+        error("@hidden cannot be combined with @positional")
+      else inline if hasAnn[flagged.short, Anns] then
+        error("@short cannot be combined with @positional")
       else inline if isTrue[SR] then
         error("a repeated positional must be the last positional field")
       else inline if isTrue[SG] then
@@ -261,6 +264,8 @@ object Derive:
               error("@short cannot be combined with a trailing field")
             else inline if hasAnn[flagged.name, Anns] then
               error("@name has no effect on a trailing field")
+            else inline if hasAnn[flagged.hidden, Anns] then
+              error("@hidden has no effect on a trailing field")
             else resOf[true, SR, SG, SP, Shorts, Longs](List((p, optional)))
           case _: Parser.CommandGroup[?] =>
             inline if hasAnn[flagged.positional, Anns] then
@@ -271,6 +276,8 @@ object Derive:
               error("@name has no effect on a subcommand field (command names come from the cases)")
             else inline if hasAnn[flagged.help, Anns] then
               error("@help has no effect on a subcommand field (put it on the enum or its cases)")
+            else inline if hasAnn[flagged.hidden, Anns] then
+              error("@hidden has no effect on a subcommand field (put it on the enum cases)")
             else inline if isTrue[SG] then
               error("only one subcommand field is supported per command")
             else inline if isTrue[SP] then
@@ -290,6 +297,10 @@ object Derive:
               )
             else inline if hasAnn[flagged.help, Anns] then
               error("@help has no effect on a spliced options group")
+            else inline if hasAnn[flagged.hidden, Anns] then
+              error(
+                "@hidden has no effect on a spliced options group (put it on the group's fields)"
+              )
             else resOf[ST, SR, SG, SP, Shorts, Longs](List((p, optional)))
           case _ =>
             error(

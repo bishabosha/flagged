@@ -80,7 +80,7 @@ private[flagged] object Engine:
                 rest = Nil
               case None =>
                 val sug = Runtime
-                  .suggest(tok, g.cases.map(_.name))
+                  .suggest(tok, g.cases.filterNot(_.hidden).map(_.name))
                   .map(s => s" (did you mean '$s'?)")
                   .getOrElse("")
                 report(s"unknown command '$tok'$sug")
@@ -123,7 +123,7 @@ private[flagged] object Engine:
           longOf(nm) match
             case None =>
               val sug = Runtime
-                .suggest(nm, cmd.opts.map(_.long) :+ "help")
+                .suggest(nm, cmd.opts.filterNot(_.hidden).map(_.long) :+ "help")
                 .map(s => s" (did you mean '--$s'?)")
                 .getOrElse("")
               report(s"unknown option '--$nm'$sug")

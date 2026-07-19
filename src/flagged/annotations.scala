@@ -21,3 +21,8 @@ final case class help(value: String) extends StaticAnnotation derives Defaults
 
 /** Mark a field as a positional argument instead of a named option. */
 final case class positional() extends StaticAnnotation derives Defaults
+
+/** Omit an option (on a field) or a subcommand (on an enum case) from help output. It still parses;
+  * only the listing is suppressed.
+  */
+final case class hidden() extends StaticAnnotation derives Defaults

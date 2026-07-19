@@ -85,6 +85,15 @@ case class ParityShortField(
     v: Int = 0
 ) derives Parser.Command
 
+case class ParityHidden(
+    visible: String = "a",
+    @hidden secret: String = "b"
+) derives Parser.Command
+
+enum ParityTool derives Parser.CommandGroup:
+  case Run(fast: Boolean = false)
+  @hidden case Debug(level: Int = 0)
+
 class ParitySuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
@@ -239,6 +248,33 @@ class ParitySuite extends munit.FunSuite:
     )
     val msg = err(Flagged.parse[ParityDigits](Seq("--opt-for29-name", "5")))
     assert(msg.contains("unknown option"), msg)
+  }
+
+  test("@hidden options parse but are omitted from help (mainargs, case-app: same)") {
+    assertEquals(
+      ok(Flagged.parse[ParityHidden](Seq("--secret", "x"))),
+      ParityHidden(secret = "x")
+    )
+    val help = Flagged.help[ParityHidden]
+    assert(help.contains("--visible"), help)
+    assert(!help.contains("--secret"), help)
+  }
+
+  test("@hidden subcommands are selectable but unlisted (case-app: same)") {
+    assertEquals(
+      ok(Flagged.parse[ParityTool](Seq("debug", "--level", "2"))),
+      ParityTool.Debug(2)
+    )
+    val help = Flagged.help[ParityTool]
+    assert(help.contains("run"), help)
+    assert(!help.contains("debug"), help)
+  }
+
+  test("@hidden misuse is a compile error") {
+    val e = compileErrors(
+      "case class C(@positional @hidden x: Int = 0) derives Parser.Command"
+    )
+    assert(e.contains("@hidden cannot be combined with @positional"), e)
   }
 
   test("option names are case-sensitive (case-app: same)") {

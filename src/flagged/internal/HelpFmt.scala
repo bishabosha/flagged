@@ -17,7 +17,7 @@ private[flagged] object HelpFmt:
 
     cmd.sub.foreach { g =>
       b ++= "\nCommands:\n"
-      b ++= table(g.cases.map(c => c.name -> c.help))
+      b ++= table(g.cases.filterNot(_.hidden).map(c => c.name -> c.help))
       b += '\n'
     }
 
@@ -33,8 +33,9 @@ private[flagged] object HelpFmt:
     }
 
     b ++= "\nOptions:\n"
-    val optRows = cmd.opts.map(o => optLeft(o) -> withExtras(o.help, optExtras(o))) :+
-      ("-h, --help" -> "Show this message and exit")
+    val optRows =
+      cmd.opts.filterNot(_.hidden).map(o => optLeft(o) -> withExtras(o.help, optExtras(o))) :+
+        ("-h, --help" -> "Show this message and exit")
     b ++= table(optRows)
     b += '\n'
 
