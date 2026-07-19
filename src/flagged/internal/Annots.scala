@@ -23,7 +23,8 @@ final case class FieldAnnots(
     short: Option[Char],
     help: Option[String],
     positional: Boolean,
-    hidden: Boolean = false
+    hidden: Boolean = false,
+    group: Option[String] = None
 )
 
 object FieldAnnots:
@@ -81,7 +82,8 @@ object Annots:
       AnnotMirror.find[flagged.short, Anns].map(_.value),
       AnnotMirror.find[flagged.help, Anns].map(_.value),
       AnnotMirror.find[flagged.positional, Anns].isDefined,
-      AnnotMirror.find[flagged.hidden, Anns].isDefined
+      AnnotMirror.find[flagged.hidden, Anns].isDefined,
+      AnnotMirror.find[flagged.group, Anns].map(_.value)
     )
 
   // both walks halve the slot tuple (inline depth O(log n), matching Derive.walk) — annotation

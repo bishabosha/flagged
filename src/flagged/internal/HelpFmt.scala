@@ -37,13 +37,27 @@ private[flagged] object HelpFmt:
       b += '\n'
     }
 
+    val visible                 = cmd.opts.filterNot(_.hidden)
+    val (ungrouped, inSections) = visible.partition(_.group.isEmpty)
+
     b ++= "\nOptions:\n"
     val optRows =
-      cmd.opts.filterNot(_.hidden).map(o => optLeft(o) -> withExtras(o.help, optExtras(o))) ++
+      ungrouped.map(o => optLeft(o) -> withExtras(o.help, optExtras(o))) ++
         Seq("-h, --help" -> "Show this message and exit") ++
         cmd.version.map(_ => "    --version" -> "Show version and exit")
     b ++= table(optRows)
     b += '\n'
+
+    // sections in first-appearance order
+    inSections.map(_.group.get).distinct.foreach { g =>
+      b ++= s"\n$g options:\n"
+      b ++= table(
+        inSections
+          .filter(_.group.contains(g))
+          .map(o => optLeft(o) -> withExtras(o.help, optExtras(o)))
+      )
+      b += '\n'
+    }
 
     cmd.sub.foreach { _ =>
       b ++= s"\nRun '$full <command> --help' for more information on a command.\n"

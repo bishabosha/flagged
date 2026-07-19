@@ -99,6 +99,22 @@ case class ParityVersioned(
     input: String = ""
 ) derives Parser.Command
 
+case class ParityNet(
+    @group("Network") host: String = "localhost",
+    @group("Network") port: Int = 80,
+    quiet: Boolean = false
+) derives Parser.Command
+
+case class ParityOut(
+    color: Boolean = false,
+    pager: Boolean = false
+) derives Parser.Command
+
+case class ParityGrouped(
+    input: String = "",
+    @group("Output") out: ParityOut
+) derives Parser.Command
+
 class ParitySuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
@@ -289,6 +305,30 @@ class ParitySuite extends munit.FunSuite:
       "case class C(@version(\"1.0\") x: Int = 0) derives Parser.Command"
     )
     assert(e.contains("@version has no effect on a field"), e)
+  }
+
+  test("@group renders options under titled sections (case-app @Group: same)") {
+    val help = Flagged.help[ParityNet]
+    val net  = help.indexOf("Network options:")
+    assert(net > 0, help)
+    assert(help.indexOf("--host") > net, help)
+    assert(help.indexOf("--port") > net, help)
+    assert(help.indexOf("--quiet") < net, help)
+  }
+
+  test("@group on a spliced group titles its options (case-app: per-field only)") {
+    val help = Flagged.help[ParityGrouped]
+    val out  = help.indexOf("Output options:")
+    assert(out > 0, help)
+    assert(help.indexOf("--color") > out, help)
+    assert(help.indexOf("--pager") > out, help)
+  }
+
+  test("@group misuse is a compile error") {
+    val e = compileErrors(
+      "case class C(@positional @group(\"X\") x: Int = 0) derives Parser.Command"
+    )
+    assert(e.contains("@group cannot be combined with @positional"), e)
   }
 
   test("@hidden misuse is a compile error") {

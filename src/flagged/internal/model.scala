@@ -34,7 +34,8 @@ final case class OptSpec(
     index: Int,
     mode: Mode,
     default: Option[() => Any],
-    hidden: Boolean = false
+    hidden: Boolean = false,
+    group: Option[String] = None
 )
 
 final case class PosSpec(

@@ -31,3 +31,8 @@ final case class hidden() extends StaticAnnotation derives Defaults
   * type of a command or command group.
   */
 final case class version(value: String) extends StaticAnnotation derives Defaults
+
+/** Put an option under a titled section in help output (`Output options:`). On a spliced options
+  * group field, titles all of the group's options that have no group of their own.
+  */
+final case class group(value: String) extends StaticAnnotation derives Defaults

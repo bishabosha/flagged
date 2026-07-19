@@ -18,7 +18,7 @@ private enum Plan:
   case Named(spec: OptSpec)
   case Positional(spec: PosSpec, kind: PosKind)
   case Commands(index: Int, optional: Boolean, default: Option[() => Any], inner: Command)
-  case Grouped(index: Int, label: String, inner: Command)
+  case Grouped(index: Int, label: String, group: Option[String], inner: Command)
   case Rest(spec: TrailingSpec)
 
 private enum PosKind:
@@ -33,6 +33,7 @@ private final case class Field(
     help: String,
     positional: Boolean,
     hidden: Boolean,
+    group: Option[String],
     optional: Boolean,
     default: Option[() => Any],
     parser: Parser[?]
@@ -167,6 +168,7 @@ object Assemble:
           help = anns.help.getOrElse(""),
           positional = anns.positional,
           hidden = anns.hidden,
+          group = anns.group,
           optional = opt,
           default =
             if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None,
@@ -189,7 +191,9 @@ object Assemble:
       if f.optional || f.default.nonEmpty then PosKind.Optional else PosKind.Required
     def named(metavar: String, mode: Mode): Plan =
       if f.long == "help" then bad("option name 'help' is reserved")
-      Plan.Named(OptSpec(f.long, f.short, f.help, metavar, f.index, mode, f.default, f.hidden))
+      Plan.Named(
+        OptSpec(f.long, f.short, f.help, metavar, f.index, mode, f.default, f.hidden, f.group)
+      )
     def positional(metavar: String, mode: Mode, kind: PosKind): Plan =
       Plan.Positional(PosSpec(f.long, f.help, metavar, f.index, mode, f.default), kind)
 
@@ -203,7 +207,7 @@ object Assemble:
           bad("a spliced options group cannot contain positional fields")
         if inner.trailing.nonEmpty then
           bad("a spliced options group cannot contain a trailing field")
-        Plan.Grouped(f.index, f.label, inner)
+        Plan.Grouped(f.index, f.label, f.group, inner)
 
       case vf: Parser.ValuedFlag[?] =>
         val fv = vf.fromValue.asInstanceOf[String => Result[Any, String]]
@@ -261,10 +265,10 @@ object Assemble:
       case Plan.Commands(index, optional, default, inner) =>
         if sub.nonEmpty then invalid("only one subcommand field is supported per command")
         sub = Some(SubGroup(index, optional, default, inner.sub.get.cases))
-      case Plan.Grouped(index, label, inner) =>
+      case Plan.Grouped(index, label, group, inner) =>
         inner.opts.foreach { o =>
           names.register(o.long, o.short, from = Some(label))
-          opts += o.copy(index = storage + o.index)
+          opts += o.copy(index = storage + o.index, group = o.group.orElse(group))
         }
         splices += Splice(index, storage, inner)
         storage += inner.arity
