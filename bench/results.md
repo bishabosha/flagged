@@ -87,6 +87,43 @@ faster than mainargs and case-app on the same inputs, allocating 2–14× less. 
 scenario (defaults only) is effectively a tie with case-app. The closest contest is mainargs'
 `Leftover` (1.3× on time), whose token pass-through is already minimal.
 
+### Cross-platform (Scala.js, Wasm, Scala Native)
+
+`bench-portable/` re-runs the same scenarios against the same parser definitions on the
+platforms JMH cannot cover, with a calibrated best-of-5-rounds timer (~250 ms rounds). The JVM
+column below uses the same portable harness for comparability — its closure indirection adds a
+small constant to every library, so the JMH tables above stay canonical for JVM. Scala.js
+1.21.0 on Node 26 (`--js`, plus `--js-emit-wasm --js-module-kind es` for the WebAssembly
+backend), Scala Native 0.5 in `release-fast`.
+
+ns per parse, best of 5 rounds:
+
+| Benchmark | JVM | JS | JS/Wasm | Native |
+|---|---|---|---|---|
+| empty — flagged | 154 | 430 | 369 | 624 |
+| empty — mainargs | 231 | 1 573 | 1 022 | 631 |
+| empty — case-app | 134 | 352 | 268 | 244 |
+| simple — flagged | 268 | 893 | 996 | 1 242 |
+| simple — mainargs | 1 084 | 6 700 | 6 420 | 3 351 |
+| simple — case-app | 1 455 | 4 593 | 3 261 | 5 847 |
+| repeated — flagged | 302 | 1 118 | 1 180 | 1 676 |
+| repeated — mainargs | 1 024 | 6 824 | 6 313 | 3 393 |
+| repeated — case-app | 4 768 | 11 953 | 9 115 | 17 507 |
+| bundled — flagged | 221 | 841 | 792 | 1 106 |
+| bundled — mainargs | 1 259 | 7 838 | 6 204 | 3 711 |
+| counter — flagged | 205 | 683 | 845 | 897 |
+| counter — case-app | 2 041 | 6 323 | 4 065 | 8 066 |
+| group — flagged | 323 | 1 204 | 1 189 | 1 648 |
+| group — case-app | 3 012 | 9 479 | 6 216 | 11 965 |
+| leftover — flagged | 255 | 1 395 | 958 | 1 278 |
+| leftover — mainargs | 363 | 2 691 | 1 568 | 1 202 |
+
+flagged is the fastest of the three on every non-trivial scenario on every platform; the
+exceptions are the `empty` scenario, where case-app's near-no-op wins everywhere, and Native's
+`leftover`, where mainargs ties. Cross-platform slowdowns for flagged are roughly 3–5× on
+Scala.js and 4–7× on Native versus the JVM; the WebAssembly backend is broadly comparable to
+the JavaScript one on these workloads (somewhat faster for case-app, a wash for flagged).
+
 CLI parsing happens once per process, so parse latency is rarely a deciding factor; the compile
 table is the practically relevant one, and the allocation column mostly matters as a proxy for
 work done per token.

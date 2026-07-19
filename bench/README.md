@@ -11,6 +11,17 @@ root `project.scala`) and is not run in CI.
 
 Requires scala-cli power mode; JMH arguments go after `--`.
 
+JMH covers the JVM; `bench-portable/` runs the same runtime scenarios (shared definitions in
+`bench-portable/src/defs`) on Scala.js, Scala.js-on-Wasm, and Scala Native with a calibrated
+best-of-rounds timer:
+
+```console
+$ scala-cli --power run bench-portable                                       # JVM reference
+$ scala-cli --power run bench-portable --js                                  # Node
+$ scala-cli --power run bench-portable --js --js-emit-wasm --js-module-kind es  # Wasm
+$ scala-cli --power run bench-portable --native --native-mode release-fast   # Native
+```
+
 ```console
 $ scala-cli --power run --jmh bench                          # everything (slow)
 $ scala-cli --power run --jmh bench -- 'RuntimeBench.*'      # parse latency only
