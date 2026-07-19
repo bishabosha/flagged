@@ -163,15 +163,14 @@ object Assemble:
 
   def product(
       labels: List[String],
-      fields: List[(Parser[?], Boolean)],
+      fields: List[(Parser[?], Boolean, FieldAnnots)],
       defaults: Defaults[?],
-      annots: Annots.Product[?],
+      onType: TargetAnnots,
       build: Array[Any] => Result[Any, String]
   ): Command =
     val n     = labels.length
     val plans = (0 until n).toList.map { i =>
-      val anns          = annots.perField(i)
-      val (parser, opt) = fields(i)
+      val (parser, opt, anns) = fields(i)
       resolveField(
         Field(
           index = i,
@@ -191,7 +190,7 @@ object Assemble:
         )
       )
     }
-    combine(n, plans, annots.onType, build)
+    combine(n, plans, onType, build)
 
   /** The complete field matrix: one parser shape × `@positional` × `Option[_]` case at a time, each
     * producing a [[Plan]] or a construction error.

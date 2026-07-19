@@ -139,16 +139,26 @@ object Annots:
 
   inline def fieldAnnotsEach[Slots]: List[FieldAnnots] =
     inline erasedValue[Slots] match
-      case _: EmptyTuple        => Nil
-      case _: (h *: EmptyTuple) => fieldAnnotsOf[h] :: Nil
-      case _: (h *: t)          =>
+      case _: EmptyTuple                  => Nil
+      case _: (a *: EmptyTuple)           => fieldAnnotsOf[a] :: Nil
+      case _: (a *: b *: EmptyTuple)      => fieldAnnotsOf[a] :: fieldAnnotsOf[b] :: Nil
+      case _: (a *: b *: c *: EmptyTuple) =>
+        fieldAnnotsOf[a] :: fieldAnnotsOf[b] :: fieldAnnotsOf[c] :: Nil
+      case _: (a *: b *: c *: d *: EmptyTuple) =>
+        fieldAnnotsOf[a] :: fieldAnnotsOf[b] :: fieldAnnotsOf[c] :: fieldAnnotsOf[d] :: Nil
+      case _: (h *: t) =>
         fieldAnnotsEach[Tuple.Take[h *: t, Half[h *: t]]] :::
           fieldAnnotsEach[Tuple.Drop[h *: t, Half[h *: t]]]
 
   inline def targetAnnotsEach[Slots]: List[TargetAnnots] =
     inline erasedValue[Slots] match
-      case _: EmptyTuple        => Nil
-      case _: (h *: EmptyTuple) => targetAnnotsOf[h] :: Nil
-      case _: (h *: t)          =>
+      case _: EmptyTuple                  => Nil
+      case _: (a *: EmptyTuple)           => targetAnnotsOf[a] :: Nil
+      case _: (a *: b *: EmptyTuple)      => targetAnnotsOf[a] :: targetAnnotsOf[b] :: Nil
+      case _: (a *: b *: c *: EmptyTuple) =>
+        targetAnnotsOf[a] :: targetAnnotsOf[b] :: targetAnnotsOf[c] :: Nil
+      case _: (a *: b *: c *: d *: EmptyTuple) =>
+        targetAnnotsOf[a] :: targetAnnotsOf[b] :: targetAnnotsOf[c] :: targetAnnotsOf[d] :: Nil
+      case _: (h *: t) =>
         targetAnnotsEach[Tuple.Take[h *: t, Half[h *: t]]] :::
           targetAnnotsEach[Tuple.Drop[h *: t, Half[h *: t]]]
