@@ -92,9 +92,12 @@ repeats:
 | `x: A` (`Parser.Value[A]`) | required option `--x <a>` |
 | `x: A = default` | optional, default shown in help |
 | `x: Option[A]` | optional, `None` when absent |
+| `x: Option[Boolean]` | optional flag: absent → `None`, `--x` → `Some(true)`, `--x=false` → `Some(false)` |
 | `x: A` (`Parser.Repeated[A]`, e.g. `List`/`Seq`/`Vector`) | repeatable |
+| `x: Map[K, V]` | repeatable `--x key=value` entries |
 | `x: E` (enum `E derives Parser.CommandGroup`) | nested subcommands |
 | `x: P` (case class `P derives Parser.Command`) | options group spliced into this command |
+| `x: Option[P]` | optional group: `None` unless one of its options occurs |
 | `x: Trailing` (or any `Parser.Trailing[A]`) | the raw arguments after `--`, verbatim |
 | `@positional x: A` | positional argument (same rules) |
 
@@ -118,15 +121,27 @@ Fine-tune with annotations:
 
 | Annotation | Effect |
 |---|---|
-| `@name("out")` | override the long name (or command / program name on types) |
+| `@name("out")` | override the long name (or command / program name on types); repeatable — later occurrences are aliases, on fields and on enum cases |
 | `@short('o')` | add a short alias |
 | `@help("...")` | help text for fields, cases, and top-level types |
 | `@positional` | positional argument instead of named option |
+| `@hidden` | omit from help (still parses); on an enum case, an unlisted command |
+| `@group("Network")` | put the option under a titled help section; on a spliced group field, titles the whole group |
+| `@version("1.2.3")` | on the top-level type: help header line plus a `--version` flag |
+| `@default` | on one command-group case: the default command, run when no command token is given (remaining arguments are forwarded to it) |
+
+On a spliced group field, `@name("net")` prefixes the group's option names
+(`--net-host`) and drops their short aliases, so the same group can be spliced more
+than once.
+
+Errors accumulate: unknown options, invalid values, missing option values, and
+missing required arguments are all collected and reported in one failure, one per
+line.
 
 The grammar is validated at compile time: a field type without a `Parser` given,
 conflicting or ineffective annotations (`@positional` with `@short`, `@short` on a
-subcommand field, ...), shape conflicts (`Option` of a repeated parser or of a
-spliced group, a bare flag in `Option`, ...), cross-field rules (two subcommand or
+subcommand field, ...), shape conflicts (`Option` of a repeated parser, a bare flag
+in `Option`, ...), cross-field rules (two subcommand or
 trailing fields, positionals mixed with subcommands, a positional after a repeated
 one), and duplicate constant names (`@short`/`@name`) are all compile errors. Every
 field's instance must carry its shape in its type: the shape *is* the subtype
