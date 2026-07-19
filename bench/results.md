@@ -4,7 +4,7 @@ Produced by the suites in this directory (see `README.md` for methodology and ca
 are JMH averages ± 99.9% confidence intervals, one forked JVM, 5 warmup + 5 measurement
 iterations.
 
-- Date: 2026-07-19, flagged commit `7f3e870`
+- Date: 2026-07-19, flagged commit `fd51a07`
 - Hardware: Apple M3 Max, 64 GB, macOS 26.5.1
 - JVM: Temurin OpenJDK 25.0.2, Scala 3.8.3, JMH 1.37
 - Library versions: mainargs 0.7.8, case-app 2.1.0
@@ -17,14 +17,34 @@ shape. Only comparisons within a row are meaningful.
 
 | Scenario | baseline | flagged | mainargs | case-app |
 |---|---|---|---|---|
-| `options10` (10 mixed fields) | 51.5 ± 2.9 | 177.6 ± 13.2 | 252.7 ± 21.3 | 707.0 ± 130.1 |
-| `options25` (25 defaulted fields) | 48.5 ± 2.0 | 296.0 ± 15.0 | 256.4 ± 16.7 | 651.8 ± 230.8 |
-| `commands` (3 subcommands) | 50.3 ± 8.2 | 174.5 ± 5.4 | 325.8 ± 50.8 | 522.2 ± 93.5 |
+| `options10` (10 mixed fields) | 53.7 ± 11.2 | 115.6 ± 8.9 | 244.7 ± 32.2 | 486.7 ± 46.3 |
+| `options25` (25 defaulted fields) | 47.7 ± 3.2 | 161.2 ± 13.3 | 247.3 ± 19.7 | 528.4 ± 32.8 |
+| `commands` (3 subcommands) | 49.1 ± 5.4 | 114.0 ± 6.4 | 258.7 ± 20.6 | 524.5 ± 56.5 |
 
-Derivation cost over the baseline: flagged adds ~125–250 ms, mainargs ~200–275 ms, case-app
-~470–655 ms. flagged is the cheapest of the three on `options10` and `commands`; on the wide
-`options25` class mainargs is somewhat cheaper — flagged's per-field inline expansion volume
-grows faster than mainargs' macro there, even though the inline *depth* is logarithmic.
+Derivation cost over the baseline: flagged adds ~60–115 ms, mainargs ~190–210 ms, case-app
+~430–480 ms; flagged is the cheapest of the three in every scenario. (Before the per-field
+expansion collapse in `fd51a07`, flagged was at 178/296/175 ms and lost `options25` to
+mainargs.)
+
+### Scaling with field count
+
+`bench.ScalingProbe` (same warm driver, best of five, one options class of N `Int` fields;
+`flagged@` has every second field `@name`-annotated):
+
+| n fields | flagged | flagged@ | mainargs |
+|---|---|---|---|
+| 4 | 133 | 137 | 247 |
+| 8 | 136 | 144 | 240 |
+| 16 | 152 | 175 | 253 |
+| 32 | 196 | 243 | 260 |
+| 64 | 316 | 423 | 276 |
+| 128 | 602 | 857 | 308 |
+
+Marginal cost is roughly 3–5 ms per field and approximately constant across the range —
+compile time grows near-linearly with field count. A 64-field annotated class compiles at the
+default `-Xmax-inlines`. A JFR profile of the looped driver (`bench.ProfileProbe`) shows no
+single hotspot: implicit search and match-type reduction are negligible, and the remaining
+per-field cost is downstream phases traversing the code derivation expands.
 
 ## Parse latency and allocation
 
