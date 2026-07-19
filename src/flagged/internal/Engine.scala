@@ -121,6 +121,9 @@ private[flagged] object Engine:
             case i  => (body.take(i), Some(body.drop(i + 1)))
           if nm == "help" then helpNow()
           longOf(nm) match
+            case None if nm == "version" && cmd.version.nonEmpty =>
+              // a user option named `version` takes precedence (longOf matched above)
+              eval.raise(ParseError.Help(cmd.version.get))
             case None =>
               val sug = Runtime
                 .suggest(nm, cmd.opts.filterNot(_.hidden).map(_.long) :+ "help")

@@ -141,7 +141,8 @@ object Assemble:
       None,
       Nil,
       arr => Result.Ok(arr(0)),
-      1
+      1,
+      annots.onType.version
     )
 
   // ---- product assembly -------------------------------------------------------
@@ -288,7 +289,8 @@ object Assemble:
       trailing,
       allSplices,
       fullBuild,
-      storage
+      storage,
+      onType.version
     )
 
   /** Long / short option names claimed so far; duplicates are construction errors. */

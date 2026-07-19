@@ -7,6 +7,11 @@ private[flagged] object HelpFmt:
     val full = (prog :: path).mkString(" ")
     val b    = new StringBuilder
 
+    cmd.version.foreach { v =>
+      b ++= s"$full $v"
+      b ++= "\n\n"
+    }
+
     if cmd.description.nonEmpty then
       b ++= cmd.description
       b ++= "\n\n"
@@ -34,8 +39,9 @@ private[flagged] object HelpFmt:
 
     b ++= "\nOptions:\n"
     val optRows =
-      cmd.opts.filterNot(_.hidden).map(o => optLeft(o) -> withExtras(o.help, optExtras(o))) :+
-        ("-h, --help" -> "Show this message and exit")
+      cmd.opts.filterNot(_.hidden).map(o => optLeft(o) -> withExtras(o.help, optExtras(o))) ++
+        Seq("-h, --help" -> "Show this message and exit") ++
+        cmd.version.map(_ => "    --version" -> "Show version and exit")
     b ++= table(optRows)
     b += '\n'
 

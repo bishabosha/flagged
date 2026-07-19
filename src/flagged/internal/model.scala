@@ -78,7 +78,8 @@ final case class Command(
     trailing: Option[TrailingSpec],
     splices: List[Splice],
     build: Array[Any] => Result[Any, String], // fallible: `emap` validation composes here
-    arity: Int // value-storage size: own fields plus spliced children's storage
+    arity: Int,                    // value-storage size: own fields plus spliced children's storage
+    version: Option[String] = None // printed by --version and in the help header
 ):
   /** Build spliced children from their storage slices, then build this command's value; the first
     * failing build (e.g. an `emap` validation) short-circuits.

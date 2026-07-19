@@ -204,6 +204,9 @@ object Derive:
     inline if hasAnnApplied[Ann[flagged.short, 'h' *: EmptyTuple, ?], Anns] then
       error("short option 'h' is reserved for help")
     else ()
+    inline if hasAnn[flagged.version, Anns] then
+      error("@version has no effect on a field (put it on the top-level type)")
+    else ()
     inline if hasAnn[flagged.positional, Anns] then
       inline if hasAnn[flagged.hidden, Anns] then
         error("@hidden cannot be combined with @positional")

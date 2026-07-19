@@ -7,7 +7,12 @@ import flagged.meta.AnnotMirror
 /** flagged's annotations on a type or an enum case, extracted at compile time from an
   * [[AnnotMirror]] — fully typed, no `Any` and no runtime type tests.
   */
-final case class TargetAnnots(name: Option[String], help: Option[String], hidden: Boolean = false)
+final case class TargetAnnots(
+    name: Option[String],
+    help: Option[String],
+    hidden: Boolean = false,
+    version: Option[String] = None
+)
 
 object TargetAnnots:
   val empty: TargetAnnots = TargetAnnots(None, None, false)
@@ -66,7 +71,8 @@ object Annots:
     TargetAnnots(
       AnnotMirror.find[flagged.name, Anns].map(_.value),
       AnnotMirror.find[flagged.help, Anns].map(_.value),
-      AnnotMirror.find[flagged.hidden, Anns].isDefined
+      AnnotMirror.find[flagged.hidden, Anns].isDefined,
+      AnnotMirror.find[flagged.version, Anns].map(_.value)
     )
 
   inline def fieldAnnotsOf[Anns]: FieldAnnots =

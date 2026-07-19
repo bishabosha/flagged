@@ -26,3 +26,8 @@ final case class positional() extends StaticAnnotation derives Defaults
   * only the listing is suppressed.
   */
 final case class hidden() extends StaticAnnotation derives Defaults
+
+/** Program version, shown in the help header and printed by `--version`. Valid on the top-level
+  * type of a command or command group.
+  */
+final case class version(value: String) extends StaticAnnotation derives Defaults

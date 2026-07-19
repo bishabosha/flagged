@@ -94,6 +94,11 @@ enum ParityTool derives Parser.CommandGroup:
   case Run(fast: Boolean = false)
   @hidden case Debug(level: Int = 0)
 
+@version("1.2.3")
+case class ParityVersioned(
+    input: String = ""
+) derives Parser.Command
+
 class ParitySuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
@@ -268,6 +273,22 @@ class ParitySuite extends munit.FunSuite:
     val help = Flagged.help[ParityTool]
     assert(help.contains("run"), help)
     assert(!help.contains("debug"), help)
+  }
+
+  test("@version adds --version and a help header (case-app @AppVersion: same)") {
+    Flagged.parse[ParityVersioned](Seq("--version")) match
+      case Err(ParseError.Help(t)) => assertEquals(t, "1.2.3")
+      case other                   => fail(s"expected version output, got $other")
+    val help = Flagged.help[ParityVersioned]
+    assert(help.startsWith("parity-versioned 1.2.3"), help)
+    assert(help.contains("--version"), help)
+  }
+
+  test("@version on a field is a compile error") {
+    val e = compileErrors(
+      "case class C(@version(\"1.0\") x: Int = 0) derives Parser.Command"
+    )
+    assert(e.contains("@version has no effect on a field"), e)
   }
 
   test("@hidden misuse is a compile error") {
