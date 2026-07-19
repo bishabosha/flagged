@@ -246,11 +246,12 @@ class ParitySuite extends munit.FunSuite:
     )
   }
 
-  test("repeating a boolean flag is tolerated (case-app: scalar repeat is an error)") {
-    assertEquals(
-      ok(Flagged.parse[ParityBasic](Seq("--verbose", "--verbose"))),
-      ParityBasic(verbose = true)
-    )
+  test("repeating a boolean flag is an error (mainargs, case-app: same; Count accumulates)") {
+    val msg = err(Flagged.parse[ParityBasic](Seq("--verbose", "--verbose")))
+    assert(msg.contains("flag '--verbose': specified 2 times"), msg)
+    val bundled = err(Flagged.parse[ParityBasic](Seq("-vv")))
+    assert(bundled.contains("specified 2 times"), bundled)
+    assertEquals(ok(Flagged.parse[ParityCount](Seq("-vvv"))), ParityCount(Count(3)))
   }
 
   test("Seq fields accumulate like List and Vector (case-app: no generic Seq instance)") {

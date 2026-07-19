@@ -205,7 +205,11 @@ private[flagged] object Engine:
                     report(s"flag '${v.display}' does not take a value")
                     Some(null)
               case None if occurrences.nonEmpty =>
-                Some(wrap(orReport(display)(fromCount(occurrences.length))))
+                fromCount(occurrences.length) match
+                  case Ok(v)    => Some(wrap(v))
+                  case Err(msg) =>
+                    report(s"flag '$display': $msg")
+                    Some(null)
               case None if optional =>
                 Some(default.map(_()).getOrElse(None))
               case None =>

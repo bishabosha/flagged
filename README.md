@@ -87,7 +87,7 @@ repeats:
 
 | Field shape | Meaning |
 |---|---|
-| `x: Boolean` | flag `--x` (also `--x=false`); always optional |
+| `x: Boolean` | flag `--x` (also `--x=false`); always optional, at most once |
 | `x: Count` (or any `Parser.Flag[A]`) | counting flag: `-vvv` → `Count(3)` |
 | `x: A` (`Parser.Value[A]`) | required option `--x <a>` |
 | `x: A = default` | optional, default shown in help |
