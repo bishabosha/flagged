@@ -67,8 +67,8 @@ private[flagged] object Engine:
             None
 
       def isFlag(spec: OptSpec): Boolean = spec.mode match
-        case Mode.Flag(_, _) => true
-        case _               => false
+        case Mode.Flag(_, _, _) => true
+        case _                  => false
 
       def handleFree(tok: String): Unit =
         cmd.sub match
@@ -175,16 +175,19 @@ private[flagged] object Engine:
           occurrences: List[Occ]
       ): Option[Any] =
         mode match
-          case Mode.Flag(fromCount, fromValue) =>
+          case Mode.Flag(fromCount, fromValue, optional) =>
+            def wrap(v: Any): Any = if optional then Some(v) else v
             occurrences.collect { case v: Occ.Val => v }.lastOption match
               case Some(v) =>
                 fromValue match
-                  case Some(f) => Some(orReport(v.display)(f(v.raw)))
+                  case Some(f) => Some(wrap(orReport(v.display)(f(v.raw))))
                   case None    =>
                     report(s"flag '${v.display}' does not take a value")
                     Some(null)
               case None if occurrences.nonEmpty =>
-                Some(orReport(display)(fromCount(occurrences.length)))
+                Some(wrap(orReport(display)(fromCount(occurrences.length))))
+              case None if optional =>
+                Some(default.map(_()).getOrElse(None))
               case None =>
                 Some(default.map(_()).getOrElse(orReport(display)(fromCount(0))))
           case Mode.Single(read, optional) =>

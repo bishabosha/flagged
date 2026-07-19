@@ -278,9 +278,10 @@ class OptionsSuite extends munit.FunSuite:
     assert(e1.contains("cannot be used inside Option"), e1)
     val e2 = compileErrors("case class C(@positional v: Count = Count(0)) derives Parser.Command")
     assert(e2.contains("cannot be used positionally"), e2)
-    // Boolean has the explicit-value form, so Option[Boolean] stays legal
+    // Boolean has the explicit-value form, so Option[Boolean] stays legal: presence is Some(true)
     case class D(dry: Option[Boolean] = None) derives Parser.Command
-    assertEquals(ok(Flagged.parse[D](Seq("--dry", "true"))), D(Some(true)))
+    assertEquals(ok(Flagged.parse[D](Seq("--dry"))), D(Some(true)))
+    assertEquals(ok(Flagged.parse[D](Seq("--dry=false"))), D(Some(false)))
   }
 
   test("reserved names are compile errors when given as constants") {

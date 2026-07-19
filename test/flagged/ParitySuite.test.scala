@@ -196,13 +196,13 @@ class ParitySuite extends munit.FunSuite:
 
   // ---- case-app parity -----------------------------------------------------------
 
-  test("Option[Boolean] requires an explicit value (case-app: bare --flag gives Some(true))") {
+  test("bare Option[Boolean] means Some(true), absent means None (case-app: same)") {
+    assertEquals(ok(Flagged.parse[ParityMaybeFlag](Nil)), ParityMaybeFlag(None))
+    assertEquals(ok(Flagged.parse[ParityMaybeFlag](Seq("--flag"))), ParityMaybeFlag(Some(true)))
     assertEquals(
-      ok(Flagged.parse[ParityMaybeFlag](Seq("--flag", "true"))),
-      ParityMaybeFlag(Some(true))
+      ok(Flagged.parse[ParityMaybeFlag](Seq("--flag=false"))),
+      ParityMaybeFlag(Some(false))
     )
-    val msg = err(Flagged.parse[ParityMaybeFlag](Seq("--flag")))
-    assert(msg.contains("requires a value"), msg)
   }
 
   test("repeating a boolean flag is tolerated (case-app: scalar repeat is an error)") {

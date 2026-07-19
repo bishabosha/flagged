@@ -204,13 +204,15 @@ object Assemble:
 
       case vf: Parser.ValuedFlag[?] =>
         val fv = vf.fromValue.asInstanceOf[String => Result[Any, String]]
-        if f.positional || f.optional then
-          val mode = Mode.Single(fv, f.optional)
-          if f.positional then positional("value", mode, posKind) else named("value", mode)
-        else named("", Mode.Flag(vf.fromCount.asInstanceOf[Int => Result[Any, String]], Some(fv)))
+        if f.positional then positional("value", Mode.Single(fv, f.optional), posKind)
+        else
+          named(
+            "",
+            Mode.Flag(vf.fromCount.asInstanceOf[Int => Result[Any, String]], Some(fv), f.optional)
+          )
 
       case fl: Parser.Flag[?] =>
-        named("", Mode.Flag(fl.fromCount.asInstanceOf[Int => Result[Any, String]], None))
+        named("", Mode.Flag(fl.fromCount.asInstanceOf[Int => Result[Any, String]], None, false))
 
       case v: Parser.Value[?] =>
         val mode = Mode.Single(readFn(f.parser), f.optional)

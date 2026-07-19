@@ -7,9 +7,14 @@ import steps.result.Result
   */
 enum Mode:
   /** Flag: takes no token; built from the occurrence count. `fromValue`, when available, handles
-    * the explicit `--flag=value` form.
+    * the explicit `--flag=value` form. If `optional` the field is an `Option[_]`: absent means
+    * `None`, any presence wraps the built value in `Some`.
     */
-  case Flag(fromCount: Int => Result[Any, String], fromValue: Option[String => Result[Any, String]])
+  case Flag(
+      fromCount: Int => Result[Any, String],
+      fromValue: Option[String => Result[Any, String]],
+      optional: Boolean
+  )
 
   /** Option taking one value. If `optional` the field is an `Option[_]` and the parsed value is
     * wrapped in `Some`.

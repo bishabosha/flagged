@@ -68,7 +68,7 @@ private[flagged] object HelpFmt:
   private def optLeft(o: OptSpec): String =
     val short = o.short.map(c => s"-$c, ").getOrElse("    ")
     val value = o.mode match
-      case Mode.Flag(_, _)     => ""
+      case Mode.Flag(_, _, _)  => ""
       case Mode.Single(_, _)   => s" <${o.metavar}>"
       case Mode.Repeated(_, _) => s" <${o.metavar}>"
     s"$short--${o.long}$value"
@@ -77,8 +77,8 @@ private[flagged] object HelpFmt:
     val default = o.default.map(d => d()).filterNot { v =>
       // a flag default equal to the absent-value (fromCount(0)) conveys nothing
       o.mode match
-        case Mode.Flag(fromCount, _) => fromCount(0).toOption.contains(v)
-        case _                       => false
+        case Mode.Flag(fromCount, _, _) => fromCount(0).toOption.contains(v)
+        case _                          => false
     }
     val dflt = default match
       case Some(v) => fmtDefault(v).map(s => s"default: $s")
