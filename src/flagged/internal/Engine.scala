@@ -231,13 +231,15 @@ private[flagged] object Engine:
                 default.map(d => Some(d())).getOrElse(if optional then Some(None) else None)
           case Mode.Repeated(parser) =>
             var bad = false
-            val arr = new Array[AnyRef](occurrences.length)
+            // Array[Any] erases to an object array; only generic ArrayOps (take & co.) would
+            // route through ClassTag machinery, so compaction is a plain arraycopy
+            val arr = new Array[Any](occurrences.length)
             var k   = 0
             occurrences.foreach {
               case Occ.Val(raw, disp) =>
                 parser.parseElem(raw) match
                   case Ok(v) =>
-                    arr(k) = v.asInstanceOf[AnyRef]
+                    arr(k) = v
                     k += 1
                   case Err(msg) =>
                     report(s"invalid value for '$disp': $msg")
@@ -249,14 +251,14 @@ private[flagged] object Engine:
               val exact =
                 if k == arr.length then arr
                 else
-                  val out = new Array[AnyRef](k)
+                  val out = new Array[Any](k)
                   System.arraycopy(arr, 0, out, 0, k)
                   out
               Some(orReport(display)(parser.buildErased(ArraySeq.unsafeWrapArray(exact))))
             else
               default
                 .map(d => Some(d()))
-                .getOrElse(Some(orReport(display)(parser.buildErased(ArraySeq.empty[AnyRef]))))
+                .getOrElse(Some(orReport(display)(parser.buildErased(ArraySeq.empty[Any]))))
 
       val missing = mutable.ListBuffer.empty[String]
 
