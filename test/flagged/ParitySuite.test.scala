@@ -1,0 +1,228 @@
+package flagged
+
+/** Behaviors cross-checked against what mainargs and case-app document for the same input, so that
+  * deliberate differences stay deliberate. Each test names the library whose documented behavior it
+  * was checked against; where flagged diverges on purpose, the test pins down *our* behavior and
+  * the comment records the difference.
+  */
+
+case class ParityBasic(
+    @short('v') verbose: Boolean = false,
+    @short('o') output: String = "out.txt",
+    maxRetries: Int = 3
+) derives Parser.Command
+
+case class ParityCount(
+    @short('v') verbose: Count = Count(0)
+) derives Parser.Command
+
+case class ParityAuth(
+    user: String,
+    pass: String
+) derives Parser.Command
+
+case class ParityApp(
+    url: String,
+    auth: ParityAuth
+) derives Parser.Command
+
+case class ParityLazyDefault(
+    name: String,
+    expensive: Int = sys.error("default evaluated")
+) derives Parser.Command
+
+case class ParityWide(
+    f1: Int = 1,
+    f2: Int = 2,
+    f3: Int = 3,
+    f4: Int = 4,
+    f5: Int = 5,
+    f6: Int = 6,
+    f7: Int = 7,
+    f8: Int = 8,
+    f9: Int = 9,
+    f10: Int = 10,
+    f11: Int = 11,
+    f12: Int = 12,
+    f13: Int = 13,
+    f14: Int = 14,
+    f15: Int = 15,
+    f16: Int = 16,
+    f17: Int = 17,
+    f18: Int = 18,
+    f19: Int = 19,
+    f20: Int = 20,
+    f21: Int = 21,
+    f22: Int = 22,
+    f23: Int = 23
+) derives Parser.Command
+
+case class ParityIntArgs(
+    @positional nums: List[Int] = Nil
+) derives Parser.Command
+
+case class ParityMaybeFlag(
+    flag: Option[Boolean] = None
+) derives Parser.Command
+
+case class ParitySeqField(
+    items: Seq[String] = Nil
+) derives Parser.Command
+
+case class ParityDigits(
+    optFor29Name: Int = 0
+) derives Parser.Command
+
+case class ParityExactName(
+    @name("myExact") value: Int = 0
+) derives Parser.Command
+
+case class ParityShortField(
+    v: Int = 0
+) derives Parser.Command
+
+class ParitySuite extends munit.FunSuite:
+
+  def ok[A](r: ParseResult[A]): A = r match
+    case Ok(a)                         => a
+    case Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
+    case Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
+
+  def err[A](r: ParseResult[A]): String = r match
+    case Err(ParseError.Failure(m, _)) => m
+    case other                         => fail(s"expected failure, got $other")
+
+  // ---- mainargs parity: `=` handling -------------------------------------------
+
+  test("--name= passes an empty string value (mainargs: same)") {
+    assertEquals(ok(Flagged.parse[ParityBasic](Seq("--output="))), ParityBasic(output = ""))
+  }
+
+  test("--name=a=b splits on the first = only (mainargs: same)") {
+    assertEquals(
+      ok(Flagged.parse[ParityBasic](Seq("--output=bar=qux"))),
+      ParityBasic(output = "bar=qux")
+    )
+  }
+
+  test("-o= passes an empty attached value (mainargs: same)") {
+    assertEquals(ok(Flagged.parse[ParityBasic](Seq("-o="))), ParityBasic(output = ""))
+  }
+
+  test("-okey=value keeps a non-leading = in the attached value (mainargs: same)") {
+    assertEquals(
+      ok(Flagged.parse[ParityBasic](Seq("-okey=value"))),
+      ParityBasic(output = "key=value")
+    )
+  }
+
+  test("a bundle ending in -x=value strips the leading = (mainargs: same)") {
+    assertEquals(
+      ok(Flagged.parse[ParityBasic](Seq("-vo=x.txt"))),
+      ParityBasic(verbose = true, output = "x.txt")
+    )
+  }
+
+  test("a counting flag rejects --flag=value (mainargs: unknown argument; we name the flag)") {
+    val msg = err(Flagged.parse[ParityCount](Seq("--verbose=3")))
+    assert(msg.contains("does not take a value"), msg)
+  }
+
+  // ---- mainargs parity: errors, defaults, arity ---------------------------------
+
+  test("all missing required arguments are reported together, across splices (mainargs: same)") {
+    val msg = err(Flagged.parse[ParityApp](Nil))
+    assert(msg.contains("--url"), msg)
+    assert(msg.contains("--user"), msg)
+    assert(msg.contains("--pass"), msg)
+  }
+
+  test("defaults are evaluated lazily, only when actually needed (mainargs, case-app: same)") {
+    // deriving the parser and providing the value must never run the default's right-hand side
+    assertEquals(
+      ok(Flagged.parse[ParityLazyDefault](Seq("--name", "a", "--expensive", "5"))),
+      ParityLazyDefault("a", 5)
+    )
+  }
+
+  test("more than 22 fields derive and parse (mainargs: supported since 0.6.3)") {
+    assertEquals(ok(Flagged.parse[ParityWide](Nil)), ParityWide())
+    assertEquals(ok(Flagged.parse[ParityWide](Seq("--f23", "99"))), ParityWide(f23 = 99))
+  }
+
+  test("a typed repeated positional reports the offending element (mainargs Leftover[Int]: same)") {
+    assertEquals(ok(Flagged.parse[ParityIntArgs](Seq("1", "2"))), ParityIntArgs(List(1, 2)))
+    val msg = err(Flagged.parse[ParityIntArgs](Seq("1", "x")))
+    assert(msg.contains("<nums>"), msg)
+  }
+
+  test("--help is honored in any position (mainargs: first token only)") {
+    Flagged.parse[ParityBasic](Seq("--output", "x", "--help")) match
+      case Err(ParseError.Help(_)) => ()
+      case other                   => fail(s"expected help, got $other")
+  }
+
+  test("an all-dash token is an unknown option (mainargs: treated as a plain value)") {
+    val msg = err(Flagged.parse[ParityBasic](Seq("---")))
+    assert(msg.contains("unknown option"), msg)
+  }
+
+  test("only the kebab-case spelling is accepted (mainargs: camelCase also matches)") {
+    val msg = err(Flagged.parse[ParityBasic](Seq("--maxRetries", "7")))
+    assert(msg.startsWith("unknown option '--maxRetries'"), msg)
+  }
+
+  test("an explicit @name is matched verbatim, never kebab-mapped (mainargs, case-app: same)") {
+    assertEquals(ok(Flagged.parse[ParityExactName](Seq("--myExact", "5"))), ParityExactName(5))
+    val msg = err(Flagged.parse[ParityExactName](Seq("--my-exact", "5")))
+    assert(msg.contains("unknown option"), msg)
+  }
+
+  test("a single-letter field is a long option, no implicit short (mainargs, case-app: short)") {
+    assertEquals(ok(Flagged.parse[ParityShortField](Seq("--v", "5"))), ParityShortField(5))
+    val msg = err(Flagged.parse[ParityShortField](Seq("-v", "5")))
+    assert(msg.contains("unknown option '-v'"), msg)
+  }
+
+  // ---- case-app parity -----------------------------------------------------------
+
+  test("Option[Boolean] requires an explicit value (case-app: bare --flag gives Some(true))") {
+    assertEquals(
+      ok(Flagged.parse[ParityMaybeFlag](Seq("--flag", "true"))),
+      ParityMaybeFlag(Some(true))
+    )
+    val msg = err(Flagged.parse[ParityMaybeFlag](Seq("--flag")))
+    assert(msg.contains("requires a value"), msg)
+  }
+
+  test("repeating a boolean flag is tolerated (case-app: scalar repeat is an error)") {
+    assertEquals(
+      ok(Flagged.parse[ParityBasic](Seq("--verbose", "--verbose"))),
+      ParityBasic(verbose = true)
+    )
+  }
+
+  test("Seq fields accumulate like List and Vector (case-app: no generic Seq instance)") {
+    assertEquals(
+      ok(Flagged.parse[ParitySeqField](Seq("--items", "a", "--items", "b"))),
+      ParitySeqField(Seq("a", "b"))
+    )
+  }
+
+  test("an absent repeated option is the empty collection (mainargs, case-app: same)") {
+    assertEquals(ok(Flagged.parse[ParitySeqField](Nil)), ParitySeqField(Nil))
+  }
+
+  test("kebab-casing does not split at digit boundaries (mainargs: opt-for-29-name)") {
+    assertEquals(
+      ok(Flagged.parse[ParityDigits](Seq("--opt-for29-name", "5"))),
+      ParityDigits(5)
+    )
+    val msg = err(Flagged.parse[ParityDigits](Seq("--opt-for-29-name", "5")))
+    assert(msg.contains("unknown option"), msg)
+  }
+
+  test("option names are case-sensitive (case-app: same)") {
+    val msg = err(Flagged.parse[ParityBasic](Seq("--Output", "x")))
+    assert(msg.contains("unknown option '--Output'"), msg)
+  }
