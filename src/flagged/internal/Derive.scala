@@ -54,7 +54,11 @@ object Derive:
   // ---- fields ---------------------------------------------------------------
 
   inline def labelsOf[L <: Tuple]: List[String] =
-    constValueTuple[L].toList.asInstanceOf[List[String]]
+    inline erasedValue[L] match
+      case _: EmptyTuple        => Nil
+      case _: (l *: EmptyTuple) => constValue[l].asInstanceOf[String] :: Nil
+      case _: (l *: t)          =>
+        labelsOf[Tuple.Take[l *: t, HalfN[l *: t]]] ::: labelsOf[Tuple.Drop[l *: t, HalfN[l *: t]]]
 
   /** The single field rule: summon the field type's `Parser`; `Option[_]` marks it optional. The
     * parser's shape (its `Parser` subtype, which derivation requires to be statically known)
@@ -123,6 +127,14 @@ object Derive:
     inline erasedValue[B] match
       case _: true  => true
       case _: false => false
+
+  /** Whether the field's annotation slot is empty — the common case; lets every per-field
+    * annotation check and name-union extension collapse to nothing.
+    */
+  transparent inline def noAnns[Anns]: Boolean =
+    inline erasedValue[Anns] match
+      case _: EmptyTuple => true
+      case _             => false
 
   transparent inline def walk[
       Types <: Tuple,
@@ -201,30 +213,32 @@ object Derive:
       Shorts,
       Longs
   ]: FieldsRes =
-    inline if hasAnnApplied[Ann[flagged.short, 'h' *: EmptyTuple, ?], Anns] then
-      error("short option 'h' is reserved for help")
-    else ()
-    inline if hasAnn[flagged.version, Anns] then
-      error("@version has no effect on a field (put it on the top-level type)")
-    else ()
-    inline if hasAnn[flagged.default, Anns] then
-      error("@default has no effect on a field (put it on a command-group enum case)")
-    else ()
-    inline if hasAnn[flagged.positional, Anns] then
-      inline if hasAnn[flagged.hidden, Anns] then
-        error("@hidden cannot be combined with @positional")
-      else inline if hasAnn[flagged.group, Anns] then
-        error("@group cannot be combined with @positional")
-      else inline if hasAnn[flagged.short, Anns] then
-        error("@short cannot be combined with @positional")
-      else inline if isTrue[SR] then
-        error("a repeated positional must be the last positional field")
-      else inline if isTrue[SG] then
-        error("mixing positional fields with a subcommand field is ambiguous and not supported")
+    inline if noAnns[Anns] then () // nothing to check, and none of the cascades below expand
+    else
+      inline if hasAnnApplied[Ann[flagged.short, 'h' *: EmptyTuple, ?], Anns] then
+        error("short option 'h' is reserved for help")
       else ()
-    else inline if hasAnnApplied[Ann[flagged.name, "help" *: EmptyTuple, ?], Anns] then
-      error("option name 'help' is reserved")
-    else ()
+      inline if hasAnn[flagged.version, Anns] then
+        error("@version has no effect on a field (put it on the top-level type)")
+      else ()
+      inline if hasAnn[flagged.default, Anns] then
+        error("@default has no effect on a field (put it on a command-group enum case)")
+      else ()
+      inline if hasAnn[flagged.positional, Anns] then
+        inline if hasAnn[flagged.hidden, Anns] then
+          error("@hidden cannot be combined with @positional")
+        else inline if hasAnn[flagged.group, Anns] then
+          error("@group cannot be combined with @positional")
+        else inline if hasAnn[flagged.short, Anns] then
+          error("@short cannot be combined with @positional")
+        else inline if isTrue[SR] then
+          error("a repeated positional must be the last positional field")
+        else inline if isTrue[SG] then
+          error("mixing positional fields with a subcommand field is ambiguous and not supported")
+        else ()
+      else inline if hasAnnApplied[Ann[flagged.name, "help" *: EmptyTuple, ?], Anns] then
+        error("option name 'help' is reserved")
+      else ()
     inline erasedValue[F] match
       case _: Option[e] => shape[e, Anns, L, ST, SR, SG, SP, Shorts, Longs](optional = true)
       case _            => shape[F, Anns, L, ST, SR, SG, SP, Shorts, Longs](optional = false)
@@ -330,14 +344,24 @@ object Derive:
       Shorts,
       Longs
   ](p: Parser[?], inline optional: Boolean): FieldsRes =
-    inline if hasAnn[flagged.positional, Anns] then
+    inline if noAnns[Anns] then resOf[ST, SR, SG, SP, Shorts, Longs](List((p, optional)))
+    else inline if hasAnn[flagged.positional, Anns] then
       resOf[ST, SR, SG, true, Shorts, Longs](List((p, optional)))
     else
+      // extend each claimed-name union only when this field claims a constant name: unions (and
+      // the unreduced match types inside them) would otherwise grow with every field and be
+      // dragged through all later type arguments
       checkNewShort[Anns, Shorts]
       checkNewLong[Anns, L, Longs]
-      resOf[ST, SR, SG, SP, Shorts | ShortIn[Anns], Longs | EffLong[Anns, L]](
-        List((p, optional))
-      )
+      inline if hasAnn[flagged.short, Anns] then
+        inline if hasAnn[flagged.name, Anns] then
+          resOf[ST, SR, SG, SP, Shorts | ShortIn[Anns], Longs | EffLong[Anns, L]](
+            List((p, optional))
+          )
+        else resOf[ST, SR, SG, SP, Shorts | ShortIn[Anns], Longs](List((p, optional)))
+      else inline if hasAnn[flagged.name, Anns] then
+        resOf[ST, SR, SG, SP, Shorts, Longs | EffLong[Anns, L]](List((p, optional)))
+      else resOf[ST, SR, SG, SP, Shorts, Longs](List((p, optional)))
 
   /** The `@short` character claimed by the slot, or `Nothing`. */
   type ShortIn[Anns] = Anns match
@@ -398,9 +422,10 @@ object Derive:
 
   inline def entriesOf[T <: Tuple]: List[SubEntry] =
     inline erasedValue[T] match
-      case _: EmptyTuple    => Nil
-      case _: NonEmptyTuple =>
-        entryOf[Tuple.Head[T & NonEmptyTuple]] :: entriesOf[Tuple.Tail[T & NonEmptyTuple]]
+      case _: EmptyTuple        => Nil
+      case _: (? *: EmptyTuple) => entryOf[Tuple.Head[T & NonEmptyTuple]] :: Nil
+      case _: NonEmptyTuple     =>
+        entriesOf[Tuple.Take[T, HalfN[T]]] ::: entriesOf[Tuple.Drop[T, HalfN[T]]]
 
   /** One case of the sum being derived. Singleton and product cases belong to the sum's own
     * declaration and are handled in place; a case that is itself a sum is a separate hierarchy and
@@ -417,12 +442,13 @@ object Derive:
 
   inline def singletonValues[T <: Tuple]: List[Any] =
     inline erasedValue[T] match
-      case _: EmptyTuple    => Nil
-      case _: NonEmptyTuple =>
+      case _: EmptyTuple        => Nil
+      case _: (? *: EmptyTuple) =>
         summonFrom:
-          case v: ValueOf[Tuple.Head[T & NonEmptyTuple]] =>
-            v.value :: singletonValues[Tuple.Tail[T & NonEmptyTuple]]
-          case _ =>
+          case v: ValueOf[Tuple.Head[T & NonEmptyTuple]] => v.value :: Nil
+          case _                                         =>
             error(
               "Parser.Enumerated requires an enum (or sealed trait) whose cases are all parameterless"
             )
+      case _: NonEmptyTuple =>
+        singletonValues[Tuple.Take[T, HalfN[T]]] ::: singletonValues[Tuple.Drop[T, HalfN[T]]]
