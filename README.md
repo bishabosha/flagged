@@ -286,16 +286,17 @@ A parser's *shape* is its subtype — `Parser.Value`, `Parser.Flag`,
 builds single-value parsers; `Parser.repeated` builds parsers whose argument may
 appear any number of times, each occurrence parsed by a `Parser.Value` element (so
 repeats cannot nest, by construction) and the collected elements combined by a
-function of your choice. The provided `List`/`Seq`/`Vector` instances are ordinary
-`Parser.repeated` definitions, and any type can opt in the same way — including with
-constraints, since the combining function may fail (it also receives `Nil` when the
-argument is absent):
+function of your choice, from an `IndexedSeq` view of the collected elements. The
+provided `List`/`Seq`/`Vector`/`Map` instances are ordinary `Parser.repeated`
+definitions, and any type can opt in the same way — including with constraints,
+since the combining function may fail (it is also invoked empty when the argument
+is absent):
 
 ```scala
 given Parser.Repeated[Set[String]] = Parser.repeated[String, Set[String]](l => Ok(l.toSet))
 
 given Parser.Repeated[NonEmpty] = Parser.repeated[Int, NonEmpty](l =>
-  if l.isEmpty then Err("expected at least one occurrence") else Ok(NonEmpty(l)))
+  if l.isEmpty then Err("expected at least one occurrence") else Ok(NonEmpty(l.toList)))
 ```
 
 Flag shape is pluggable the same way: `Parser.flag` builds the value from the number

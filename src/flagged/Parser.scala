@@ -1,6 +1,7 @@
 package flagged
 
 import java.io.File
+import scala.collection.immutable.ArraySeq
 import java.util.UUID
 import scala.deriving.Mirror
 import flagged.internal.{Assemble, Engine, HelpFmt}
@@ -60,7 +61,7 @@ sealed trait Parser[A]:
     case v: Parser.Value[A]       => v.parse(s)
     case vf: Parser.ValuedFlag[A] => vf.fromValue(s)
     case _: Parser.Flag[A]        => Err(s"'$s': this flag does not take a value")
-    case r: Parser.Repeated[A]    => r.element.parse(s).flatMap(e => r.build(List(e)))
+    case r: Parser.Repeated[A]    => r.element.parse(s).flatMap(e => r.build(IndexedSeq(e)))
     case t: Parser.Trailing[A]    => t.build(List(s))
     case c: Parser.Command[A]     =>
       Err(s"'$s': '${c.prog}' is a command parser, not a single value")
@@ -132,19 +133,20 @@ object Parser:
       flag(n => fromCount(n).flatMap(f), s => fromValue(s).flatMap(f))
 
   /** Any number of occurrences, each parsed by a `Value` element (so repeats cannot nest, by
-    * construction), combined with `build` — which is also invoked with `Nil` when the argument is
-    * absent; return `Err` to require at least one occurrence.
+    * construction), combined with `build` from an indexed view of the collected elements (an
+    * `ArraySeq` over the engine's array — also invoked empty when the argument is absent; return
+    * `Err` to require at least one occurrence).
     */
   sealed trait Repeated[A] extends Parser[A]:
     type Elem
     def element: Value[Elem]
-    def build(l: List[Elem]): Result[A, String]
+    def build(l: IndexedSeq[Elem]): Result[A, String]
     final def typeName: String                          = element.typeName
     def emap[B](f: A => Result[B, String]): Repeated[B] =
       repeated[Elem, B](l => build(l).flatMap(f))(using element)
-    private[flagged] final def parseElem(s: String): Result[Any, String]    = element.parse(s)
-    private[flagged] final def buildErased(l: List[Any]): Result[A, String] =
-      build(l.asInstanceOf[List[Elem]])
+    private[flagged] final def parseElem(s: String): Result[Any, String]          = element.parse(s)
+    private[flagged] final def buildErased(l: IndexedSeq[Any]): Result[A, String] =
+      build(l.asInstanceOf[IndexedSeq[Elem]])
 
   /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with `Nil`
     * when no `--` is given — return `Err` to require one).
@@ -210,11 +212,13 @@ object Parser:
   /** Opt `A` into repeated shape: each occurrence is parsed with the element's (single-value)
     * parser, and the collected elements are combined with `combine`.
     */
-  def repeated[E, A](combine: List[E] => Result[A, String])(using elem: Value[E]): Repeated[A] =
+  def repeated[E, A](combine: IndexedSeq[E] => Result[A, String])(
+      using elem: Value[E]
+  ): Repeated[A] =
     new Repeated[A]:
       type Elem = E
-      def element           = elem
-      def build(l: List[E]) = combine(l)
+      def element                 = elem
+      def build(l: IndexedSeq[E]) = combine(l)
 
   /** Opt `A` into trailing shape: it is built from the raw arguments after `--`. */
   def trailing[A](combine: List[String] => Result[A, String]): Trailing[A] = new Trailing[A]:
@@ -235,18 +239,18 @@ object Parser:
 
   given [A] => (elem: Value[A]) => Repeated[List[A]]:
     type Elem = A
-    def element           = elem
-    def build(l: List[A]) = Ok(l)
+    def element                 = elem
+    def build(l: IndexedSeq[A]) = Ok(l.toList)
 
   given [A] => (elem: Value[A]) => Repeated[Vector[A]]:
     type Elem = A
-    def element           = elem
-    def build(l: List[A]) = Ok(l.toVector)
+    def element                 = elem
+    def build(l: IndexedSeq[A]) = Ok(l.toVector)
 
   given [A] => (elem: Value[A]) => Repeated[Seq[A]]:
     type Elem = A
-    def element           = elem
-    def build(l: List[A]) = Ok(l)
+    def element                 = elem
+    def build(l: IndexedSeq[A]) = Ok(l) // the engine's ArraySeq, zero-copy
 
   private final class PairValue[K, V](k: Value[K], v: Value[V]) extends Value[(K, V)]:
     def typeName         = s"${k.typeName}=${v.typeName}"
@@ -262,8 +266,8 @@ object Parser:
   /** Each occurrence is one `key=value` entry, split at the first `=`; later entries win. */
   given [K, V] => (k: Value[K], v: Value[V]) => Repeated[Map[K, V]]:
     type Elem = (K, V)
-    val element              = PairValue(k, v)
-    def build(l: List[Elem]) = Ok(l.toMap)
+    val element                    = PairValue(k, v)
+    def build(l: IndexedSeq[Elem]) = Ok(l.toMap)
 
   // built-in instances implement `parse` directly, so the default path is plain virtual dispatch
   // with no closures; only user-constructed parsers (`of`, `emap`, ...) go through a function

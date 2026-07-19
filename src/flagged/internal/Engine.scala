@@ -4,6 +4,7 @@ import flagged.{ParseError, ParseResult}
 import steps.result.Result
 import steps.result.Result.{Ok, Err, eval}
 import steps.result.Result.eval.ok
+import scala.collection.immutable.ArraySeq
 import scala.collection.mutable
 
 /** One occurrence of an option or positional on the command line. */
@@ -229,21 +230,28 @@ private[flagged] object Engine:
               case _ =>
                 default.map(d => Some(d())).getOrElse(if optional then Some(None) else None)
           case Mode.Repeated(parser) =>
-            var bad  = false
-            val vals = occurrences.collect { case Occ.Val(raw, disp) =>
-              parser.parseElem(raw) match
-                case Ok(v)    => v
-                case Err(msg) =>
-                  report(s"invalid value for '$disp': $msg")
-                  bad = true
-                  null
+            var bad = false
+            val arr = new Array[Any](occurrences.length)
+            var k   = 0
+            occurrences.foreach {
+              case Occ.Val(raw, disp) =>
+                parser.parseElem(raw) match
+                  case Ok(v) =>
+                    arr(k) = v
+                    k += 1
+                  case Err(msg) =>
+                    report(s"invalid value for '$disp': $msg")
+                    bad = true
+              case Occ.Bare => ()
             }
             if bad then Some(null) // reported: the parse fails before anything is built
-            else if vals.nonEmpty then Some(orReport(display)(parser.buildErased(vals)))
+            else if k > 0 then
+              val vals = ArraySeq.unsafeWrapArray(if k == arr.length then arr else arr.take(k))
+              Some(orReport(display)(parser.buildErased(vals)))
             else
               default
                 .map(d => Some(d()))
-                .getOrElse(Some(orReport(display)(parser.buildErased(Nil))))
+                .getOrElse(Some(orReport(display)(parser.buildErased(ArraySeq.empty[Any]))))
 
       val missing = mutable.ListBuffer.empty[String]
 

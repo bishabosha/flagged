@@ -118,7 +118,7 @@ class ValueParserSuite extends munit.FunSuite:
   test("a repeated reader can require at least one occurrence") {
     case class AtLeastOne(xs: List[Int])
     given Parser.Repeated[AtLeastOne] = Parser.repeated[Int, AtLeastOne](l =>
-      if l.isEmpty then Err("expected at least one occurrence") else Ok(AtLeastOne(l))
+      if l.isEmpty then Err("expected at least one occurrence") else Ok(AtLeastOne(l.toList))
     )
     case class Cfg(num: AtLeastOne) derives Parser.Command
     assertEquals(
@@ -136,7 +136,7 @@ class ValueParserSuite extends munit.FunSuite:
       Parser.of[Int]("int")(s => s.toIntOption.fold(Err(s"'$s' not an int"))(Ok(_)))
     given Parser.Repeated[List[Int]] =
       Parser
-        .repeated[Int, List[Int]](l => Ok(l))
+        .repeated[Int, List[Int]](l => Ok(l.toList))
         .emap(l => if l.sum > 10 then Err("sum too large") else Ok(l))
     case class Sums(n: List[Int] = Nil) derives Parser.Command
     assertEquals(ok(Flagged.parse[Sums](Seq("--n", "1", "--n", "2"))), Sums(List(1, 2)))
