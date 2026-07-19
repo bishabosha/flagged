@@ -15,17 +15,33 @@ jobs:
       - uses: VirtusLab/scala-cli-setup@v1
         with:
           jvm: temurin:21
+          power: true
       - name: scalafmt
         run: scala-cli fmt --check .
 
   test:
-    name: Test
+    name: Test (${{ matrix.platform }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: jvm
+            flags: ""
+          - platform: js
+            flags: "--js"
+          - platform: native
+            flags: "--native"
     steps:
       - uses: actions/checkout@v4
       - uses: coursier/cache-action@v6
       - uses: VirtusLab/scala-cli-setup@v1
         with:
           jvm: temurin:21
+          power: true
+      - uses: actions/setup-node@v4
+        if: matrix.platform == 'js'
+        with:
+          node-version: 22
       - name: Run tests
-        run: scala-cli test .
+        run: scala-cli test . ${{ matrix.flags }}

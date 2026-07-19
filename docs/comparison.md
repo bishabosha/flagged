@@ -48,7 +48,7 @@ across the three libraries live in `bench/` (see `bench/README.md`).
 | Cross-field validation | `emap` on the command parser | manual, after parse | manual, after parse |
 | Argument index tracking | no | no | `Indexed[T]` |
 | Scala versions | 3 only | 2.12, 2.13, 3 | 2.12, 2.13, 3 |
-| Platforms | JVM | JVM, JS, Native | JVM, JS, Native |
+| Platforms | JVM, JS, Native (`java.time`/`Path` instances per platform) | JVM, JS, Native | JVM, JS, Native |
 
 ## Deliberate differences (kept, covered by ParitySuite)
 
@@ -70,7 +70,7 @@ across the three libraries live in `bench/` (see `bench/README.md`).
 
 Remaining after the parity round (everything else in the original list is implemented):
 unrecognized-argument passthrough modes, shell completions, a `--full-help`-style toggle for
-revealing hidden options, argument index tracking, Scala.js/Native, Scala 2.
+revealing hidden options, argument index tracking, Scala 2.
 
 ## Features neither library has
 
@@ -86,17 +86,14 @@ commands, `@hidden`, `@version`/`--version`, `@group` help sections, repeatable 
 (options and commands), `Option[Group]`, prefixed splices, `Map[K,V]`, `@default` command,
 digit-aware kebab-casing, and presence semantics for optional valued flags. Still open:
 
-1. **Scala.js and Scala Native cross-build.** Both competitors support all three platforms; CLI
-   tools built with scala-cli increasingly target Native. Needs platform toolchains and publish
-   setup rather than code changes.
-2. **Shell completions.** bash/zsh completion generation from the command model; the static model
+1. **Shell completions.** bash/zsh completion generation from the command model; the static model
    makes this mechanical, but it is a sizable feature (case-app ships it).
-3. **Passthrough modes.** Stop-at-first-unrecognized and ignore-unrecognized parsing for wrapper
+2. **Passthrough modes.** Stop-at-first-unrecognized and ignore-unrecognized parsing for wrapper
    CLIs that forward arguments (case-app has both; `Trailing` covers the explicit `--` case, and
    `@default`-command forwarding covers the leading-command case). Needs an API-surface decision:
    a parse-time flag does not fit the typed model as well as a `Passthrough`-shaped field would.
-4. **Detailed help toggle.** A `--help-all` that reveals `@hidden` options and commands
+3. **Detailed help toggle.** A `--help-all` that reveals `@hidden` options and commands
    (case-app's `--full-help`).
-5. **Low priority.** `--usage` (condensed help), alphabetical help sorting toggle, pluggable name
+4. **Low priority.** `--usage` (condensed help), alphabetical help sorting toggle, pluggable name
    mapper (snake_case), argument index tracking (`Indexed`), runtime name/doc overrides, Scala 2
    support (not planned: the design depends on Scala 3 inline derivation).

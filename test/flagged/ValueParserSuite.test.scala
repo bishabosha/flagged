@@ -1,6 +1,5 @@
 package flagged
 
-import java.nio.file.Paths
 import scala.concurrent.duration.*
 
 enum LogLevel derives Parser.Enumerated:
@@ -8,7 +7,6 @@ enum LogLevel derives Parser.Enumerated:
 
 case class ValueConfig(
     level: LogLevel = LogLevel.Info,
-    path: java.nio.file.Path = Paths.get("."),
     timeout: FiniteDuration = 30.seconds,
     ratio: Double = 0.5,
     id: Option[java.util.UUID] = None
@@ -34,14 +32,13 @@ class ValueParserSuite extends munit.FunSuite:
     )
   }
 
-  test("built-in readers: path, duration, double, uuid") {
-    val id  = java.util.UUID.randomUUID()
+  test("built-in readers: duration, double, uuid") {
+    val id  = java.util.UUID.fromString("123e4567-e89b-12d3-a456-426614174000")
     val cfg = ok(
       Flagged.parse[ValueConfig](
-        Seq("--path", "/tmp/x", "--timeout", "5s", "--ratio", "0.25", "--id", id.toString)
+        Seq("--timeout", "5s", "--ratio", "0.25", "--id", id.toString)
       )
     )
-    assertEquals(cfg.path, Paths.get("/tmp/x"))
     assertEquals(cfg.timeout, 5.seconds)
     assertEquals(cfg.ratio, 0.25)
     assertEquals(cfg.id, Some(id))
@@ -50,7 +47,6 @@ class ValueParserSuite extends munit.FunSuite:
   test("reader typeName appears as metavar in help") {
     Flagged.parse[ValueConfig](Seq("--help")) match
       case Err(ParseError.Help(t)) =>
-        assert(t.contains("--path <path>"), t)
         assert(t.contains("--timeout <duration>"), t)
         assert(t.contains("--level <debug|info|warn|error>"), t)
       case other => fail(s"expected help, got $other")

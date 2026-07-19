@@ -1,11 +1,7 @@
 package flagged
 
 import java.io.File
-import java.nio.file.{InvalidPathException, Path, Paths}
-import java.time.{Instant, LocalDate, LocalDateTime, LocalTime}
-import java.time.format.DateTimeParseException
 import java.util.UUID
-import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.deriving.Mirror
 import flagged.internal.{Assemble, Engine, HelpFmt}
 
@@ -269,11 +265,6 @@ object Parser:
     if s.length == 1 then Ok(s.charAt(0)) else Err(s"'$s' is not a single character")
   )
 
-  given Value[Path] = of("path")(s =>
-    try Ok(Paths.get(s))
-    catch case _: InvalidPathException => Err(s"'$s' is not a valid path")
-  )
-
   given Value[File] = of("file")(s => Ok(new File(s)))
 
   given Value[UUID] = of("uuid")(s =>
@@ -281,26 +272,9 @@ object Parser:
     catch case _: IllegalArgumentException => Err(s"'$s' is not a valid UUID")
   )
 
-  private def temporal[A](name: String)(f: String => A): Value[A] =
-    of(name)(s =>
-      try Ok(f(s.trim))
-      catch case _: DateTimeParseException => Err(s"'$s' is not a valid $name")
-    )
-
-  given Value[LocalDate]     = temporal("date")(LocalDate.parse)
-  given Value[LocalTime]     = temporal("time")(LocalTime.parse)
-  given Value[LocalDateTime] = temporal("date-time")(LocalDateTime.parse)
-  given Value[Instant]       = temporal("instant")(Instant.parse)
-
-  given Value[FiniteDuration] = of("duration")(s =>
-    try
-      Duration(s.trim) match
-        case fd: FiniteDuration => Ok(fd)
-        case _                  => Err(s"'$s' is not a finite duration")
-    catch
-      case _: NumberFormatException =>
-        Err(s"'$s' is not a valid duration (try e.g. '30s' or '5.minutes')")
-  )
+  // platform-dependent value instances (java.nio.file.Path is unavailable on Scala.js,
+  // java.time outside the JVM); exported so they stay in this companion's implicit scope
+  export flagged.internal.PlatformValues.given
 
 /** Convenience entry points:
   *

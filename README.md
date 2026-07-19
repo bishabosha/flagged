@@ -75,7 +75,10 @@ delimiter rule.
 
 flagged is not yet published to a Maven repository. To try it out, clone this repository
 and run `scala-cli test .` or any of the demos in `examples/`; to use it in a project,
-vendor the `src/flagged` directory.
+vendor the `src/flagged` directory. flagged cross-builds for the JVM, Scala.js, and
+Scala Native (`scala-cli test . --js` / `--native`); the platform-specific sources use
+scala-cli's `target.platform` directives, which need power mode
+(`scala-cli config power true` once).
 
 ## Declaring options
 
@@ -265,7 +268,8 @@ Option and positional values use the same `Parser[A]` typeclass as commands, in 
 value shapes. Instances for
 `String`, `Char`, `Boolean`, the numeric types, `BigInt`/`BigDecimal`,
 `java.nio.file.Path`, `java.io.File`, `UUID`, the common `java.time` types, and
-`FiniteDuration` (`"30s"`, `"5.minutes"`) are built in.
+`FiniteDuration` (`"30s"`, `"5.minutes"`) are built in. Instances follow platform
+availability: `java.time` types are JVM-only, `Path` is JVM and Scala Native.
 
 A custom value parser is a one-liner, and its type name becomes the `<metavar>` in help
 output:
