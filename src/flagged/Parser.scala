@@ -9,7 +9,8 @@ import flagged.internal.{Assemble, Engine, HelpFmt}
 final case class Count(value: Int)
 
 object Count:
-  given Parser.Flag[Count] = Parser.flag(n => Ok(Count(n)))
+  given Parser.Flag[Count]:
+    def fromCount(n: Int) = Ok(Count(n))
 
 /** The raw arguments after `--`, collected verbatim (no option parsing). Empty when no `--` is
   * given; use `Option[Trailing]` to distinguish an absent `--` from a present-but-empty one.
@@ -17,7 +18,8 @@ object Count:
 final case class Trailing(args: List[String])
 
 object Trailing:
-  given Parser.Trailing[Trailing] = Parser.trailing(l => Ok(Trailing(l)))
+  given Parser.Trailing[Trailing]:
+    def build(l: List[String]) = Ok(Trailing(l))
 
 /** Describes how command-line input becomes an `A`. The *shape* is the subtype:
   *
@@ -231,62 +233,97 @@ object Parser:
 
   // ---- instances --------------------------------------------------------------
 
-  given [A](using Value[A]): Repeated[List[A]]   = repeated[A, List[A]](l => Ok(l))
-  given [A](using Value[A]): Repeated[Vector[A]] = repeated[A, Vector[A]](l => Ok(l.toVector))
-  given [A](using Value[A]): Repeated[Seq[A]]    = repeated[A, Seq[A]](l => Ok(l))
+  given [A] => (elem: Value[A]) => Repeated[List[A]]:
+    type Elem = A
+    def element           = elem
+    def build(l: List[A]) = Ok(l)
 
-  /** Each occurrence is one `key=value` entry, split at the first `=`; later entries win. */
-  given [K, V](using k: Value[K], v: Value[V]): Repeated[Map[K, V]] =
-    given Value[(K, V)] = of(s"${k.typeName}=${v.typeName}")(s =>
+  given [A] => (elem: Value[A]) => Repeated[Vector[A]]:
+    type Elem = A
+    def element           = elem
+    def build(l: List[A]) = Ok(l.toVector)
+
+  given [A] => (elem: Value[A]) => Repeated[Seq[A]]:
+    type Elem = A
+    def element           = elem
+    def build(l: List[A]) = Ok(l)
+
+  private final class PairValue[K, V](k: Value[K], v: Value[V]) extends Value[(K, V)]:
+    def typeName         = s"${k.typeName}=${v.typeName}"
+    def parse(s: String) =
       s.indexOf('=') match
-        case -1 => Err(s"'$s' is not in ${k.typeName}=${v.typeName} form")
+        case -1 => Err(s"'$s' is not in $typeName form")
         case i  =>
           for
             key   <- k.parse(s.take(i))
             value <- v.parse(s.drop(i + 1))
           yield (key, value)
-    )
-    repeated[(K, V), Map[K, V]](l => Ok(l.toMap))
 
-  // built-in instances implement `parse` directly (an abstract `convert` method rather than a
-  // stored function), so the default path is plain virtual dispatch with no closures; only
-  // user-constructed parsers (`of`, `emap`, ...) go through a function value
-  private abstract class Num[A](val typeName: String) extends Value[A]:
-    protected def convert(s: String): A
-    final def parse(s: String): Result[A, String] =
-      try Ok(convert(s.trim))
-      catch case _: NumberFormatException => Err(s"'$s' is not a valid $typeName")
+  /** Each occurrence is one `key=value` entry, split at the first `=`; later entries win. */
+  given [K, V] => (k: Value[K], v: Value[V]) => Repeated[Map[K, V]]:
+    type Elem = (K, V)
+    val element              = PairValue(k, v)
+    def build(l: List[Elem]) = Ok(l.toMap)
 
-  given Value[String] = new Value[String]:
+  // built-in instances implement `parse` directly, so the default path is plain virtual dispatch
+  // with no closures; only user-constructed parsers (`of`, `emap`, ...) go through a function
+  // value. `num` takes its conversion inline, so each numeric parse body is direct code.
+  private inline def num[A](s: String, name: String)(inline f: String => A): Result[A, String] =
+    try Ok(f(s.trim))
+    catch case _: NumberFormatException => Err(s"'$s' is not a valid $name")
+
+  given Value[String]:
     def typeName         = "string"
     def parse(s: String) = Ok(s)
 
-  given Value[Int]    = new Num[Int]("int") { protected def convert(s: String) = s.toInt }
-  given Value[Long]   = new Num[Long]("long") { protected def convert(s: String) = s.toLong }
-  given Value[Short]  = new Num[Short]("short") { protected def convert(s: String) = s.toShort }
-  given Value[Byte]   = new Num[Byte]("byte") { protected def convert(s: String) = s.toByte }
-  given Value[Float]  = new Num[Float]("float") { protected def convert(s: String) = s.toFloat }
-  given Value[Double] = new Num[Double]("double") { protected def convert(s: String) = s.toDouble }
-  given Value[BigInt] = new Num[BigInt]("integer") { protected def convert(s: String) = BigInt(s) }
-  given Value[BigDecimal] =
-    new Num[BigDecimal]("decimal") { protected def convert(s: String) = BigDecimal(s) }
+  given Value[Int]:
+    def typeName         = "int"
+    def parse(s: String) = num(s, typeName)(_.toInt)
+
+  given Value[Long]:
+    def typeName         = "long"
+    def parse(s: String) = num(s, typeName)(_.toLong)
+
+  given Value[Short]:
+    def typeName         = "short"
+    def parse(s: String) = num(s, typeName)(_.toShort)
+
+  given Value[Byte]:
+    def typeName         = "byte"
+    def parse(s: String) = num(s, typeName)(_.toByte)
+
+  given Value[Float]:
+    def typeName         = "float"
+    def parse(s: String) = num(s, typeName)(_.toFloat)
+
+  given Value[Double]:
+    def typeName         = "double"
+    def parse(s: String) = num(s, typeName)(_.toDouble)
+
+  given Value[BigInt]:
+    def typeName         = "integer"
+    def parse(s: String) = num(s, typeName)(BigInt(_))
+
+  given Value[BigDecimal]:
+    def typeName         = "decimal"
+    def parse(s: String) = num(s, typeName)(BigDecimal(_))
 
   // repetition policy belongs to the flag's count parser: repeating a Boolean flag replaces the
   // previous value (the last mention wins, like value options); counting is opt-in via Count
-  given ValuedFlag[Boolean] = new ValuedFlag[Boolean]:
+  given ValuedFlag[Boolean]:
     def fromCount(n: Int)    = Ok(n > 0)
     def fromValue(s: String) = internal.Runtime.parseBool(s)
 
-  given Value[Char] = new Value[Char]:
+  given Value[Char]:
     def typeName         = "char"
     def parse(s: String) =
       if s.length == 1 then Ok(s.charAt(0)) else Err(s"'$s' is not a single character")
 
-  given Value[File] = new Value[File]:
+  given Value[File]:
     def typeName         = "file"
     def parse(s: String) = Ok(new File(s))
 
-  given Value[UUID] = new Value[UUID]:
+  given Value[UUID]:
     def typeName         = "uuid"
     def parse(s: String) =
       try Ok(UUID.fromString(s.trim))
