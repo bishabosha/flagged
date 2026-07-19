@@ -216,10 +216,21 @@ private[flagged] object Engine:
 
       val missing = mutable.ListBuffer.empty[String]
 
+      // slots of optional splices none of whose options occurred: the group parses to None, so
+      // its required options are not enforced (nested optional splices recurse)
+      def absentRanges(splices: List[Splice], base: Int): List[Range] =
+        splices.flatMap { s =>
+          val range = (base + s.offset) until (base + s.offset + s.command.arity)
+          if s.optional && !range.exists(i => occs(i).nonEmpty) then List(range)
+          else absentRanges(s.command.splices, base + s.offset)
+        }
+      val skipIdx = absentRanges(cmd.splices, 0).flatten.toSet
+
       cmd.opts.foreach { o =>
-        finishSpec(s"--${o.long}", o.mode, o.default, occs(o.index).toList) match
-          case Some(v) => values(o.index) = v
-          case None    => missing += s"--${o.long}"
+        if !skipIdx(o.index) then
+          finishSpec(s"--${o.long}", o.mode, o.default, occs(o.index).toList) match
+            case Some(v) => values(o.index) = v
+            case None    => missing += s"--${o.long}"
       }
       cmd.positionals.foreach { p =>
         finishSpec(s"<${p.name}>", p.mode, p.default, occs(p.index).toList) match
@@ -262,6 +273,6 @@ private[flagged] object Engine:
 
       if errors.nonEmpty then eval.raise(ParseError.Failure(errors.mkString("\n"), hint))
 
-      cmd.finish(values) match
+      cmd.finish(values, i => occs(i).nonEmpty) match
         case Ok(v)    => v
         case Err(msg) => eval.raise(ParseError.Failure(msg, hint))

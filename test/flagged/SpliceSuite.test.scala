@@ -97,9 +97,26 @@ class SpliceSuite extends munit.FunSuite:
     assert(e.getMessage.contains("options group 'logging'"), e.getMessage)
   }
 
-  test("Option of a spliced group is rejected at compile time") {
-    val e = compileErrors("case class Bad(logging: Option[LogOpts] = None) derives Parser.Command")
-    assert(e.contains("Option of a spliced options group"), e)
+  test("Option of a spliced group: None unless one of its options occurs") {
+    case class MaybeLogged(port: Int = 8080, logging: Option[LogOpts] = None) derives Parser.Command
+    assertEquals(ok(Flagged.parse[MaybeLogged](Seq("--port", "9000"))), MaybeLogged(9000, None))
+    assertEquals(
+      ok(Flagged.parse[MaybeLogged](Seq("-q"))),
+      MaybeLogged(logging = Some(LogOpts(quiet = true)))
+    )
+  }
+
+  test("an absent optional group skips its required options; a present one enforces them") {
+    case class Auth(user: String, token: String) derives Parser.Command
+    case class Pull(repo: String = ".", auth: Option[Auth] = None) derives Parser.Command
+    assertEquals(ok(Flagged.parse[Pull](Nil)), Pull(".", None))
+    assertEquals(
+      ok(Flagged.parse[Pull](Seq("--user", "u", "--token", "t"))),
+      Pull(".", Some(Auth("u", "t")))
+    )
+    val msg = err(Flagged.parse[Pull](Seq("--user", "u")))
+    assert(msg.contains("--token"), msg)
+    assert(!msg.contains("--user"), msg)
   }
 
   test("a spliced group with a trailing field is rejected") {

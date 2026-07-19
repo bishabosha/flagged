@@ -297,7 +297,6 @@ object Derive:
           case _: Parser.Command[?] =>
             inline if hasAnn[flagged.positional, Anns] then
               error("@positional cannot be combined with a command-shaped Parser")
-            else inline if optional then error("Option of a spliced options group is not supported")
             else inline if hasAnn[flagged.short, Anns] then
               error("@short has no effect on a spliced options group")
             else inline if hasAnn[flagged.name, Anns] then

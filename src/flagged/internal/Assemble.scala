@@ -18,7 +18,14 @@ private enum Plan:
   case Named(spec: OptSpec)
   case Positional(spec: PosSpec, kind: PosKind)
   case Commands(index: Int, optional: Boolean, default: Option[() => Any], inner: Command)
-  case Grouped(index: Int, label: String, group: Option[String], inner: Command)
+  case Grouped(
+      index: Int,
+      label: String,
+      group: Option[String],
+      optional: Boolean,
+      default: Option[() => Any],
+      inner: Command
+  )
   case Rest(spec: TrailingSpec)
 
 private enum PosKind:
@@ -207,7 +214,7 @@ object Assemble:
           bad("a spliced options group cannot contain positional fields")
         if inner.trailing.nonEmpty then
           bad("a spliced options group cannot contain a trailing field")
-        Plan.Grouped(f.index, f.label, f.group, inner)
+        Plan.Grouped(f.index, f.label, f.group, f.optional, f.default, inner)
 
       case vf: Parser.ValuedFlag[?] =>
         val fv = vf.fromValue.asInstanceOf[String => Result[Any, String]]
@@ -265,12 +272,12 @@ object Assemble:
       case Plan.Commands(index, optional, default, inner) =>
         if sub.nonEmpty then invalid("only one subcommand field is supported per command")
         sub = Some(SubGroup(index, optional, default, inner.sub.get.cases))
-      case Plan.Grouped(index, label, group, inner) =>
+      case Plan.Grouped(index, label, group, optional, default, inner) =>
         inner.opts.foreach { o =>
           names.register(o.long, o.short, from = Some(label))
           opts += o.copy(index = storage + o.index, group = o.group.orElse(group))
         }
-        splices += Splice(index, storage, inner)
+        splices += Splice(index, storage, inner, optional, default)
         storage += inner.arity
       case Plan.Rest(spec) =>
         if trailing.nonEmpty then invalid("only one trailing field is supported per command")

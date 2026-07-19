@@ -58,9 +58,16 @@ final case class SubGroup(
 
 /** An options group spliced into a parent command: the child command's option specs live re-indexed
   * in the parent (at `offset ..< offset + command.arity` of the parent's value storage), and the
-  * built child value lands in parent slot `slot`.
+  * built child value lands in parent slot `slot`. If `optional` the field is an `Option[_]`: the
+  * group is `None` unless at least one of its options occurs on the command line.
   */
-final case class Splice(slot: Int, offset: Int, command: Command)
+final case class Splice(
+    slot: Int,
+    offset: Int,
+    command: Command,
+    optional: Boolean = false,
+    default: Option[() => Any] = None
+)
 
 /** A field collecting the raw arguments after `--`, verbatim. */
 final case class TrailingSpec(
@@ -83,17 +90,27 @@ final case class Command(
     version: Option[String] = None // printed by --version and in the help header
 ):
   /** Build spliced children from their storage slices, then build this command's value; the first
-    * failing build (e.g. an `emap` validation) short-circuits.
+    * failing build (e.g. an `emap` validation) short-circuits. `occupied` reports whether the value
+    * slot at an index (relative to this command's storage) saw any command-line occurrence: an
+    * optional splice none of whose slots are occupied becomes `None` without being built.
     */
-  def finish(values: Array[Any]): Result[Any, String] =
+  def finish(values: Array[Any], occupied: Int => Boolean = _ => true): Result[Any, String] =
     def loop(remaining: List[Splice]): Result[Any, String] = remaining match
       case Nil       => build(values)
       case s :: rest =>
-        s.command.finish(values.slice(s.offset, s.offset + s.command.arity)) match
-          case Result.Ok(v) =>
-            values(s.slot) = v
-            loop(rest)
-          case err => err
+        val range = s.offset until s.offset + s.command.arity
+        if s.optional && !range.exists(occupied) then
+          values(s.slot) = s.default.map(_()).getOrElse(None)
+          loop(rest)
+        else
+          s.command.finish(
+            values.slice(s.offset, s.offset + s.command.arity),
+            i => occupied(s.offset + i)
+          ) match
+            case Result.Ok(v) =>
+              values(s.slot) = if s.optional then Some(v) else v
+              loop(rest)
+            case err => err
     loop(splices)
 
 object Command:
