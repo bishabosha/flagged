@@ -119,6 +119,28 @@ class SpliceSuite extends munit.FunSuite:
     assert(!msg.contains("--user"), msg)
   }
 
+  test("@name on a spliced group prefixes its options, allowing repeat splices") {
+    case class Endpoint(host: String = "localhost", port: Int = 80) derives Parser.Command
+    case class Proxy(
+        @name("from") src: Endpoint = Endpoint(),
+        @name("to") dst: Endpoint = Endpoint()
+    ) derives Parser.Command
+    assertEquals(
+      ok(Flagged.parse[Proxy](Seq("--from-host", "a", "--to-port", "8080"))),
+      Proxy(Endpoint(host = "a"), Endpoint(port = 8080))
+    )
+    val msg = err(Flagged.parse[Proxy](Seq("--host", "a")))
+    assert(msg.contains("unknown option '--host'"), msg)
+  }
+
+  test("a prefixed splice drops the group's short aliases") {
+    case class Verbosity(@short('v') level: Int = 0) derives Parser.Command
+    case class App2(@name("log") log: Verbosity = Verbosity()) derives Parser.Command
+    assertEquals(ok(Flagged.parse[App2](Seq("--log-level", "3"))), App2(Verbosity(3)))
+    val msg = err(Flagged.parse[App2](Seq("-v", "3")))
+    assert(msg.contains("unknown option '-v'"), msg)
+  }
+
   test("a spliced group with a trailing field is rejected") {
     // previously produced a silent null: the splice copies only the child's options,
     // so the child's trailing slot could never be filled

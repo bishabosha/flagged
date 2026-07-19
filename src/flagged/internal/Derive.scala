@@ -299,10 +299,6 @@ object Derive:
               error("@positional cannot be combined with a command-shaped Parser")
             else inline if hasAnn[flagged.short, Anns] then
               error("@short has no effect on a spliced options group")
-            else inline if hasAnn[flagged.name, Anns] then
-              error(
-                "@name has no effect on a spliced options group (its options keep their own names)"
-              )
             else inline if hasAnn[flagged.help, Anns] then
               error("@help has no effect on a spliced options group")
             else inline if hasAnn[flagged.hidden, Anns] then

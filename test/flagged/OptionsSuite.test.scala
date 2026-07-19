@@ -260,9 +260,9 @@ class OptionsSuite extends munit.FunSuite:
     )
     assert(e3.contains("@short has no effect on a subcommand field"), e3)
     val e4 = compileErrors(
-      "case class C(@name(\"g\") g: LogOpts) derives Parser.Command"
+      "case class C(@short('g') g: LogOpts = LogOpts()) derives Parser.Command"
     )
-    assert(e4.contains("@name has no effect on a spliced options group"), e4)
+    assert(e4.contains("@short has no effect on a spliced options group"), e4)
   }
 
   test("a shape-erased instance is rejected statically") {

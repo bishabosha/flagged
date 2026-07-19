@@ -21,6 +21,7 @@ private enum Plan:
   case Grouped(
       index: Int,
       label: String,
+      prefix: Option[String],
       group: Option[String],
       optional: Boolean,
       default: Option[() => Any],
@@ -36,6 +37,7 @@ private final case class Field(
     index: Int,
     label: String,
     long: String,
+    nameAnn: Option[String],
     short: Option[Char],
     help: String,
     positional: Boolean,
@@ -171,6 +173,7 @@ object Assemble:
           index = i,
           label = labels(i),
           long = anns.name.getOrElse(kebab(labels(i))),
+          nameAnn = anns.name,
           short = anns.short,
           help = anns.help.getOrElse(""),
           positional = anns.positional,
@@ -214,7 +217,7 @@ object Assemble:
           bad("a spliced options group cannot contain positional fields")
         if inner.trailing.nonEmpty then
           bad("a spliced options group cannot contain a trailing field")
-        Plan.Grouped(f.index, f.label, f.group, f.optional, f.default, inner)
+        Plan.Grouped(f.index, f.label, f.nameAnn, f.group, f.optional, f.default, inner)
 
       case vf: Parser.ValuedFlag[?] =>
         val fv = vf.fromValue.asInstanceOf[String => Result[Any, String]]
@@ -272,10 +275,19 @@ object Assemble:
       case Plan.Commands(index, optional, default, inner) =>
         if sub.nonEmpty then invalid("only one subcommand field is supported per command")
         sub = Some(SubGroup(index, optional, default, inner.sub.get.cases))
-      case Plan.Grouped(index, label, group, optional, default, inner) =>
+      case Plan.Grouped(index, label, prefix, group, optional, default, inner) =>
         inner.opts.foreach { o =>
-          names.register(o.long, o.short, from = Some(label))
-          opts += o.copy(index = storage + o.index, group = o.group.orElse(group))
+          // a prefixed splice renames its options (--net-host) and drops their short aliases,
+          // so the same group can be spliced more than once
+          val long  = prefix.fold(o.long)(pre => s"$pre-${o.long}")
+          val short = if prefix.isEmpty then o.short else None
+          names.register(long, short, from = Some(label))
+          opts += o.copy(
+            long = long,
+            short = short,
+            index = storage + o.index,
+            group = o.group.orElse(group)
+          )
         }
         splices += Splice(index, storage, inner, optional, default)
         storage += inner.arity
