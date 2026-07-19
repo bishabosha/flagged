@@ -130,6 +130,12 @@ class ParitySuite extends munit.FunSuite:
 
   // ---- mainargs parity: errors, defaults, arity ---------------------------------
 
+  test("distinct error kinds are reported in one failure (mainargs, case-app: same)") {
+    val msg = err(Flagged.parse[ParityBasic](Seq("--wrong", "--max-retries", "lol")))
+    assert(msg.contains("unknown option '--wrong'"), msg)
+    assert(msg.contains("invalid value for '--max-retries'"), msg)
+  }
+
   test("all missing required arguments are reported together, across splices (mainargs: same)") {
     val msg = err(Flagged.parse[ParityApp](Nil))
     assert(msg.contains("--url"), msg)

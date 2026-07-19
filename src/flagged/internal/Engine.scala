@@ -22,19 +22,25 @@ private enum Occ:
   *   1. *finishing* — one uniform pass interprets each spec's occurrence list according to its
   *      `Mode` (count flags, last-wins singles, combined repeats), falling back to defaults, then
   *      builds the command's value.
+  *
+  * Errors do not stop parsing: routing and finishing both record every problem they find (unknown
+  * options, missing values, invalid values, missing required arguments), and the parse fails at the
+  * end with all of them. Only `--help` and delegation to a subcommand short-circuit.
   */
 private[flagged] object Engine:
 
   def run(cmd: Command, prog: String, path: List[String], args: List[String]): ParseResult[Any] =
     Result:
-      val full                       = (prog :: path).mkString(" ")
-      def hint                       = s"Try '$full --help' for more information."
-      def fail(msg: String): Nothing = eval.raise(ParseError.Failure(msg, hint))
-      def helpNow(): Nothing         = eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path)))
+      val full                      = (prog :: path).mkString(" ")
+      def hint                      = s"Try '$full --help' for more information."
+      val errors                    = mutable.ListBuffer.empty[String]
+      def report(msg: String): Unit = errors += msg
+      def helpNow(): Nothing        = eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path)))
 
       val values     = new Array[Any](cmd.arity)
       val occs       = Array.fill(cmd.arity)(mutable.ListBuffer.empty[Occ])
       var subValue   = Option.empty[Any]
+      var subErrored = false
       var trailValue = Option.empty[Any]
       var rest       = args
       var posIdx     = 0
@@ -50,13 +56,15 @@ private[flagged] object Engine:
       def looksLikeOption(s: String): Boolean =
         s.length > 1 && s.startsWith("-") && !isNegativeNumber(s)
 
-      def takeValue(display: String): String =
+      /** `None` after reporting when the value is missing. */
+      def takeValue(display: String): Option[String] =
         rest match
           case v :: tail if !looksLikeOption(v) =>
             rest = tail
-            v
+            Some(v)
           case _ =>
-            fail(s"option '$display' requires a value")
+            report(s"option '$display' requires a value")
+            None
 
       def isFlag(spec: OptSpec): Boolean = spec.mode match
         case Mode.Flag(_, _) => true
@@ -75,14 +83,17 @@ private[flagged] object Engine:
                   .suggest(tok, g.cases.map(_.name))
                   .map(s => s" (did you mean '$s'?)")
                   .getOrElse("")
-                fail(s"unknown command '$tok'$sug")
+                report(s"unknown command '$tok'$sug")
+                subErrored = true
+                rest = Nil // the remaining tokens belong to the unknown command
           case None =>
-            if posIdx >= cmd.positionals.length then fail(s"unexpected argument '$tok'")
-            val p = cmd.positionals(posIdx)
-            occs(p.index) += Occ.Val(tok, s"<${p.name}>")
-            p.mode match
-              case Mode.Repeated(_, _) => () // keep filling the last positional
-              case _                   => posIdx += 1
+            if posIdx >= cmd.positionals.length then report(s"unexpected argument '$tok'")
+            else
+              val p = cmd.positionals(posIdx)
+              occs(p.index) += Occ.Val(tok, s"<${p.name}>")
+              p.mode match
+                case Mode.Repeated(_, _) => () // keep filling the last positional
+                case _                   => posIdx += 1
 
       // ---- phase 1: routing ---------------------------------------------------
 
@@ -100,7 +111,7 @@ private[flagged] object Engine:
               // divert everything after `--` to the trailing field, verbatim
               t.build(rest) match
                 case Ok(v)    => trailValue = Some(v)
-                case Err(msg) => fail(s"invalid arguments after '--': $msg")
+                case Err(msg) => report(s"invalid arguments after '--': $msg")
               rest = Nil
             case None => noMoreOpts = true
         else if tok.startsWith("--") then
@@ -115,24 +126,24 @@ private[flagged] object Engine:
                 .suggest(nm, cmd.opts.map(_.long) :+ "help")
                 .map(s => s" (did you mean '--$s'?)")
                 .getOrElse("")
-              fail(s"unknown option '--$nm'$sug")
+              report(s"unknown option '--$nm'$sug")
             case Some(spec) =>
-              occs(spec.index) += {
-                inlineValue match
-                  case Some(v)              => Occ.Val(v, s"--$nm")
-                  case None if isFlag(spec) => Occ.Bare
-                  case None                 => Occ.Val(takeValue(s"--$nm"), s"--$nm")
-              }
+              inlineValue match
+                case Some(v)              => occs(spec.index) += Occ.Val(v, s"--$nm")
+                case None if isFlag(spec) => occs(spec.index) += Occ.Bare
+                case None                 =>
+                  takeValue(s"--$nm").foreach(v => occs(spec.index) += Occ.Val(v, s"--$nm"))
         else
           // short option cluster: -v, -abc, -o value, -ovalue, -o=value
-          var i             = 1
-          var consumedValue = false
-          while i < tok.length && !consumedValue do
+          var i    = 1
+          var stop = false
+          while i < tok.length && !stop do
             val c = tok(i)
             if c == 'h' && shortOf('h').isEmpty then helpNow()
             shortOf(c) match
               case None =>
-                fail(s"unknown option '-$c'")
+                report(s"unknown option '-$c'")
+                stop = true // the rest of the cluster is unintelligible
               case Some(spec) if isFlag(spec) =>
                 occs(spec.index) += Occ.Bare
                 i += 1
@@ -140,16 +151,21 @@ private[flagged] object Engine:
                 val attached = tok.drop(i + 1)
                 val raw      =
                   if attached.nonEmpty then
-                    if attached.startsWith("=") then attached.drop(1) else attached
+                    Some(if attached.startsWith("=") then attached.drop(1) else attached)
                   else takeValue(s"-$c")
-                occs(spec.index) += Occ.Val(raw, s"-$c")
-                consumedValue = true
+                raw.foreach(v => occs(spec.index) += Occ.Val(v, s"-$c"))
+                stop = true
 
       // ---- phase 2: finishing ---------------------------------------------------
 
-      def orFail[A](display: String)(r: Result[A, String]): A = r match
+      /** Report an invalid value; the placeholder result is never built into a value because a
+        * reported error fails the parse before `finish`.
+        */
+      def orReport[A](display: String)(r: Result[A, String]): Any = r match
         case Ok(v)    => v
-        case Err(msg) => fail(s"invalid value for '$display': $msg")
+        case Err(msg) =>
+          report(s"invalid value for '$display': $msg")
+          null
 
       /** Interpret one spec's occurrences; `None` means a required value is missing. */
       def finishSpec(
@@ -163,23 +179,25 @@ private[flagged] object Engine:
             occurrences.collect { case v: Occ.Val => v }.lastOption match
               case Some(v) =>
                 fromValue match
-                  case Some(f) => Some(orFail(v.display)(f(v.raw)))
-                  case None    => fail(s"flag '${v.display}' does not take a value")
+                  case Some(f) => Some(orReport(v.display)(f(v.raw)))
+                  case None    =>
+                    report(s"flag '${v.display}' does not take a value")
+                    Some(null)
               case None if occurrences.nonEmpty =>
-                Some(orFail(display)(fromCount(occurrences.length)))
+                Some(orReport(display)(fromCount(occurrences.length)))
               case None =>
-                Some(default.map(_()).getOrElse(orFail(display)(fromCount(0))))
+                Some(default.map(_()).getOrElse(orReport(display)(fromCount(0))))
           case Mode.Single(read, optional) =>
             occurrences.lastOption match
               case Some(Occ.Val(raw, disp)) =>
-                val v = orFail(disp)(read(raw))
+                val v = orReport(disp)(read(raw))
                 Some(if optional then Some(v) else v)
               case _ =>
                 default.map(d => Some(d())).getOrElse(if optional then Some(None) else None)
           case Mode.Repeated(read, fromList) =>
-            val vals = occurrences.collect { case Occ.Val(raw, disp) => orFail(disp)(read(raw)) }
-            if vals.nonEmpty then Some(orFail(display)(fromList(vals)))
-            else default.map(d => Some(d())).getOrElse(Some(orFail(display)(fromList(Nil))))
+            val vals = occurrences.collect { case Occ.Val(raw, disp) => orReport(disp)(read(raw)) }
+            if vals.nonEmpty then Some(orReport(display)(fromList(vals)))
+            else default.map(d => Some(d())).getOrElse(Some(orReport(display)(fromList(Nil))))
 
       val missing = mutable.ListBuffer.empty[String]
 
@@ -195,7 +213,7 @@ private[flagged] object Engine:
       }
       if missing.nonEmpty then
         val what = if missing.sizeIs == 1 then "argument" else "arguments"
-        fail(s"missing required $what: ${missing.mkString(", ")}")
+        report(s"missing required $what: ${missing.mkString(", ")}")
 
       cmd.trailing.foreach { t =>
         values(t.index) = trailValue match
@@ -206,7 +224,9 @@ private[flagged] object Engine:
               else
                 t.build(Nil) match
                   case Ok(v)    => v
-                  case Err(msg) => fail(s"missing arguments after '--': $msg")
+                  case Err(msg) =>
+                    report(s"missing arguments after '--': $msg")
+                    null
             }
       }
 
@@ -216,10 +236,17 @@ private[flagged] object Engine:
           case None    =>
             g.default.map(_()).getOrElse {
               if g.optional then None
-              else fail(s"missing command (expected one of: ${g.cases.map(_.name).mkString(", ")})")
+              else
+                if !subErrored then
+                  report(
+                    s"missing command (expected one of: ${g.cases.map(_.name).mkString(", ")})"
+                  )
+                null
             }
       }
 
+      if errors.nonEmpty then eval.raise(ParseError.Failure(errors.mkString("\n"), hint))
+
       cmd.finish(values) match
         case Ok(v)    => v
-        case Err(msg) => fail(msg)
+        case Err(msg) => eval.raise(ParseError.Failure(msg, hint))
