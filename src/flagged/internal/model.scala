@@ -35,7 +35,8 @@ final case class OptSpec(
     mode: Mode,
     default: Option[() => Any],
     hidden: Boolean = false,
-    group: Option[String] = None
+    group: Option[String] = None,
+    aliases: List[String] = Nil
 )
 
 final case class PosSpec(
@@ -47,7 +48,13 @@ final case class PosSpec(
     default: Option[() => Any]
 )
 
-final case class SubCase(name: String, help: String, command: Command, hidden: Boolean = false)
+final case class SubCase(
+    name: String,
+    help: String,
+    command: Command,
+    hidden: Boolean = false,
+    aliases: List[String] = Nil
+)
 
 final case class SubGroup(
     index: Int,

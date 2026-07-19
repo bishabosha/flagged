@@ -43,6 +43,7 @@ private final case class Field(
     positional: Boolean,
     hidden: Boolean,
     group: Option[String],
+    aliases: List[String],
     optional: Boolean,
     default: Option[() => Any],
     parser: Parser[?]
@@ -141,7 +142,7 @@ object Assemble:
       val cmd  = e match
         case SubEntry.Leaf(v) => Command.leaf(v, help)
         case SubEntry.Node(p) => p().command
-      SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden)
+      SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden, anns.aliases)
     }
     Command(
       annots.onType.help.getOrElse(""),
@@ -179,6 +180,7 @@ object Assemble:
           positional = anns.positional,
           hidden = anns.hidden,
           group = anns.group,
+          aliases = anns.aliases,
           optional = opt,
           default =
             if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None,
@@ -202,7 +204,18 @@ object Assemble:
     def named(metavar: String, mode: Mode): Plan =
       if f.long == "help" then bad("option name 'help' is reserved")
       Plan.Named(
-        OptSpec(f.long, f.short, f.help, metavar, f.index, mode, f.default, f.hidden, f.group)
+        OptSpec(
+          f.long,
+          f.short,
+          f.help,
+          metavar,
+          f.index,
+          mode,
+          f.default,
+          f.hidden,
+          f.group,
+          f.aliases
+        )
       )
     def positional(metavar: String, mode: Mode, kind: PosKind): Plan =
       Plan.Positional(PosSpec(f.long, f.help, metavar, f.index, mode, f.default), kind)
@@ -268,6 +281,7 @@ object Assemble:
     plans.foreach {
       case Plan.Named(spec) =>
         names.register(spec.long, spec.short, from = None)
+        spec.aliases.foreach(a => names.register(a, None, from = None))
         opts += spec
       case Plan.Positional(spec, kind) =>
         posKinds += ((spec.name, kind))
@@ -279,14 +293,17 @@ object Assemble:
         inner.opts.foreach { o =>
           // a prefixed splice renames its options (--net-host) and drops their short aliases,
           // so the same group can be spliced more than once
-          val long  = prefix.fold(o.long)(pre => s"$pre-${o.long}")
-          val short = if prefix.isEmpty then o.short else None
+          val long    = prefix.fold(o.long)(pre => s"$pre-${o.long}")
+          val short   = if prefix.isEmpty then o.short else None
+          val aliases = o.aliases.map(a => prefix.fold(a)(pre => s"$pre-$a"))
           names.register(long, short, from = Some(label))
+          aliases.foreach(a => names.register(a, None, from = Some(label)))
           opts += o.copy(
             long = long,
             short = short,
             index = storage + o.index,
-            group = o.group.orElse(group)
+            group = o.group.orElse(group),
+            aliases = aliases
           )
         }
         splices += Splice(index, storage, inner, optional, default)

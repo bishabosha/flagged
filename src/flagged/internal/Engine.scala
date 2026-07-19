@@ -46,7 +46,7 @@ private[flagged] object Engine:
       var posIdx     = 0
       var noMoreOpts = false
 
-      def longOf(n: String) = cmd.opts.find(_.long == n)
+      def longOf(n: String) = cmd.opts.find(o => o.long == n || o.aliases.contains(n))
       def shortOf(c: Char)  = cmd.opts.find(_.short.contains(c))
 
       def isNegativeNumber(s: String): Boolean =
@@ -73,14 +73,14 @@ private[flagged] object Engine:
       def handleFree(tok: String): Unit =
         cmd.sub match
           case Some(g) =>
-            g.cases.find(_.name == tok) match
+            g.cases.find(c => c.name == tok || c.aliases.contains(tok)) match
               case Some(sc) =>
                 // .ok propagates the subcommand's Help/Failure to our caller unchanged
                 subValue = Some(run(sc.command, prog, path :+ sc.name, rest).ok)
                 rest = Nil
               case None =>
                 val sug = Runtime
-                  .suggest(tok, g.cases.filterNot(_.hidden).map(_.name))
+                  .suggest(tok, g.cases.filterNot(_.hidden).flatMap(c => c.name :: c.aliases))
                   .map(s => s" (did you mean '$s'?)")
                   .getOrElse("")
                 report(s"unknown command '$tok'$sug")
@@ -126,7 +126,10 @@ private[flagged] object Engine:
               eval.raise(ParseError.Help(cmd.version.get))
             case None =>
               val sug = Runtime
-                .suggest(nm, cmd.opts.filterNot(_.hidden).map(_.long) :+ "help")
+                .suggest(
+                  nm,
+                  cmd.opts.filterNot(_.hidden).flatMap(o => o.long :: o.aliases) :+ "help"
+                )
                 .map(s => s" (did you mean '--$s'?)")
                 .getOrElse("")
               report(s"unknown option '--$nm'$sug")

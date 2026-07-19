@@ -342,11 +342,12 @@ object Derive:
     case _ *: t                           => ShortIn[t]
     case EmptyTuple                       => Nothing
 
-  /** The long name the field claims when written as a constant (`@name`); `Nothing` for
-    * label-derived names, which involve kebab-casing and are checked at construction instead.
+  /** The union of long names the field claims as constants (`@name` is repeatable: the first is the
+    * primary name, the rest aliases); `Nothing` for label-derived names, which involve kebab-casing
+    * and are checked at construction instead.
     */
   type EffLong[Anns, L] = Anns match
-    case Ann[flagged.name, args, ?] *: _ => Tuple.Head[args & NonEmptyTuple]
+    case Ann[flagged.name, args, ?] *: t => Tuple.Head[args & NonEmptyTuple] | EffLong[t, L]
     case _ *: t                          => EffLong[t, L]
     case EmptyTuple                      => Nothing
 
@@ -357,12 +358,17 @@ object Derive:
         case _         => ()
     else ()
 
+  /** Test each constant `@name` (primary and aliases) against the claimed-name union: a union
+    * scrutinee would only flag when *all* members collide.
+    */
   inline def checkNewLong[Anns, L, Longs]: Unit =
-    inline if hasAnn[flagged.name, Anns] then
-      inline erasedValue[EffLong[Anns, L]] match
-        case _: Longs => error("duplicate option name")
-        case _        => ()
-    else ()
+    inline erasedValue[Anns] match
+      case _: EmptyTuple                        => ()
+      case _: (Ann[flagged.name, args, ?] *: t) =>
+        inline erasedValue[Tuple.Head[args & NonEmptyTuple]] match
+          case _: Longs => error("duplicate option name")
+          case _        => checkNewLong[t, L, Longs]
+      case _: (_ *: t) => checkNewLong[t, L, Longs]
 
   /** Whether annotation slot `Anns` contains an `A` — a compile-time constant. */
   transparent inline def hasAnn[A <: scala.annotation.Annotation, Anns]: Boolean =

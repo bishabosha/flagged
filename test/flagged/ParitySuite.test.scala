@@ -99,6 +99,13 @@ case class ParityVersioned(
     input: String = ""
 ) derives Parser.Command
 
+case class ParityAliased(
+    @name("color") @name("colour") color: Boolean = false
+) derives Parser.Command
+
+enum ParityVcs derives Parser.CommandGroup:
+  @name("checkout") @name("co") case Checkout(branch: String = "main")
+
 case class ParityNet(
     @group("Network") host: String = "localhost",
     @group("Network") port: Int = 80,
@@ -305,6 +312,32 @@ class ParitySuite extends munit.FunSuite:
       "case class C(@version(\"1.0\") x: Int = 0) derives Parser.Command"
     )
     assert(e.contains("@version has no effect on a field"), e)
+  }
+
+  test("repeated @name adds option aliases (case-app stacked @Name: same)") {
+    assertEquals(ok(Flagged.parse[ParityAliased](Seq("--color"))), ParityAliased(true))
+    assertEquals(ok(Flagged.parse[ParityAliased](Seq("--colour"))), ParityAliased(true))
+    val help = Flagged.help[ParityAliased]
+    assert(help.contains("--color"), help)
+    assert(help.contains("alias: --colour"), help)
+  }
+
+  test("repeated @name on an enum case adds command aliases (case-app names: same)") {
+    assertEquals(
+      ok(Flagged.parse[ParityVcs](Seq("co", "--branch", "dev"))),
+      ParityVcs.Checkout("dev")
+    )
+    assertEquals(
+      ok(Flagged.parse[ParityVcs](Seq("checkout"))),
+      ParityVcs.Checkout("main")
+    )
+  }
+
+  test("an alias colliding with a constant name is a compile error") {
+    val e = compileErrors(
+      "case class C(@name(\"x\") a: Int = 0, @name(\"y\") @name(\"x\") b: Int = 0) derives Parser.Command"
+    )
+    assert(e.contains("duplicate option name"), e)
   }
 
   test("@group renders options under titled sections (case-app @Group: same)") {

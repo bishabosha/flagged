@@ -11,7 +11,8 @@ final case class TargetAnnots(
     name: Option[String],
     help: Option[String],
     hidden: Boolean = false,
-    version: Option[String] = None
+    version: Option[String] = None,
+    aliases: List[String] = Nil
 )
 
 object TargetAnnots:
@@ -24,7 +25,8 @@ final case class FieldAnnots(
     help: Option[String],
     positional: Boolean,
     hidden: Boolean = false,
-    group: Option[String] = None
+    group: Option[String] = None,
+    aliases: List[String] = Nil
 )
 
 object FieldAnnots:
@@ -69,21 +71,25 @@ object Annots:
         )
 
   inline def targetAnnotsOf[Anns]: TargetAnnots =
+    val names = AnnotMirror.findAll[flagged.name, Anns].map(_.value)
     TargetAnnots(
-      AnnotMirror.find[flagged.name, Anns].map(_.value),
+      names.headOption,
       AnnotMirror.find[flagged.help, Anns].map(_.value),
       AnnotMirror.find[flagged.hidden, Anns].isDefined,
-      AnnotMirror.find[flagged.version, Anns].map(_.value)
+      AnnotMirror.find[flagged.version, Anns].map(_.value),
+      names.drop(1)
     )
 
   inline def fieldAnnotsOf[Anns]: FieldAnnots =
+    val names = AnnotMirror.findAll[flagged.name, Anns].map(_.value)
     FieldAnnots(
-      AnnotMirror.find[flagged.name, Anns].map(_.value),
+      names.headOption,
       AnnotMirror.find[flagged.short, Anns].map(_.value),
       AnnotMirror.find[flagged.help, Anns].map(_.value),
       AnnotMirror.find[flagged.positional, Anns].isDefined,
       AnnotMirror.find[flagged.hidden, Anns].isDefined,
-      AnnotMirror.find[flagged.group, Anns].map(_.value)
+      AnnotMirror.find[flagged.group, Anns].map(_.value),
+      names.drop(1)
     )
 
   // both walks halve the slot tuple (inline depth O(log n), matching Derive.walk) — annotation

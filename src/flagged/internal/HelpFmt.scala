@@ -110,10 +110,14 @@ private[flagged] object HelpFmt:
     val repeatable = o.mode match
       case Mode.Repeated(_, _) => true
       case _                   => false
+    val alias = Option.when(o.aliases.nonEmpty)(
+      s"alias: ${o.aliases.map("--" + _).mkString(", ")}"
+    )
     List(
       dflt,
       Option.when(required)("required"),
-      Option.when(repeatable)("repeatable")
+      Option.when(repeatable)("repeatable"),
+      alias
     ).flatten
 
   private def posExtras(p: PosSpec): List[String] =
