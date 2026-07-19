@@ -157,7 +157,7 @@ class ParitySuite extends munit.FunSuite:
 
   test("more than 22 fields derive and parse (mainargs: supported since 0.6.3)") {
     assertEquals(ok(Flagged.parse[ParityWide](Nil)), ParityWide())
-    assertEquals(ok(Flagged.parse[ParityWide](Seq("--f23", "99"))), ParityWide(f23 = 99))
+    assertEquals(ok(Flagged.parse[ParityWide](Seq("--f-23", "99"))), ParityWide(f23 = 99))
   }
 
   test("a typed repeated positional reports the offending element (mainargs Leftover[Int]: same)") {
@@ -232,12 +232,12 @@ class ParitySuite extends munit.FunSuite:
     assertEquals(ok(Flagged.parse[ParitySeqField](Nil)), ParitySeqField(Nil))
   }
 
-  test("kebab-casing does not split at digit boundaries (mainargs: opt-for-29-name)") {
+  test("kebab-casing splits at digit boundaries (mainargs: same)") {
     assertEquals(
-      ok(Flagged.parse[ParityDigits](Seq("--opt-for29-name", "5"))),
+      ok(Flagged.parse[ParityDigits](Seq("--opt-for-29-name", "5"))),
       ParityDigits(5)
     )
-    val msg = err(Flagged.parse[ParityDigits](Seq("--opt-for-29-name", "5")))
+    val msg = err(Flagged.parse[ParityDigits](Seq("--opt-for29-name", "5")))
     assert(msg.contains("unknown option"), msg)
   }
 

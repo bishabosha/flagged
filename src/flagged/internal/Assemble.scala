@@ -50,10 +50,14 @@ object Assemble:
   def kebab(s: String): String =
     val b = new StringBuilder
     s.zipWithIndex.foreach { (c, i) =>
-      if c.isUpper then
-        if i > 0 && !s(i - 1).isUpper then b += '-'
-        b += c.toLower
-      else b += c
+      // word boundaries: before an upper after non-upper, and at both edges of a digit run
+      val prev     = if i > 0 then Some(s(i - 1)) else None
+      val boundary =
+        (c.isUpper && prev.exists(!_.isUpper)) ||
+          (c.isDigit && prev.exists(p => !p.isDigit)) ||
+          (c.isLetter && prev.exists(_.isDigit))
+      if boundary && prev.exists(_ != '-') then b += '-'
+      b += c.toLower
     }
     b.result()
 
