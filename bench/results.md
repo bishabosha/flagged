@@ -4,7 +4,7 @@ Produced by the suites in this directory (see `README.md` for methodology and ca
 are JMH averages ± 99.9% confidence intervals, one forked JVM, 5 warmup + 5 measurement
 iterations.
 
-- Date: 2026-07-19, flagged commit `7bb26e7`
+- Date: 2026-07-19, flagged commit `4680453`
 - Hardware: Apple M3 Max, 64 GB, macOS 26.5.1
 - JVM: Temurin OpenJDK 25.0.2, Scala 3.8.3, JMH 1.37
 - Library versions: mainargs 0.7.8, case-app 2.1.0
@@ -33,17 +33,17 @@ optimization rounds — per-field expansion collapse, then bottom-up mergeable w
 
 | n fields | flagged | flagged@ | mainargs |
 |---|---|---|---|
-| 4 | 126 | 127 | 221 |
-| 8 | 122 | 133 | 236 |
-| 16 | 119 | 152 | 232 |
-| 32 | 155 | 203 | 252 |
-| 64 | 210 | 300 | 273 |
-| 128 | 337 | 571 | 289 |
+| 4 | 120 | 122 | 233 |
+| 8 | 119 | 125 | 231 |
+| 16 | 124 | 148 | 236 |
+| 32 | 152 | 185 | 241 |
+| 64 | 191 | 285 | 250 |
+| 128 | 324 | 556 | 305 |
 
 Marginal cost is roughly 2 ms per unannotated field (~3.5 ms with half the fields annotated)
 and approximately constant across the range — compile time grows linearly with field count,
 with a no-derivation floor around 118 ms for the 128-field file. flagged is faster than
-mainargs up to and including 64 fields and within ~17% at 128. A 64-field annotated class
+mainargs up to and including 64 fields and within ~6% at 128. A 64-field annotated class
 compiles at the default `-Xmax-inlines`. A JFR profile of the looped driver
 (`bench.ProfileProbe`) shows no single hotspot — implicit search and match-type reduction are
 negligible — and `bench.AblationProbe` breaks derivation cost down by component.
