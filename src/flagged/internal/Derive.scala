@@ -114,35 +114,27 @@ object Derive:
   inline def plainRes(fields: List[(Parser[?], Boolean, FieldAnnots)]) =
     resOf[0, EmptyTuple, EmptyTuple](fields)
 
-  transparent inline def isZero[M <: Int]: Boolean =
+  inline def isZero[M <: Int]: Boolean =
     inline erasedValue[M] match
       case _: 0 => true
       case _    => false
 
-  transparent inline def hasBit[M <: Int, B <: Int]: Boolean =
+  inline def hasBit[M <: Int, B <: Int]: Boolean =
     inline erasedValue[BitwiseAnd[M, B]] match
       case _: 0 => false
       case _    => true
 
   type HalfN[T <: Tuple] = Tuple.Size[T] / 2
 
-  /** Read a type-level boolean via type-test rather than `constValue`: refined members behind
-    * inferred type parameters reduce here where `constValue` cannot.
-    */
-  transparent inline def isTrue[B <: Boolean]: Boolean =
-    inline erasedValue[B] match
-      case _: true  => true
-      case _: false => false
-
   /** Whether the field's annotation slot is empty — the common case; lets every per-field
     * annotation check and name collection collapse to nothing.
     */
-  transparent inline def noAnns[Anns]: Boolean =
+  inline def noAnns[Anns]: Boolean =
     inline erasedValue[Anns] match
       case _: EmptyTuple => true
       case _             => false
 
-  transparent inline def walk[Types <: Tuple, Slots <: Tuple]: FieldsRes =
+  private transparent inline def walk[Types <: Tuple, Slots <: Tuple]: FieldsRes =
     inline erasedValue[Types] match
       case _: EmptyTuple         => plainRes(Nil)
       case _: (f1 *: EmptyTuple) =>
@@ -168,7 +160,7 @@ object Derive:
   /** Combine two subtree summaries: all cross-field rules are checked where the subtrees meet (each
     * rule involves two fields, one in each half at exactly one merge).
     */
-  transparent inline def merge[L <: FieldsRes, R <: FieldsRes](l: L, r: R): FieldsRes =
+  private transparent inline def merge[L <: FieldsRes, R <: FieldsRes](l: L, r: R): FieldsRes =
     inline if isZero[BitwiseOr[l.Marks, r.Marks]] then () // one gate: reduction is reused below
     else crossChecks(l, r)
     resOf[
@@ -181,7 +173,7 @@ object Derive:
     * special delegates to nested pairwise merges (identical semantics: the summary is associative
     * and every check is pairwise).
     */
-  transparent inline def merge4[
+  private transparent inline def merge4[
       A <: FieldsRes,
       B <: FieldsRes,
       C <: FieldsRes,
@@ -196,7 +188,7 @@ object Derive:
   /** Only expanded when both sides contain a special shape (a dropped inline-if branch never
     * expands): each cross-field rule involves two fields, one in each half at exactly one merge.
     */
-  transparent inline def crossChecks[L <: FieldsRes, R <: FieldsRes](l: L, r: R): Unit =
+  private transparent inline def crossChecks[L <: FieldsRes, R <: FieldsRes](l: L, r: R): Unit =
     inline if hasBit[l.Marks, NamesBit.type] then
       inline if hasBit[r.Marks, NamesBit.type] then
         checkDisjointShorts[l.Shorts, r.Shorts]
@@ -239,7 +231,7 @@ object Derive:
     * and dispatch on the instance's statically known shape. The field's extracted [[FieldAnnots]]
     * ride along in the value, so no separate annotation walk is needed.
     */
-  transparent inline def fieldRes[F, Anns]: FieldsRes =
+  private transparent inline def fieldRes[F, Anns]: FieldsRes =
     inline if noAnns[Anns] then () // nothing to check, and none of the cascades below expand
     else
       inline if hasAnnApplied[Ann[flagged.short, 'h' *: EmptyTuple, ?], Anns] then
@@ -339,7 +331,7 @@ object Derive:
         plainRes(List((summonInline[Parser[Unwrap[F]]], constValue[IsOpt[F]], FieldAnnots.empty)))
 
   /** A field that surely becomes a named option: claim its constant names (if not positional). */
-  transparent inline def namedRes[Anns](p: Parser[?], inline optional: Boolean): FieldsRes =
+  private transparent inline def namedRes[Anns](p: Parser[?], inline optional: Boolean): FieldsRes =
     inline if noAnns[Anns] then plainRes(List((p, optional, FieldAnnots.empty)))
     else inline if hasAnn[flagged.positional, Anns] then
       resOf[4, EmptyTuple, EmptyTuple](List((p, optional, Annots.fieldAnnotsOf[Anns]))) // pos
@@ -387,7 +379,7 @@ object Derive:
               case _           => checkDisjointLongs[A, t]
 
   /** Whether annotation slot `Anns` contains an `A` — a compile-time constant. */
-  transparent inline def hasAnn[A <: scala.annotation.Annotation, Anns]: Boolean =
+  inline def hasAnn[A <: scala.annotation.Annotation, Anns]: Boolean =
     inline erasedValue[Anns] match
       case _: EmptyTuple          => false
       case _: (Ann[A, ?, ?] *: _) => true
@@ -396,7 +388,7 @@ object Derive:
   /** Whether the slot contains a specific annotation *application*, e.g. `@short('h')` — decidable
     * because `Ann` is invariant with constant arguments.
     */
-  transparent inline def hasAnnApplied[Applied, Anns]: Boolean =
+  inline def hasAnnApplied[Applied, Anns]: Boolean =
     inline erasedValue[Anns] match
       case _: EmptyTuple     => false
       case _: (Applied *: _) => true
