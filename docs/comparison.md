@@ -4,7 +4,8 @@ Feature comparison against the two most-used Scala CLI parsing libraries, based 
 documentation and test suites (mainargs 0.7.7–0.7.8 readme and `mainargs/test`; case-app 2.x docs at
 alexarchambault.github.io/case-app and `tests/`). Behaviors that overlap are pinned down in
 `test/flagged/ParitySuite.test.scala`; each test names the library whose documented behavior it was
-checked against.
+checked against. JMH benchmarks comparing derivation compile time and parse latency/allocation
+across the three libraries live in `bench/` (see `bench/README.md`).
 
 ## Feature matrix
 
