@@ -12,7 +12,8 @@ final case class TargetAnnots(
     help: Option[String],
     hidden: Boolean = false,
     version: Option[String] = None,
-    aliases: List[String] = Nil
+    aliases: List[String] = Nil,
+    default: Boolean = false
 )
 
 object TargetAnnots:
@@ -77,7 +78,8 @@ object Annots:
       AnnotMirror.find[flagged.help, Anns].map(_.value),
       AnnotMirror.find[flagged.hidden, Anns].isDefined,
       AnnotMirror.find[flagged.version, Anns].map(_.value),
-      names.drop(1)
+      names.drop(1),
+      AnnotMirror.find[flagged.default, Anns].isDefined
     )
 
   inline def fieldAnnotsOf[Anns]: FieldAnnots =

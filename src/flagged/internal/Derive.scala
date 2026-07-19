@@ -207,6 +207,9 @@ object Derive:
     inline if hasAnn[flagged.version, Anns] then
       error("@version has no effect on a field (put it on the top-level type)")
     else ()
+    inline if hasAnn[flagged.default, Anns] then
+      error("@default has no effect on a field (put it on a command-group enum case)")
+    else ()
     inline if hasAnn[flagged.positional, Anns] then
       inline if hasAnn[flagged.hidden, Anns] then
         error("@hidden cannot be combined with @positional")

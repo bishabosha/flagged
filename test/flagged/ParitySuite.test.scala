@@ -106,6 +106,10 @@ case class ParityAliased(
 enum ParityVcs derives Parser.CommandGroup:
   @name("checkout") @name("co") case Checkout(branch: String = "main")
 
+enum ParityGit derives Parser.CommandGroup:
+  @default case Status(@short('s') short: Boolean = false)
+  case Push(remote: String = "origin")
+
 case class ParityNet(
     @group("Network") host: String = "localhost",
     @group("Network") port: Int = 80,
@@ -338,6 +342,21 @@ class ParitySuite extends munit.FunSuite:
       "case class C(@name(\"x\") a: Int = 0, @name(\"y\") @name(\"x\") b: Int = 0) derives Parser.Command"
     )
     assert(e.contains("duplicate option name"), e)
+  }
+
+  test("@default command runs when no command is given, with args forwarded (case-app: same)") {
+    assertEquals(ok(Flagged.parse[ParityGit](Nil)), ParityGit.Status())
+    assertEquals(ok(Flagged.parse[ParityGit](Seq("--short"))), ParityGit.Status(true))
+    assertEquals(ok(Flagged.parse[ParityGit](Seq("-s"))), ParityGit.Status(true))
+    assertEquals(ok(Flagged.parse[ParityGit](Seq("push"))), ParityGit.Push())
+    val help = Flagged.help[ParityGit]
+    assert(help.contains("(default)"), help)
+    assert(help.contains("[<command>]"), help)
+  }
+
+  test("@default on a field is a compile error") {
+    val e = compileErrors("case class C(@default x: Int = 0) derives Parser.Command")
+    assert(e.contains("@default has no effect on a field"), e)
   }
 
   test("@group renders options under titled sections (case-app @Group: same)") {

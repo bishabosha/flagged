@@ -36,3 +36,8 @@ final case class version(value: String) extends StaticAnnotation derives Default
   * group field, titles all of the group's options that have no group of their own.
   */
 final case class group(value: String) extends StaticAnnotation derives Defaults
+
+/** Mark one case of a command-group enum as the default command: selected when no command token is
+  * given, with the remaining arguments forwarded to it.
+  */
+final case class default() extends StaticAnnotation derives Defaults

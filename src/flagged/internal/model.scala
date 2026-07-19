@@ -60,7 +60,8 @@ final case class SubGroup(
     index: Int,
     optional: Boolean,
     default: Option[() => Any],
-    cases: Vector[SubCase]
+    cases: Vector[SubCase],
+    defaultCase: Option[SubCase] = None // @default: run when no command token is given
 )
 
 /** An options group spliced into a parent command: the child command's option specs live re-indexed

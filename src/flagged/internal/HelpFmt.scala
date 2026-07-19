@@ -22,7 +22,10 @@ private[flagged] object HelpFmt:
 
     cmd.sub.foreach { g =>
       b ++= "\nCommands:\n"
-      b ++= table(g.cases.filterNot(_.hidden).map(c => c.name -> c.help))
+      b ++= table(g.cases.filterNot(_.hidden).map { c =>
+        val marker = if g.defaultCase.exists(_.name == c.name) then " (default)" else ""
+        c.name -> s"${c.help}$marker".stripLeading()
+      })
       b += '\n'
     }
 
@@ -76,7 +79,10 @@ private[flagged] object HelpFmt:
         case _                     => parts += s"[<${p.name}>]"
     }
     cmd.sub.foreach { g =>
-      parts += (if g.optional || g.default.nonEmpty then "[<command>]" else "<command>")
+      parts += (
+        if g.optional || g.default.nonEmpty || g.defaultCase.nonEmpty then "[<command>]"
+        else "<command>"
+      )
     }
     cmd.trailing.foreach { _ => parts += "[-- <args>]" }
     parts.result().mkString(" ")

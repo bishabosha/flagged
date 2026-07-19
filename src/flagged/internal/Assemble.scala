@@ -144,11 +144,14 @@ object Assemble:
         case SubEntry.Node(p) => p().command
       SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden, anns.aliases)
     }
+    val defaultIdxs = annots.perCase.zipWithIndex.collect { case (a, i) if a.default => i }
+    if defaultIdxs.sizeIs > 1 then invalid("only one @default command is supported")
+    val defaultCase = defaultIdxs.headOption.map(cases(_))
     Command(
       annots.onType.help.getOrElse(""),
       Vector.empty,
       Vector.empty,
-      Some(SubGroup(0, false, None, cases.toVector)),
+      Some(SubGroup(0, false, None, cases.toVector, defaultCase)),
       None,
       Nil,
       arr => Result.Ok(arr(0)),
@@ -288,7 +291,8 @@ object Assemble:
         poss += spec
       case Plan.Commands(index, optional, default, inner) =>
         if sub.nonEmpty then invalid("only one subcommand field is supported per command")
-        sub = Some(SubGroup(index, optional, default, inner.sub.get.cases))
+        sub =
+          Some(SubGroup(index, optional, default, inner.sub.get.cases, inner.sub.get.defaultCase))
       case Plan.Grouped(index, label, prefix, group, optional, default, inner) =>
         inner.opts.foreach { o =>
           // a prefixed splice renames its options (--net-host) and drops their short aliases,

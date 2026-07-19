@@ -70,22 +70,31 @@ private[flagged] object Engine:
         case Mode.Flag(_, _, _) => true
         case _                  => false
 
+      /** With a `@default` command and no own options, unrecognized tokens are its arguments. */
+      def defaultSub: Option[SubCase] =
+        if cmd.opts.isEmpty then cmd.sub.flatMap(_.defaultCase) else None
+
+      def runSub(sc: SubCase, args: List[String]): Unit =
+        // .ok propagates the subcommand's Help/Failure to our caller unchanged
+        subValue = Some(run(sc.command, prog, path :+ sc.name, args).ok)
+        rest = Nil
+
       def handleFree(tok: String): Unit =
         cmd.sub match
           case Some(g) =>
             g.cases.find(c => c.name == tok || c.aliases.contains(tok)) match
-              case Some(sc) =>
-                // .ok propagates the subcommand's Help/Failure to our caller unchanged
-                subValue = Some(run(sc.command, prog, path :+ sc.name, rest).ok)
-                rest = Nil
-              case None =>
-                val sug = Runtime
-                  .suggest(tok, g.cases.filterNot(_.hidden).flatMap(c => c.name :: c.aliases))
-                  .map(s => s" (did you mean '$s'?)")
-                  .getOrElse("")
-                report(s"unknown command '$tok'$sug")
-                subErrored = true
-                rest = Nil // the remaining tokens belong to the unknown command
+              case Some(sc) => runSub(sc, rest)
+              case None     =>
+                defaultSub match
+                  case Some(dc) => runSub(dc, tok :: rest)
+                  case None     =>
+                    val sug = Runtime
+                      .suggest(tok, g.cases.filterNot(_.hidden).flatMap(c => c.name :: c.aliases))
+                      .map(s => s" (did you mean '$s'?)")
+                      .getOrElse("")
+                    report(s"unknown command '$tok'$sug")
+                    subErrored = true
+                    rest = Nil // the remaining tokens belong to the unknown command
           case None =>
             if posIdx >= cmd.positionals.length then report(s"unexpected argument '$tok'")
             else
@@ -124,6 +133,8 @@ private[flagged] object Engine:
             case None if nm == "version" && cmd.version.nonEmpty =>
               // a user option named `version` takes precedence (longOf matched above)
               eval.raise(ParseError.Help(cmd.version.get))
+            case None if defaultSub.nonEmpty =>
+              runSub(defaultSub.get, tok :: rest)
             case None =>
               val sug = Runtime
                 .suggest(
@@ -147,6 +158,9 @@ private[flagged] object Engine:
             val c = tok(i)
             if c == 'h' && shortOf('h').isEmpty then helpNow()
             shortOf(c) match
+              case None if i == 1 && defaultSub.nonEmpty =>
+                runSub(defaultSub.get, tok :: rest)
+                stop = true
               case None =>
                 report(s"unknown option '-$c'")
                 stop = true // the rest of the cluster is unintelligible
@@ -264,13 +278,18 @@ private[flagged] object Engine:
           case Some(v) => if g.optional then Some(v) else v
           case None    =>
             g.default.map(_()).getOrElse {
-              if g.optional then None
-              else
-                if !subErrored then
-                  report(
-                    s"missing command (expected one of: ${g.cases.map(_.name).mkString(", ")})"
-                  )
-                null
+              g.defaultCase match
+                case Some(dc) =>
+                  val v = run(dc.command, prog, path :+ dc.name, Nil).ok
+                  if g.optional then Some(v) else v
+                case None =>
+                  if g.optional then None
+                  else
+                    if !subErrored then
+                      report(
+                        s"missing command (expected one of: ${g.cases.map(_.name).mkString(", ")})"
+                      )
+                    null
             }
       }
 
