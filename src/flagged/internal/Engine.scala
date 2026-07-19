@@ -195,8 +195,17 @@ private[flagged] object Engine:
               case _ =>
                 default.map(d => Some(d())).getOrElse(if optional then Some(None) else None)
           case Mode.Repeated(read, fromList) =>
-            val vals = occurrences.collect { case Occ.Val(raw, disp) => orReport(disp)(read(raw)) }
-            if vals.nonEmpty then Some(orReport(display)(fromList(vals)))
+            var bad  = false
+            val vals = occurrences.collect { case Occ.Val(raw, disp) =>
+              read(raw) match
+                case Ok(v)    => v
+                case Err(msg) =>
+                  report(s"invalid value for '$disp': $msg")
+                  bad = true
+                  null
+            }
+            if bad then Some(null) // reported: the parse fails before anything is built
+            else if vals.nonEmpty then Some(orReport(display)(fromList(vals)))
             else default.map(d => Some(d())).getOrElse(Some(orReport(display)(fromList(Nil))))
 
       val missing = mutable.ListBuffer.empty[String]

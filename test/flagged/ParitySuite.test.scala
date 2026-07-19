@@ -69,6 +69,10 @@ case class ParitySeqField(
     items: Seq[String] = Nil
 ) derives Parser.Command
 
+case class ParityDefines(
+    define: Map[String, Int] = Map.empty
+) derives Parser.Command
+
 case class ParityDigits(
     optFor29Name: Int = 0
 ) derives Parser.Command
@@ -213,6 +217,15 @@ class ParitySuite extends munit.FunSuite:
       ok(Flagged.parse[ParitySeqField](Seq("--items", "a", "--items", "b"))),
       ParitySeqField(Seq("a", "b"))
     )
+  }
+
+  test("Map fields accumulate k=v entries, split at the first = (mainargs: same)") {
+    assertEquals(
+      ok(Flagged.parse[ParityDefines](Seq("--define", "a=1", "--define", "b=2"))),
+      ParityDefines(Map("a" -> 1, "b" -> 2))
+    )
+    val msg = err(Flagged.parse[ParityDefines](Seq("--define", "nope")))
+    assert(msg.contains("string=int"), msg)
   }
 
   test("an absent repeated option is the empty collection (mainargs, case-app: same)") {

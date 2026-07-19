@@ -232,6 +232,19 @@ object Parser:
   given [A](using Value[A]): Repeated[Vector[A]] = repeated[A, Vector[A]](l => Ok(l.toVector))
   given [A](using Value[A]): Repeated[Seq[A]]    = repeated[A, Seq[A]](l => Ok(l))
 
+  /** Each occurrence is one `key=value` entry, split at the first `=`; later entries win. */
+  given [K, V](using k: Value[K], v: Value[V]): Repeated[Map[K, V]] =
+    given Value[(K, V)] = of(s"${k.typeName}=${v.typeName}")(s =>
+      s.indexOf('=') match
+        case -1 => Err(s"'$s' is not in ${k.typeName}=${v.typeName} form")
+        case i  =>
+          for
+            key   <- k.parse(s.take(i))
+            value <- v.parse(s.drop(i + 1))
+          yield (key, value)
+    )
+    repeated[(K, V), Map[K, V]](l => Ok(l.toMap))
+
   private def numeric[A](name: String)(f: String => A): Value[A] =
     of(name)(s =>
       try Ok(f(s.trim))
