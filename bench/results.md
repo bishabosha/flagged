@@ -124,6 +124,16 @@ exceptions are the `empty` scenario, where case-app's near-no-op wins everywhere
 Scala.js and 4–7× on Native versus the JVM; the WebAssembly backend is broadly comparable to
 the JavaScript one on these workloads (somewhat faster for case-app, a wash for flagged).
 
+Why Native trails both: ablation on `simple — flagged` (1 242 ns at release-fast/Immix) shows
+`release-full` recovers ~17% and disabling the GC outright (`--native-gc none`) ~14%, so
+neither static-optimization headroom nor collection cost explains the gap. The remainder is
+the absence of runtime profile-guided optimization: the parse path dispatches through parser
+subtypes, reader functions, and `Result` combinators, which HotSpot and V8 speculatively
+devirtualize, inline, and escape-analyze after profiling (eliminating most of the short-lived
+allocation), while an ahead-of-time build keeps every polymorphic dispatch and allocation
+real. Consistent with that, closure-heavy case-app is 1.5× slower on Native than on JS, while
+table-driven mainargs is 2× faster on Native than on JS.
+
 CLI parsing happens once per process, so parse latency is rarely a deciding factor; the compile
 table is the practically relevant one, and the allocation column mostly matters as a proxy for
 work done per token.
