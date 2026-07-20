@@ -41,7 +41,7 @@ private[flagged] object Engine:
       from: Int
   ): ParseResult[Any] =
     Result:
-      val full                                      = (prog :: path).mkString(" ")
+      def full                                      = (prog :: path).mkString(" ")
       def hint                                      = s"Try '$full --help' for more information."
       var errors: mutable.ListBuffer[String] | Null = null
       def report(msg: String): Unit                 =
@@ -152,7 +152,7 @@ private[flagged] object Engine:
         lastIsVal(index) = false
 
       def posName(index: Int): String =
-        s"<${cmd.positionals.find(_.index == index).fold("value")(_.name)}>"
+        cmd.positionals.find(_.index == index).fold("<value>")(_.display)
 
       def findCase(g: SubGroup, tok: String): SubCase | Null =
         var i = 0
@@ -348,7 +348,7 @@ private[flagged] object Engine:
       var pi = 0
       while pi < cmd.positionals.length do
         val p = cmd.positionals(pi)
-        if !finishSlot(p.index, s"<${p.name}>", p.mode, p.default) then addMissing(s"<${p.name}>")
+        if !finishSlot(p.index, p.display, p.mode, p.default) then addMissing(p.display)
         pi += 1
       if missing != null then
         val ms   = missing.nn

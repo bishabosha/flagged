@@ -35,7 +35,8 @@ final case class OptSpec(
     group: Option[String] = None,
     aliases: List[String] = Nil
 ):
-  lazy val shortDisplay: String = short.fold("--" + long)("-" + _)
+  lazy val longDisplay: String  = "--" + long
+  lazy val shortDisplay: String = short.fold(longDisplay)("-" + _)
 
 final case class PosSpec(
     name: String,
@@ -44,7 +45,8 @@ final case class PosSpec(
     index: Int,
     mode: Mode,
     default: Option[() => Any]
-)
+):
+  lazy val display: String = "<" + name + ">"
 
 final case class SubCase(
     name: String,
