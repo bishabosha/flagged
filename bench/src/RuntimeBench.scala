@@ -11,8 +11,8 @@ import bench.defs.{FlaggedDefs, MainargsDefs, CaseappDefs}
   *
   * Scenario groups:
   *   - `empty` / `simple` / `repeated` — expressible in all three libraries
-  *   - `bundled` / `leftover` — flagged and mainargs only (case-app has no short clusters or typed
-  *     leftover)
+  *   - `bundled` / `leftover` / `map` — flagged and mainargs only (case-app has no short clusters,
+  *     typed leftover, or `Map[K,V]`)
   *   - `counter` / `group` — flagged and case-app only (mainargs has no counters or `@Recurse`
   *     equivalent beyond class splicing, which the `simple` scenario already covers)
   */
@@ -32,6 +32,7 @@ class RuntimeBench:
   private val groupArgs    = Seq("--host", "h", "--port", "8080", "-q", "--log-level", "warn")
   // option first: mainargs treats everything from the first leftover token on as leftover
   private val leftoverArgs = Seq("-s", "2", "1", "2", "3", "4", "5")
+  private val mapArgs      = Seq("--define", "a=1", "--define", "b=2", "--define", "c=3")
 
   /** A failed parse can be faster than a successful one; assert every scenario succeeds. */
   @Setup
@@ -59,7 +60,9 @@ class RuntimeBench:
       "group_flagged"     -> fOk(FlaggedDefs.withGroup.parse(groupArgs)),
       "group_caseapp"     -> CaseappDefs.withGroup.detailedParse(groupArgs).isRight,
       "leftover_flagged"  -> fOk(FlaggedDefs.nums.parse(leftoverArgs)),
-      "leftover_mainargs" -> mOk(MainargsDefs.nums.constructRaw(leftoverArgs))
+      "leftover_mainargs" -> mOk(MainargsDefs.nums.constructRaw(leftoverArgs)),
+      "map_flagged"       -> fOk(FlaggedDefs.defines.parse(mapArgs)),
+      "map_mainargs"      -> mOk(MainargsDefs.defines.constructRaw(mapArgs))
     )
     val failing = checks.collect { case (name, false) => name }
     if failing.nonEmpty then
@@ -86,6 +89,9 @@ class RuntimeBench:
 
   @Benchmark def leftover_flagged: Any  = FlaggedDefs.nums.parse(leftoverArgs)
   @Benchmark def leftover_mainargs: Any = MainargsDefs.nums.constructRaw(leftoverArgs)
+
+  @Benchmark def map_flagged: Any  = FlaggedDefs.defines.parse(mapArgs)
+  @Benchmark def map_mainargs: Any = MainargsDefs.defines.constructRaw(mapArgs)
 
   // ---- flagged x case-app ---------------------------------------------------------
 

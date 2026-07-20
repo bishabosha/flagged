@@ -36,8 +36,13 @@ case class FNums(
     @positional nums: List[Int] = Nil
 ) derives Parser.Command
 
+case class FDefines(
+    @short('D') define: Map[String, Int] = Map.empty
+) derives Parser.Command
+
 object FlaggedDefs:
   val simple    = summon[Parser.Command[FSimple]]
   val verbosity = summon[Parser.Command[FVerbosity]]
   val withGroup = summon[Parser.Command[FWithGroup]]
   val nums      = summon[Parser.Command[FNums]]
+  val defines   = summon[Parser.Command[FDefines]]

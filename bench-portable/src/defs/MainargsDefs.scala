@@ -18,6 +18,11 @@ import mainargs.{main, arg, Flag, Leftover, ParserForClass}
     nums: Leftover[Int]
 )
 
+@main case class MDefines(
+    @arg(short = 'D') define: Map[String, Int] = Map.empty
+)
+
 object MainargsDefs:
-  val simple = ParserForClass[MSimple]
-  val nums   = ParserForClass[MNums]
+  val simple  = ParserForClass[MSimple]
+  val nums    = ParserForClass[MNums]
+  val defines = ParserForClass[MDefines]
