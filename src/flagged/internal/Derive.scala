@@ -279,7 +279,7 @@ object Derive:
         case true =>
           "Option of a repeated Parser is not supported: the plain type is empty when absent"
         case false => ""
-    case 5 =>
+    case TrailingShape =>
       HasAnnT[flagged.positional, Anns] match
         case true  => "@positional cannot be combined with a trailing field"
         case false =>

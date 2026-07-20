@@ -61,16 +61,17 @@ object Assemble:
 
   def kebab(s: String): String =
     val b = new StringBuilder
-    s.zipWithIndex.foreach { (c, i) =>
-      // word boundaries: before an upper after non-upper, and at both edges of a digit run
-      val prev     = if i > 0 then Some(s(i - 1)) else None
-      val boundary =
-        (c.isUpper && prev.exists(!_.isUpper)) ||
-          (c.isDigit && prev.exists(p => !p.isDigit)) ||
-          (c.isLetter && prev.exists(_.isDigit))
-      if boundary && prev.exists(_ != '-') then b += '-'
+    var i = 0
+    while i < s.length do
+      val c = s(i)
+      if i > 0 then
+        val p = s(i - 1)
+        // word boundaries: before an upper after non-upper, and at both edges of a digit run
+        val boundary =
+          (c.isUpper && !p.isUpper) || (c.isDigit && !p.isDigit) || (c.isLetter && p.isDigit)
+        if boundary && p != '-' then b += '-'
       b += c.toLower
-    }
+      i += 1
     b.result()
 
   def progName(label: String, onType: TargetAnnots): String =
@@ -141,7 +142,7 @@ object Assemble:
         case SubEntry.Leaf(v) => Command.leaf(v, help)
         case SubEntry.Node(p) => p().command
       SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden, anns.aliases)
-    }
+    }.toVector
     val defaultIdxs = annots.perCase.zipWithIndex.collect { case (a, i) if a.default => i }
     if defaultIdxs.sizeIs > 1 then invalid("only one @default command is supported")
     val defaultCase = defaultIdxs.headOption.map(cases(_))
@@ -149,7 +150,7 @@ object Assemble:
       annots.onType.help.getOrElse(""),
       Vector.empty,
       Vector.empty,
-      Some(SubGroup(0, false, None, cases.toVector, defaultCase)),
+      Some(SubGroup(0, false, None, cases, defaultCase)),
       None,
       Nil,
       arr => Result.Ok(arr(0)),
@@ -168,13 +169,12 @@ object Assemble:
       version: Option[() => String]
   ): Command =
     val n     = labels.length
-    val plans = (0 until n).toList.map { i =>
-      val (parser, opt, anns) = fields(i)
+    val plans = labels.zip(fields).zipWithIndex.map { case ((label, (parser, opt, anns)), i) =>
       resolveField(
         Field(
           index = i,
-          label = labels(i),
-          long = anns.name.getOrElse(kebab(labels(i))),
+          label = label,
+          long = anns.name.getOrElse(kebab(label)),
           nameAnn = anns.name,
           short = anns.short,
           help = anns.help.getOrElse(""),
@@ -191,9 +191,6 @@ object Assemble:
     }
     combine(n, plans, onType, build, version)
 
-  /** The complete field matrix: one parser shape × `@positional` × `Option[_]` case at a time, each
-    * producing a [[Plan]] or a construction error.
-    */
   /** Translate one field into its [[Plan]]. Shape x annotation combinations are guaranteed by the
     * compile-time layer in `Derive`; only value-level rules (reserved/duplicate names via
     * kebab-cased labels, splice contents) are checked here.
@@ -282,8 +279,8 @@ object Assemble:
         poss += spec
       case Plan.Commands(index, optional, default, inner) =>
         if sub.nonEmpty then invalid("only one subcommand field is supported per command")
-        sub =
-          Some(SubGroup(index, optional, default, inner.sub.get.cases, inner.sub.get.defaultCase))
+        val g = inner.sub.get
+        sub = Some(SubGroup(index, optional, default, g.cases, g.defaultCase))
       case Plan.Grouped(index, label, prefix, group, optional, default, inner) =>
         inner.opts.foreach { o =>
           // a prefixed splice renames its options (--net-host) and drops their short aliases,
@@ -308,8 +305,9 @@ object Assemble:
         trailing = Some(spec)
     }
 
+    val positionals = poss.result()
     checkPositionalOrder(posKinds.result())
-    if sub.nonEmpty && poss.result().nonEmpty then
+    if sub.nonEmpty && positionals.nonEmpty then
       invalid("mixing positional fields with a subcommand field is ambiguous and not supported")
 
     val allSplices = splices.result()
@@ -319,7 +317,7 @@ object Assemble:
     Command(
       onType.help.getOrElse(""),
       opts.result(),
-      poss.result(),
+      positionals,
       sub,
       trailing,
       allSplices,

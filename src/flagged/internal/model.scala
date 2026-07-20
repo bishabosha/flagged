@@ -75,7 +75,9 @@ final case class SubGroup(
 /** An options group spliced into a parent command: the child command's option specs live re-indexed
   * in the parent (at `offset ..< offset + command.arity` of the parent's value storage), and the
   * built child value lands in parent slot `slot`. If `optional` the field is an `Option[_]`: the
-  * group is `None` unless at least one of its options occurs on the command line.
+  * group is `None` unless at least one of its options occurs on the command line. A field default
+  * plays the same role for a non-`Option` group: it is used, and the group is not built, when none
+  * of its options occur.
   */
 final case class Splice(
     slot: Int,
@@ -92,6 +94,12 @@ final case class Splice(
       if counts(i) > 0 then return true
       i += 1
     false
+
+  /** Whether the group is left unbuilt, falling back to `None` or the field default (its required
+    * options are then not enforced).
+    */
+  def skipped(counts: Array[Int], base: Int): Boolean =
+    (optional || default.nonEmpty) && !mentioned(counts, base)
 
 /** A field collecting the raw arguments after `--`, verbatim. */
 final case class TrailingSpec(
@@ -134,14 +142,14 @@ final case class Command(
 
   /** Build spliced children from their storage slices, then build this command's value; the first
     * failing build (e.g. an `emap` validation) short-circuits. `counts` holds per-slot mention
-    * counts, indexed from `base` for this command's storage: an optional splice none of whose slots
-    * were mentioned becomes `None` without being built.
+    * counts, indexed from `base` for this command's storage: a skipped splice (see
+    * [[Splice.skipped]]) becomes `None` or its field default without being built.
     */
   def finish(values: Array[Any], counts: Array[Int], base: Int): Result[Any, String] =
     def loop(remaining: List[Splice]): Result[Any, String] = remaining match
       case Nil       => build(values)
       case s :: rest =>
-        if s.optional && !s.mentioned(counts, base) then
+        if s.skipped(counts, base) then
           values(s.slot) = s.default match
             case Some(d) => d()
             case None    => None

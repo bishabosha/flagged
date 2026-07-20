@@ -327,7 +327,9 @@ case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser.
 Groups nest, and work inside subcommand cases, so common options can be shared across
 a whole command tree. A name collision between a command and a spliced group (or two
 groups) is reported at parser construction; use `@name`/`@short` on either side to
-disambiguate. Spliced groups cannot contain positional fields and cannot be `Option`al.
+disambiguate. Spliced groups cannot contain positional fields. An `Option`-typed group
+field parses to `None`, and a field default is used as-is, unless one of the group's
+options occurs on the command line.
 
 Enums with parameterless cases can derive a by-name value parser:
 

@@ -106,6 +106,16 @@ class SpliceSuite extends munit.FunSuite:
     )
   }
 
+  test("a field default on a spliced group applies when none of its options occur") {
+    case class Auth(user: String, token: String = "-") derives Parser.Command
+    case class Push(repo: String = ".", auth: Auth = Auth("anon")) derives Parser.Command
+    assertEquals(ok(Flagged.parse[Push](Nil)), Push(".", Auth("anon")))
+    assertEquals(ok(Flagged.parse[Push](Seq("--user", "u"))), Push(".", Auth("u")))
+    // once any of its options occurs, the group is built: required options are enforced
+    val msg = err(Flagged.parse[Push](Seq("--token", "t")))
+    assert(msg.contains("--user"), msg)
+  }
+
   test("an absent optional group skips its required options; a present one enforces them") {
     case class Auth(user: String, token: String) derives Parser.Command
     case class Pull(repo: String = ".", auth: Option[Auth] = None) derives Parser.Command

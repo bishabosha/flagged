@@ -136,11 +136,9 @@ private[flagged] object Engine:
           case Mode.Repeated(p) =>
             addElem(index, p, raw, display)
           case Mode.Flag(p, _) if !p.takesValue =>
-            // a pure flag rejects an explicit value wherever it appears; the staged raw doubles
-            // as the report-once latch (these specs never parse it)
-            if staged(index) == null then
-              report(s"flag '$display' does not take a value")
-              stage(index, raw, display)
+            // a pure flag rejects an explicit value wherever it appears; nothing is staged, so
+            // finishing builds from the count alone (the parse has already failed)
+            report(s"flag '$display' does not take a value")
           case _ =>
             stage(index, raw, display)
 
@@ -163,13 +161,12 @@ private[flagged] object Engine:
 
       def handleFree(tok: String): Unit =
         if subGroup != null then
-          val g  = subGroup
-          val sc = findCase(g, tok)
+          val sc = findCase(subGroup, tok)
           if sc != null then runSub(sc, idx)
           else if defaultSubCase != null then runSub(defaultSubCase, idx - 1)
           else
             val sug = Runtime
-              .suggest(tok, g.cases.filterNot(_.hidden).flatMap(c => c.name :: c.aliases))
+              .suggest(tok, subGroup.cases.filterNot(_.hidden).flatMap(c => c.name :: c.aliases))
               .map(s => s" (did you mean '$s'?)")
               .getOrElse("")
             report(s"unknown command '$tok'$sug")
@@ -230,7 +227,7 @@ private[flagged] object Engine:
                 .suggest(
                   key.drop(2),
                   cmd.opts.filterNot(_.hidden).flatMap(o => o.long :: o.aliases)
-                    :+ "help" :+ "help-all"
+                    :+ "help" :+ "help-all" :++ cmd.version.map(_ => "version")
                 )
                 .map(s => s" (did you mean '--$s'?)")
                 .getOrElse("")
@@ -287,10 +284,7 @@ private[flagged] object Engine:
               parser match
                 case vf: flagged.Parser.ValuedFlag[?] if staged(index) != null =>
                   reportInvalid(vf.readInto(lastRaw(index), values, index), lastDisp(index))
-                case _ =>
-                  // bare mentions only — or a pure flag whose value mention (its staged latch)
-                  // was already reported during routing
-                  if staged(index) == null then fromCount(parser, index, display)
+                case _ => fromCount(parser, index, display)
               if optional then values(index) = Some(values(index))
             true
           case Mode.Single(parser, optional) =>
@@ -324,11 +318,12 @@ private[flagged] object Engine:
         if missing == null then missing = mutable.ListBuffer.empty[String]
         missing += display
 
-      // slots of optional splices none of whose options occurred: the group parses to None, so
-      // its required options are not enforced (nested optional splices recurse)
+      // slots of skipped splices (optional or defaulted, none of their options occurring): the
+      // group falls back to None or its field default, so its required options are not enforced
+      // (nested splices recurse)
       def absentRanges(splices: List[Splice], base: Int): List[Range] =
         splices.flatMap { s =>
-          if s.optional && !s.mentioned(counts, base) then
+          if s.skipped(counts, base) then
             List((base + s.offset) until (base + s.offset + s.command.arity))
           else absentRanges(s.command.splices, base + s.offset)
         }

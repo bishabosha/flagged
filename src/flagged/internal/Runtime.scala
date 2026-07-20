@@ -15,7 +15,7 @@ object Runtime:
       case _                            => -1
 
   private def notABool(s: String): String =
-    s"'${s.trim.toLowerCase}' is not a valid bool (expected true/false)"
+    s"'${s.trim}' is not a valid bool (expected true/false)"
 
   def parseBool(s: String): Result[Boolean, String] =
     Result:

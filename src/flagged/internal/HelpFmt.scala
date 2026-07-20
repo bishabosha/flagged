@@ -130,8 +130,7 @@ private[flagged] object HelpFmt:
     ).flatten
 
   private def posExtras(p: PosSpec): List[String] =
-    val dflt = p.default.map(d => d()).flatMap(fmtDefault).map(s => s"default: $s")
-    List(dflt).flatten
+    p.default.map(d => d()).flatMap(fmtDefault).map(s => s"default: $s").toList
 
   /** Human-friendly rendering of a default value; `None` means "don't show". */
   private def fmtDefault(v: Any): Option[String] = v match
