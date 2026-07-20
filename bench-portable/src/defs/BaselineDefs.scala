@@ -10,33 +10,23 @@ object BaselineDefs:
 
   final case class HSimple(foo: String, bar: Int, baz: Boolean, qux: List[String])
 
-  /** The typical quick hand-rolled parser: a cursor loop matching long options only — no short
-    * options, no `=` forms, no suggestions, first error wins.
+  /** The typical quick hand-rolled parser: a tail-recursive match over the token list, matching
+    * exact option strings and copying an accumulator — long options only, no `=` forms, no
+    * suggestions, first error wins.
     */
-  def naive(args: Seq[String]): Either[String, HSimple] =
-    var foo             = "x"
-    var bar             = 0
-    var baz             = false
-    val qux             = List.newBuilder[String]
-    val it              = args.iterator
-    var err: String     = null
-    def take(d: String) =
-      if it.hasNext then it.next()
-      else
-        err = s"missing value for $d"
-        null
-    while it.hasNext && err == null do
-      it.next() match
-        case "--foo" => val v = take("--foo"); if v != null then foo = v
-        case "--bar" =>
-          val v = take("--bar")
-          if v != null then
-            try bar = v.toInt
-            catch case _: NumberFormatException => err = s"invalid int for --bar: $v"
-        case "--baz" => baz = true
-        case "--qux" => val v = take("--qux"); if v != null then qux += v
-        case other   => err = s"unknown option: $other"
-    if err != null then Left(err) else Right(HSimple(foo, bar, baz, qux.result()))
+  def naive(args: List[String]): Either[String, HSimple] =
+    @scala.annotation.tailrec
+    def loop(rest: List[String], acc: HSimple): Either[String, HSimple] = rest match
+      case Nil                  => Right(acc)
+      case "--foo" :: v :: rest => loop(rest, acc.copy(foo = v))
+      case "--bar" :: v :: rest =>
+        v.toIntOption match
+          case Some(n) => loop(rest, acc.copy(bar = n))
+          case None    => Left(s"invalid int for --bar: $v")
+      case "--baz" :: rest      => loop(rest, acc.copy(baz = true))
+      case "--qux" :: v :: rest => loop(rest, acc.copy(qux = acc.qux :+ v))
+      case other :: _           => Left(s"unknown option: $other")
+    loop(args, HSimple("x", 0, false, Nil))
 
   /** A hand-rolled parser at feature parity with the libraries on this grammar: long options with
     * `--opt=v`, short options `-f`/`-b` with clusters and attached values, last-wins repetition,

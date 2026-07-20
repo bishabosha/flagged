@@ -22,13 +22,16 @@ class BaselineBench:
   private val repeatedArgs = Seq("--qux", "a", "--qux", "b", "--qux", "c", "--qux", "d")
   private val bundledArgs  = Seq("-bfhello", "--bar", "7")
   private val mainArgs     = Array("hello", "42", "true")
+  private val emptyList    = emptyArgs.toList
+  private val simpleList   = simpleArgs.toList
+  private val repeatedList = repeatedArgs.toList
 
   @Setup
   def validate(): Unit =
     val checks = Seq(
-      "empty_hand"        -> BaselineDefs.naive(emptyArgs).isRight,
-      "simple_hand"       -> BaselineDefs.naive(simpleArgs).isRight,
-      "repeated_hand"     -> BaselineDefs.naive(repeatedArgs).isRight,
+      "empty_hand"        -> BaselineDefs.naive(emptyArgs.toList).isRight,
+      "simple_hand"       -> BaselineDefs.naive(simpleArgs.toList).isRight,
+      "repeated_hand"     -> BaselineDefs.naive(repeatedArgs.toList).isRight,
       "empty_handfull"    -> BaselineDefs.full(emptyArgs).isRight,
       "simple_handfull"   -> BaselineDefs.full(simpleArgs).isRight,
       "repeated_handfull" -> BaselineDefs.full(repeatedArgs).isRight,
@@ -40,9 +43,9 @@ class BaselineBench:
       throw new IllegalStateException(s"scenarios do not parse: ${failing.mkString(", ")}")
 
   // the typical quick hand-rolled loop (long options only)
-  @Benchmark def empty_hand: Any    = BaselineDefs.naive(emptyArgs)
-  @Benchmark def simple_hand: Any   = BaselineDefs.naive(simpleArgs)
-  @Benchmark def repeated_hand: Any = BaselineDefs.naive(repeatedArgs)
+  @Benchmark def empty_hand: Any    = BaselineDefs.naive(emptyList)
+  @Benchmark def simple_hand: Any   = BaselineDefs.naive(simpleList)
+  @Benchmark def repeated_hand: Any = BaselineDefs.naive(repeatedList)
 
   // a hand-rolled parser at feature parity on this grammar
   @Benchmark def empty_handfull: Any    = BaselineDefs.full(emptyArgs)
