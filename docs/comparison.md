@@ -20,7 +20,7 @@ across the three libraries live in `bench/` (see `bench/README.md`).
 | Flags | `Boolean` (accepts `=value`), `Count`, custom via `Parser.flag` | `Flag` (no `=value`) | `Boolean` (`=value` only), `Int @@ Counter` |
 | Counting flags | `Count` | no | `Int @@ Counter`, `List[Unit]` |
 | Repetition of scalar options | last wins (values and flags; `Count` accumulates) | error unless `allowRepeats` | error unless `Last[T]` |
-| Collections | `List`, `Vector`, `Seq`, `Map[K,V]`, any via `Parser.repeated` | `Seq`, any `Iterable`, `Map[K,V]` | `List`, `Vector` only |
+| Collections | any with a `Factory` (`List`, `Set`, ..., `Map[K,V]`), any type via `Parser.repeated` | `Seq`, any `Iterable`, `Map[K,V]` | `List`, `Vector` only |
 | `Map[K,V]` (`k=v`) | yes | yes | no |
 | `Option[T]` | yes | yes | yes |
 | Defaults from field defaults | yes (lazy) | yes (lazy) | yes (lazy) |

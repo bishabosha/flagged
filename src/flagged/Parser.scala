@@ -2,6 +2,7 @@ package flagged
 
 import java.io.File
 import java.util.UUID
+import scala.collection.Factory
 import scala.deriving.Mirror
 import flagged.internal.{Assemble, Engine, HelpFmt}
 import scala.annotation.nowarn
@@ -117,7 +118,7 @@ sealed trait Parser[A]:
 
   final def helpAll(prog: String): String = HelpFmt.render(command, prog, Nil, showHidden = true)
 
-object Parser:
+object Parser extends ParserLowPriority:
   def apply[A](using p: Parser[A]): Parser[A] = p
 
   /** Unbox a `Result` into a value slot: success is the shared [[Result.done]] (no allocation), an
@@ -432,3 +433,20 @@ object Parser:
   // platform-dependent value instances (java.nio.file.Path is unavailable on Scala.js,
   // java.time outside the JVM); exported so they stay in this companion's implicit scope
   export flagged.internal.PlatformValues.given
+
+/** Lower-priority instances, overridden by the dedicated ones in [[Parser]]. */
+sealed trait ParserLowPriority:
+
+  /** Repeated shape for any collection an implicit [[scala.collection.Factory]] can build (`Set`,
+    * `ArraySeq`, sorted collections, `Array`, ...). The dedicated instances in [[Parser]] (`List`,
+    * `Vector`, `Seq`, `Map`) take priority over this one.
+    */
+  // the Factory comes first: resolving it instantiates the element type A from C, which the
+  // Value summon then uses
+  given [A, C] => (factory: Factory[A, C], elem: Parser.Value[A]) => Parser.Repeated[C]:
+    type Elem = A
+    def element                 = elem
+    def build(l: IndexedSeq[A]) = Ok(l.to(factory))
+    override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
+      Result.task:
+        out(i) = l.asInstanceOf[IndexedSeq[A]].to(factory)

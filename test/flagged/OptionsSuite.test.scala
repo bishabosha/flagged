@@ -17,6 +17,12 @@ case class Collections(
     nums: Vector[Int] = Vector.empty
 ) derives Parser.Command
 
+case class FactoryCollections(
+    tag: Set[String] = Set.empty,
+    level: scala.collection.immutable.SortedSet[Int] = scala.collection.immutable.SortedSet.empty,
+    raw: scala.collection.immutable.ArraySeq[String] = scala.collection.immutable.ArraySeq.empty
+) derives Parser.Command
+
 case class WithPositionals(
     @positional @help("Input path") input: String,
     @positional output: Option[String] = None,
@@ -151,6 +157,46 @@ class OptionsSuite extends munit.FunSuite:
       ok(Flagged.parse[Collections](Seq("--nums", "1", "--nums", "2"))),
       Collections(nums = Vector(1, 2))
     )
+  }
+
+  test("any collection with a Factory works as a repeated option") {
+    assertEquals(
+      ok(
+        Flagged.parse[FactoryCollections](
+          Seq(
+            "--tag",
+            "a",
+            "--tag",
+            "b",
+            "--tag",
+            "a",
+            "--level",
+            "3",
+            "--level",
+            "1",
+            "--raw",
+            "x"
+          )
+        )
+      ),
+      FactoryCollections(
+        tag = Set("a", "b"),
+        level = scala.collection.immutable.SortedSet(1, 3),
+        raw = scala.collection.immutable.ArraySeq("x")
+      )
+    )
+  }
+
+  test("the k=v Map instance wins over the Factory fallback even with a tuple Value in scope") {
+    given Parser.Value[(String, Int)] =
+      Parser.of("pair")(s => Ok((s, 0))) // would parse without '=' if it were used
+    case class M(define: Map[String, Int] = Map.empty) derives Parser.Command
+    assertEquals(
+      ok(Flagged.parse[M](Seq("--define", "a=1", "--define", "b=2"))),
+      M(Map("a" -> 1, "b" -> 2))
+    )
+    val msg = err(Flagged.parse[M](Seq("--define", "nope")))
+    assert(msg.contains("is not in string=int form"), msg)
   }
 
   test("positional arguments in order") {

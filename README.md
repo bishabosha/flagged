@@ -96,7 +96,7 @@ repeats:
 | `x: A = default` | optional, default shown in help |
 | `x: Option[A]` | optional, `None` when absent |
 | `x: Option[Boolean]` | optional flag: absent → `None`, `--x` → `Some(true)`, `--x=false` → `Some(false)` |
-| `x: A` (`Parser.Repeated[A]`, e.g. `List`/`Seq`/`Vector`) | repeatable |
+| `x: A` (`Parser.Repeated[A]`, e.g. `List`/`Seq`/`Vector`/`Set`) | repeatable |
 | `x: Map[K, V]` | repeatable `--x key=value` entries |
 | `x: E` (enum `E derives Parser.CommandGroup`) | nested subcommands |
 | `x: P` (case class `P derives Parser.Command`) | options group spliced into this command |
@@ -288,7 +288,9 @@ appear any number of times, each occurrence parsed by a `Parser.Value` element (
 repeats cannot nest, by construction) and the collected elements combined by a
 function of your choice, from an `IndexedSeq` view of the collected elements. The
 provided `List`/`Seq`/`Vector`/`Map` instances are ordinary `Parser.repeated`
-definitions, and any type can opt in the same way — including with constraints,
+definitions, any other collection with a `scala.collection.Factory` works out of
+the box (`Set`, `ArraySeq`, sorted collections, ...), and any type can opt in the
+same way — including with constraints,
 since the combining function may fail (it is also invoked empty when the argument
 is absent):
 
