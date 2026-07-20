@@ -59,20 +59,10 @@ sealed trait Parser[A]:
 
   /** Engine protocol: parse one token into `out(i)` — one element for repeated parsers, the
     * explicit `--flag=value` form for valued flags. Returns the shared [[Result.done]] on success —
-    * the hot path allocates nothing. `Value` and `ValuedFlag` override with their direct slot
-    * writes.
+    * the hot path allocates nothing. Abstract: every shape implements its own reading, so coverage
+    * is checked by the compiler rather than a cast.
     */
-  private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-    Result.task:
-      (this: @unchecked) match
-        case _: Parser.Flag[A]     => eval.raise(s"'$s': this flag does not take a value")
-        case r: Parser.Repeated[A] =>
-          val c = r.collector()
-          c.offer(s, out, i).check
-          c.finishInto(out, i).check
-        case t: Parser.Trailing[A] => out(i) = t.build(List(s)).ok
-        case c: Parser.Command[A]  =>
-          eval.raise(s"'$s': '${c.prog}' is a command parser, not a single value")
+  private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String]
 
   /** The command grammar: command shapes directly; value shapes as a command line with one
     * positional argument.
@@ -215,6 +205,11 @@ object Parser extends ParserLowPriority:
     /** Whether this flag accepts the explicit `--flag=value` form ([[ValuedFlag]] does). */
     private[flagged] def takesValue: Boolean = false
 
+    /** A flag takes no token; reading one is an error ([[ValuedFlag]] overrides). */
+    private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
+      Result.task:
+        eval.raise(s"'$s': this flag does not take a value")
+
     /** Engine protocol: build from the mention count into `out(i)`. */
     private[flagged] def countInto(n: Int, out: Array[Any], i: Int): Result[Unit, String] =
       intoSlot(fromCount(n), out, i)
@@ -249,6 +244,13 @@ object Parser extends ParserLowPriority:
       */
     private[flagged] def collector(): Collector
 
+    /** One token reads as a single element, built immediately. */
+    private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
+      Result.task:
+        val c = collector()
+        c.offer(s, out, i).check
+        c.finishInto(out, i).check
+
     def emap[B](f: A => Result[B, String]): Repeated[B] = new Repeated[B]:
       type Elem = self.Elem
       def element                      = self.element
@@ -262,13 +264,23 @@ object Parser extends ParserLowPriority:
     final def typeName: String                          = "args"
     def emap[B](f: A => Result[B, String]): Trailing[B] = trailing(l => build(l).flatMap(f))
 
+    /** One token builds as a single trailing argument. */
+    private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
+      intoSlot(build(List(s)), out, i)
+
   /** A single command's grammar: named options, positionals, trailing, splices. As a field of
     * another command, its options are spliced in.
     */
   sealed trait Command[A] extends Parser[A]:
     private[flagged] def impl: flagged.internal.Command
     def prog: String
-    final def typeName: String                         = prog
+    final def typeName: String = prog
+
+    /** A command has no single-token reading. */
+    private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
+      Result.task:
+        eval.raise(s"'$s': '$prog' is a command parser, not a single value")
+
     def emap[B](f: A => Result[B, String]): Command[B] = make(emapImpl(f), prog)
     def withProg(name: String): Command[A]             = make(impl, name)
     private[flagged] final def emapImpl[B](f: A => Result[B, String]): flagged.internal.Command =
