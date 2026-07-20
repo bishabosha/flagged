@@ -1,7 +1,7 @@
 //> using target.platform jvm
 package flagged.internal
 
-import java.nio.file.{InvalidPathException, Path, Paths}
+import java.nio.file.Path
 import java.time.{Instant, LocalDate, LocalDateTime, LocalTime}
 import java.time.format.DateTimeParseException
 import scala.concurrent.duration.{Duration, FiniteDuration}
@@ -14,10 +14,7 @@ object PlatformValues:
 
   given Parser.Value[FiniteDuration] = duration
 
-  given Parser.Value[Path] = Parser.of("path")(s =>
-    try Ok(Paths.get(s))
-    catch case _: InvalidPathException => Err(s"'$s' is not a valid path")
-  )
+  given Parser.Value[Path] = path
 
   private def temporal[A](name: String)(f: String => A): Parser.Value[A] =
     Parser.of(name)(s =>
