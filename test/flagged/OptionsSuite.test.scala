@@ -17,6 +17,12 @@ case class Collections(
     nums: Vector[Int] = Vector.empty
 ) derives Parser.Command
 
+case class FactoryCollections(
+    tag: Set[String] = Set.empty,
+    level: scala.collection.immutable.SortedSet[Int] = scala.collection.immutable.SortedSet.empty,
+    raw: scala.collection.immutable.ArraySeq[String] = scala.collection.immutable.ArraySeq.empty
+) derives Parser.Command
+
 case class WithPositionals(
     @positional @help("Input path") input: String,
     @positional output: Option[String] = None,
@@ -130,6 +136,22 @@ class OptionsSuite extends munit.FunSuite:
     assert(m.contains("requires a value"), m)
   }
 
+  test("repeated options grow past the initial buffer") {
+    // more than four occurrences of a List (builder collector) and of a custom repeated (the
+    // default array collector, exercising its growth path)
+    val many = (1 to 9).flatMap(i => Seq("--file", i.toString))
+    assertEquals(
+      ok(Flagged.parse[Collections](many)).file,
+      (1 to 9).map(_.toString).toList
+    )
+    given Parser.Repeated[String] = Parser.repeated[String, String](l => Ok(l.mkString(",")))
+    case class Joined(file: String = "") derives Parser.Command
+    assertEquals(
+      ok(Flagged.parse[Joined](many)).file,
+      (1 to 9).mkString(",")
+    )
+  }
+
   test("repeated list option") {
     assertEquals(
       ok(Flagged.parse[Collections](Seq("-f", "a", "--file", "b", "-fc"))),
@@ -142,6 +164,46 @@ class OptionsSuite extends munit.FunSuite:
       ok(Flagged.parse[Collections](Seq("--nums", "1", "--nums", "2"))),
       Collections(nums = Vector(1, 2))
     )
+  }
+
+  test("any collection with a Factory works as a repeated option") {
+    assertEquals(
+      ok(
+        Flagged.parse[FactoryCollections](
+          Seq(
+            "--tag",
+            "a",
+            "--tag",
+            "b",
+            "--tag",
+            "a",
+            "--level",
+            "3",
+            "--level",
+            "1",
+            "--raw",
+            "x"
+          )
+        )
+      ),
+      FactoryCollections(
+        tag = Set("a", "b"),
+        level = scala.collection.immutable.SortedSet(1, 3),
+        raw = scala.collection.immutable.ArraySeq("x")
+      )
+    )
+  }
+
+  test("the k=v Map instance wins over the Factory fallback even with a tuple Value in scope") {
+    given Parser.Value[(String, Int)] =
+      Parser.of("pair")(s => Ok((s, 0))) // would parse without '=' if it were used
+    case class M(define: Map[String, Int] = Map.empty) derives Parser.Command
+    assertEquals(
+      ok(Flagged.parse[M](Seq("--define", "a=1", "--define", "b=2"))),
+      M(Map("a" -> 1, "b" -> 2))
+    )
+    val msg = err(Flagged.parse[M](Seq("--define", "nope")))
+    assert(msg.contains("is not in string=int form"), msg)
   }
 
   test("positional arguments in order") {
@@ -260,9 +322,9 @@ class OptionsSuite extends munit.FunSuite:
     )
     assert(e3.contains("@short has no effect on a subcommand field"), e3)
     val e4 = compileErrors(
-      "case class C(@name(\"g\") g: LogOpts) derives Parser.Command"
+      "case class C(@short('g') g: LogOpts = LogOpts()) derives Parser.Command"
     )
-    assert(e4.contains("@name has no effect on a spliced options group"), e4)
+    assert(e4.contains("@short has no effect on a spliced options group"), e4)
   }
 
   test("a shape-erased instance is rejected statically") {
@@ -278,9 +340,10 @@ class OptionsSuite extends munit.FunSuite:
     assert(e1.contains("cannot be used inside Option"), e1)
     val e2 = compileErrors("case class C(@positional v: Count = Count(0)) derives Parser.Command")
     assert(e2.contains("cannot be used positionally"), e2)
-    // Boolean has the explicit-value form, so Option[Boolean] stays legal
+    // Boolean has the explicit-value form, so Option[Boolean] stays legal: presence is Some(true)
     case class D(dry: Option[Boolean] = None) derives Parser.Command
-    assertEquals(ok(Flagged.parse[D](Seq("--dry", "true"))), D(Some(true)))
+    assertEquals(ok(Flagged.parse[D](Seq("--dry"))), D(Some(true)))
+    assertEquals(ok(Flagged.parse[D](Seq("--dry=false"))), D(Some(false)))
   }
 
   test("reserved names are compile errors when given as constants") {

@@ -1,6 +1,5 @@
 package flagged
 
-import java.nio.file.Paths
 import scala.concurrent.duration.*
 
 enum LogLevel derives Parser.Enumerated:
@@ -8,7 +7,6 @@ enum LogLevel derives Parser.Enumerated:
 
 case class ValueConfig(
     level: LogLevel = LogLevel.Info,
-    path: java.nio.file.Path = Paths.get("."),
     timeout: FiniteDuration = 30.seconds,
     ratio: Double = 0.5,
     id: Option[java.util.UUID] = None
@@ -20,10 +18,15 @@ class ValueParserSuite extends munit.FunSuite:
     case Ok(a) => a
     case other => fail(s"expected success, got $other")
 
+  /** Parse a single token through the engine's slot protocol, boxed for assertions. */
+  def read[A](s: String)(using p: Parser[A]): Result[A, String] =
+    val out = new Array[Any](1)
+    p.readInto(s, out, 0).map(_ => out(0).asInstanceOf[A])
+
   test("by-name enum Parser parses by kebab-cased name") {
-    assertEquals(summon[Parser[LogLevel]].read("warn"), Ok(LogLevel.Warn))
-    assertEquals(summon[Parser[LogLevel]].read("DEBUG"), Ok(LogLevel.Debug))
-    assert(summon[Parser[LogLevel]].read("nope").isErr)
+    assertEquals(read[LogLevel]("warn"), Ok(LogLevel.Warn))
+    assert(read[LogLevel]("DEBUG").isErr) // exact match, like clap/click/argmatch
+    assert(read[LogLevel]("nope").isErr)
     assertEquals(summon[Parser[LogLevel]].typeName, "debug|info|warn|error")
   }
 
@@ -34,14 +37,13 @@ class ValueParserSuite extends munit.FunSuite:
     )
   }
 
-  test("built-in readers: path, duration, double, uuid") {
-    val id  = java.util.UUID.randomUUID()
+  test("built-in readers: duration, double, uuid") {
+    val id  = java.util.UUID.fromString("123e4567-e89b-12d3-a456-426614174000")
     val cfg = ok(
       Flagged.parse[ValueConfig](
-        Seq("--path", "/tmp/x", "--timeout", "5s", "--ratio", "0.25", "--id", id.toString)
+        Seq("--timeout", "5s", "--ratio", "0.25", "--id", id.toString)
       )
     )
-    assertEquals(cfg.path, Paths.get("/tmp/x"))
     assertEquals(cfg.timeout, 5.seconds)
     assertEquals(cfg.ratio, 0.25)
     assertEquals(cfg.id, Some(id))
@@ -50,7 +52,6 @@ class ValueParserSuite extends munit.FunSuite:
   test("reader typeName appears as metavar in help") {
     Flagged.parse[ValueConfig](Seq("--help")) match
       case Err(ParseError.Help(t)) =>
-        assert(t.contains("--path <path>"), t)
         assert(t.contains("--timeout <duration>"), t)
         assert(t.contains("--level <debug|info|warn|error>"), t)
       case other => fail(s"expected help, got $other")
@@ -71,9 +72,9 @@ class ValueParserSuite extends munit.FunSuite:
   }
 
   test("boolean reader accepts unix-y spellings") {
-    assertEquals(summon[Parser[Boolean]].read("on"), Ok(true))
-    assertEquals(summon[Parser[Boolean]].read("0"), Ok(false))
-    assert(summon[Parser[Boolean]].read("maybe").isErr)
+    assertEquals(read[Boolean]("on"), Ok(true))
+    assertEquals(read[Boolean]("0"), Ok(false))
+    assert(read[Boolean]("maybe").isErr)
   }
 
   test("flags can accumulate occurrences (counter)") {
@@ -122,7 +123,7 @@ class ValueParserSuite extends munit.FunSuite:
   test("a repeated reader can require at least one occurrence") {
     case class AtLeastOne(xs: List[Int])
     given Parser.Repeated[AtLeastOne] = Parser.repeated[Int, AtLeastOne](l =>
-      if l.isEmpty then Err("expected at least one occurrence") else Ok(AtLeastOne(l))
+      if l.isEmpty then Err("expected at least one occurrence") else Ok(AtLeastOne(l.toList))
     )
     case class Cfg(num: AtLeastOne) derives Parser.Command
     assertEquals(
@@ -140,7 +141,7 @@ class ValueParserSuite extends munit.FunSuite:
       Parser.of[Int]("int")(s => s.toIntOption.fold(Err(s"'$s' not an int"))(Ok(_)))
     given Parser.Repeated[List[Int]] =
       Parser
-        .repeated[Int, List[Int]](l => Ok(l))
+        .repeated[Int, List[Int]](l => Ok(l.toList))
         .emap(l => if l.sum > 10 then Err("sum too large") else Ok(l))
     case class Sums(n: List[Int] = Nil) derives Parser.Command
     assertEquals(ok(Flagged.parse[Sums](Seq("--n", "1", "--n", "2"))), Sums(List(1, 2)))

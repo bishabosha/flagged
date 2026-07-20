@@ -75,7 +75,10 @@ delimiter rule.
 
 flagged is not yet published to a Maven repository. To try it out, clone this repository
 and run `scala-cli test .` or any of the demos in `examples/`; to use it in a project,
-vendor the `src/flagged` directory.
+vendor the `src/flagged` directory. flagged cross-builds for the JVM, Scala.js, and
+Scala Native (`scala-cli test . --js` / `--native`); the platform-specific sources use
+scala-cli's `target.platform` directives, which need power mode
+(`scala-cli config power true` once).
 
 ## Declaring options
 
@@ -87,14 +90,17 @@ repeats:
 
 | Field shape | Meaning |
 |---|---|
-| `x: Boolean` | flag `--x` (also `--x=false`); always optional |
+| `x: Boolean` | flag `--x` (also `--x=false`); always optional, repeatable — the last mention wins |
 | `x: Count` (or any `Parser.Flag[A]`) | counting flag: `-vvv` → `Count(3)` |
 | `x: A` (`Parser.Value[A]`) | required option `--x <a>` |
 | `x: A = default` | optional, default shown in help |
 | `x: Option[A]` | optional, `None` when absent |
-| `x: A` (`Parser.Repeated[A]`, e.g. `List`/`Seq`/`Vector`) | repeatable |
+| `x: Option[Boolean]` | optional flag: absent → `None`, `--x` → `Some(true)`, `--x=false` → `Some(false)` |
+| `x: A` (`Parser.Repeated[A]`, e.g. `List`/`Seq`/`Vector`/`Set`) | repeatable |
+| `x: Map[K, V]` | repeatable `--x key=value` entries |
 | `x: E` (enum `E derives Parser.CommandGroup`) | nested subcommands |
 | `x: P` (case class `P derives Parser.Command`) | options group spliced into this command |
+| `x: Option[P]` | optional group: `None` unless one of its options occurs |
 | `x: Trailing` (or any `Parser.Trailing[A]`) | the raw arguments after `--`, verbatim |
 | `@positional x: A` | positional argument (same rules) |
 
@@ -118,15 +124,27 @@ Fine-tune with annotations:
 
 | Annotation | Effect |
 |---|---|
-| `@name("out")` | override the long name (or command / program name on types) |
+| `@name("out")` | override the long name (or command / program name on types); repeatable — later occurrences are aliases, on fields and on enum cases |
 | `@short('o')` | add a short alias |
 | `@help("...")` | help text for fields, cases, and top-level types |
 | `@positional` | positional argument instead of named option |
+| `@hidden` | omit from help (still parses); on an enum case, an unlisted command. `--help-all` shows them |
+| `@group("Network")` | put the option under a titled help section; on a spliced group field, titles the whole group |
+| `@version` | on the top-level type: help header line plus a `--version` flag; requires a `given Versioned[A]` supplying the version string (constant or computed) |
+| `@default` | on one command-group case: the default command, run when no command token is given (remaining arguments are forwarded to it) |
+
+On a spliced group field, `@name("net")` prefixes the group's option names
+(`--net-host`) and drops their short aliases, so the same group can be spliced more
+than once.
+
+Errors accumulate: unknown options, invalid values, missing option values, and
+missing required arguments are all collected and reported in one failure, one per
+line.
 
 The grammar is validated at compile time: a field type without a `Parser` given,
 conflicting or ineffective annotations (`@positional` with `@short`, `@short` on a
-subcommand field, ...), shape conflicts (`Option` of a repeated parser or of a
-spliced group, a bare flag in `Option`, ...), cross-field rules (two subcommand or
+subcommand field, ...), shape conflicts (`Option` of a repeated parser, a bare flag
+in `Option`, ...), cross-field rules (two subcommand or
 trailing fields, positionals mixed with subcommands, a positional after a repeated
 one), and duplicate constant names (`@short`/`@name`) are all compile errors. Every
 field's instance must carry its shape in its type: the shape *is* the subtype
@@ -250,7 +268,8 @@ Option and positional values use the same `Parser[A]` typeclass as commands, in 
 value shapes. Instances for
 `String`, `Char`, `Boolean`, the numeric types, `BigInt`/`BigDecimal`,
 `java.nio.file.Path`, `java.io.File`, `UUID`, the common `java.time` types, and
-`FiniteDuration` (`"30s"`, `"5.minutes"`) are built in.
+`FiniteDuration` (`"30s"`, `"5.minutes"`) are built in. Instances follow platform
+availability: `java.time` types are JVM-only, `Path` is JVM and Scala Native.
 
 A custom value parser is a one-liner, and its type name becomes the `<metavar>` in help
 output:
@@ -267,16 +286,18 @@ A parser's *shape* is its subtype — `Parser.Value`, `Parser.Flag`,
 builds single-value parsers; `Parser.repeated` builds parsers whose argument may
 appear any number of times, each occurrence parsed by a `Parser.Value` element (so
 repeats cannot nest, by construction) and the collected elements combined by a
-function of your choice. The provided `List`/`Seq`/`Vector` instances are ordinary
-`Parser.repeated` definitions, and any type can opt in the same way — including with
-constraints, since the combining function may fail (it also receives `Nil` when the
-argument is absent):
+function of your choice, from an `IndexedSeq` view of the collected elements. Any
+collection with a `scala.collection.Factory` works out of the box (`List`, `Set`,
+`ArraySeq`, sorted collections, ..., and `Map[K, V]` from `key=value` entries) —
+occurrences append straight to the collection's builder — and any other type can
+opt in through `Parser.repeated`, including with constraints, since the combining
+function may fail (it is also invoked empty when the argument is absent):
 
 ```scala
 given Parser.Repeated[Set[String]] = Parser.repeated[String, Set[String]](l => Ok(l.toSet))
 
 given Parser.Repeated[NonEmpty] = Parser.repeated[Int, NonEmpty](l =>
-  if l.isEmpty then Err("expected at least one occurrence") else Ok(NonEmpty(l)))
+  if l.isEmpty then Err("expected at least one occurrence") else Ok(NonEmpty(l.toList)))
 ```
 
 Flag shape is pluggable the same way: `Parser.flag` builds the value from the number
@@ -306,7 +327,9 @@ case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser.
 Groups nest, and work inside subcommand cases, so common options can be shared across
 a whole command tree. A name collision between a command and a spliced group (or two
 groups) is reported at parser construction; use `@name`/`@short` on either side to
-disambiguate. Spliced groups cannot contain positional fields and cannot be `Option`al.
+disambiguate. Spliced groups cannot contain positional fields. An `Option`-typed group
+field parses to `None`, and a field default is used as-is, unless one of the group's
+options occurs on the command line.
 
 Enums with parameterless cases can derive a by-name value parser:
 
@@ -315,5 +338,5 @@ enum LogLevel derives Parser.Enumerated:
   case Debug, Info, Warn, Error
 ```
 
-gives you `--level warn` (case-insensitive, kebab-cased) and the metavar
+gives you `--level warn` (kebab-cased, matched exactly) and the metavar
 `<debug|info|warn|error>`.

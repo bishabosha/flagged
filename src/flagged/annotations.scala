@@ -21,3 +21,24 @@ final case class help(value: String) extends StaticAnnotation derives Defaults
 
 /** Mark a field as a positional argument instead of a named option. */
 final case class positional() extends StaticAnnotation derives Defaults
+
+/** Omit an option (on a field) or a subcommand (on an enum case) from help output. It still parses;
+  * only the listing is suppressed.
+  */
+final case class hidden() extends StaticAnnotation derives Defaults
+
+/** Opt into a `--version` flag and a version line in the help header. Valid on the top-level type
+  * of a command or command group; requires a given [[Versioned]] instance for the type, which
+  * supplies the version string when it is printed.
+  */
+final case class version() extends StaticAnnotation derives Defaults
+
+/** Put an option under a titled section in help output (`Output options:`). On a spliced options
+  * group field, titles all of the group's options that have no group of their own.
+  */
+final case class group(value: String) extends StaticAnnotation derives Defaults
+
+/** Mark one case of a command-group enum as the default command: selected when no command token is
+  * given, with the remaining arguments forwarded to it.
+  */
+final case class default() extends StaticAnnotation derives Defaults

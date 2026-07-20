@@ -79,6 +79,23 @@ object AnnotMirror:
         )
       case _: (_ *: t) => findImpl[A, t, B](finish)
 
+  /** All slots in `Anns` that match type `A`, in declaration order, materialised as named tuples
+    * (for repeatable annotations). Default arguments are filled in.
+    */
+  inline def findAll[A <: Annotation: {Mirror.ProductOf as m, Defaults}, Anns]
+      : List[NamedTuple.From[A]] =
+    findAllImpl[A, Anns, NamedTuple.From[A]]: args =>
+      NamedTuple(args).asInstanceOf[NamedTuple.From[A]]
+
+  private inline def findAllImpl[A <: Annotation: {Mirror.ProductOf as m, Defaults}, Anns, B](
+      inline finish: Tuple => B
+  ): List[B] =
+    inline erasedValue[Anns] match
+      case _: EmptyTuple                     => Nil
+      case _: (Ann[A, args, defaulted] *: t) =>
+        finish(argsOf[A, m.MirroredElemTypes, args, defaulted]) :: findAllImpl[A, t, B](finish)
+      case _: (_ *: t) => findAllImpl[A, t, B](finish)
+
   /** The constructor-argument tuple for one mirrored annotation: provided constants are
     * materialised directly; defaulted positions are looked up through the annotation's [[Defaults]]
     * mirror (which throws on an index without a default — unreachable for mirrors synthesized by

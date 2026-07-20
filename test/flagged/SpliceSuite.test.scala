@@ -97,9 +97,58 @@ class SpliceSuite extends munit.FunSuite:
     assert(e.getMessage.contains("options group 'logging'"), e.getMessage)
   }
 
-  test("Option of a spliced group is rejected at compile time") {
-    val e = compileErrors("case class Bad(logging: Option[LogOpts] = None) derives Parser.Command")
-    assert(e.contains("Option of a spliced options group"), e)
+  test("Option of a spliced group: None unless one of its options occurs") {
+    case class MaybeLogged(port: Int = 8080, logging: Option[LogOpts] = None) derives Parser.Command
+    assertEquals(ok(Flagged.parse[MaybeLogged](Seq("--port", "9000"))), MaybeLogged(9000, None))
+    assertEquals(
+      ok(Flagged.parse[MaybeLogged](Seq("-q"))),
+      MaybeLogged(logging = Some(LogOpts(quiet = true)))
+    )
+  }
+
+  test("a field default on a spliced group applies when none of its options occur") {
+    case class Auth(user: String, token: String = "-") derives Parser.Command
+    case class Push(repo: String = ".", auth: Auth = Auth("anon")) derives Parser.Command
+    assertEquals(ok(Flagged.parse[Push](Nil)), Push(".", Auth("anon")))
+    assertEquals(ok(Flagged.parse[Push](Seq("--user", "u"))), Push(".", Auth("u")))
+    // once any of its options occurs, the group is built: required options are enforced
+    val msg = err(Flagged.parse[Push](Seq("--token", "t")))
+    assert(msg.contains("--user"), msg)
+  }
+
+  test("an absent optional group skips its required options; a present one enforces them") {
+    case class Auth(user: String, token: String) derives Parser.Command
+    case class Pull(repo: String = ".", auth: Option[Auth] = None) derives Parser.Command
+    assertEquals(ok(Flagged.parse[Pull](Nil)), Pull(".", None))
+    assertEquals(
+      ok(Flagged.parse[Pull](Seq("--user", "u", "--token", "t"))),
+      Pull(".", Some(Auth("u", "t")))
+    )
+    val msg = err(Flagged.parse[Pull](Seq("--user", "u")))
+    assert(msg.contains("--token"), msg)
+    assert(!msg.contains("--user"), msg)
+  }
+
+  test("@name on a spliced group prefixes its options, allowing repeat splices") {
+    case class Endpoint(host: String = "localhost", port: Int = 80) derives Parser.Command
+    case class Proxy(
+        @name("from") src: Endpoint = Endpoint(),
+        @name("to") dst: Endpoint = Endpoint()
+    ) derives Parser.Command
+    assertEquals(
+      ok(Flagged.parse[Proxy](Seq("--from-host", "a", "--to-port", "8080"))),
+      Proxy(Endpoint(host = "a"), Endpoint(port = 8080))
+    )
+    val msg = err(Flagged.parse[Proxy](Seq("--host", "a")))
+    assert(msg.contains("unknown option '--host'"), msg)
+  }
+
+  test("a prefixed splice drops the group's short aliases") {
+    case class Verbosity(@short('v') level: Int = 0) derives Parser.Command
+    case class App2(@name("log") log: Verbosity = Verbosity()) derives Parser.Command
+    assertEquals(ok(Flagged.parse[App2](Seq("--log-level", "3"))), App2(Verbosity(3)))
+    val msg = err(Flagged.parse[App2](Seq("-v", "3")))
+    assert(msg.contains("unknown option '-v'"), msg)
   }
 
   test("a spliced group with a trailing field is rejected") {

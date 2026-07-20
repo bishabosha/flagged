@@ -18,7 +18,15 @@ private enum Plan:
   case Named(spec: OptSpec)
   case Positional(spec: PosSpec, kind: PosKind)
   case Commands(index: Int, optional: Boolean, default: Option[() => Any], inner: Command)
-  case Grouped(index: Int, label: String, inner: Command)
+  case Grouped(
+      index: Int,
+      label: String,
+      prefix: Option[String],
+      group: Option[String],
+      optional: Boolean,
+      default: Option[() => Any],
+      inner: Command
+  )
   case Rest(spec: TrailingSpec)
 
 private enum PosKind:
@@ -29,9 +37,13 @@ private final case class Field(
     index: Int,
     label: String,
     long: String,
+    nameAnn: Option[String],
     short: Option[Char],
     help: String,
     positional: Boolean,
+    hidden: Boolean,
+    group: Option[String],
+    aliases: List[String],
     optional: Boolean,
     default: Option[() => Any],
     parser: Parser[?]
@@ -49,19 +61,21 @@ object Assemble:
 
   def kebab(s: String): String =
     val b = new StringBuilder
-    s.zipWithIndex.foreach { (c, i) =>
-      if c.isUpper then
-        if i > 0 && !s(i - 1).isUpper then b += '-'
-        b += c.toLower
-      else b += c
-    }
+    var i = 0
+    while i < s.length do
+      val c = s(i)
+      if i > 0 then
+        val p = s(i - 1)
+        // word boundaries: before an upper after non-upper, and at both edges of a digit run
+        val boundary =
+          (c.isUpper && !p.isUpper) || (c.isDigit && !p.isDigit) || (c.isLetter && p.isDigit)
+        if boundary && p != '-' then b += '-'
+      b += c.toLower
+      i += 1
     b.result()
 
   def progName(label: String, onType: TargetAnnots): String =
     onType.name.getOrElse(kebab(label))
-
-  private def readFn(p: Parser[?]): String => Result[Any, String] =
-    s => p.asInstanceOf[Parser[Any]].read(s)
 
   private def invalid(msg: String): Nothing =
     throw new IllegalArgumentException(s"flagged: invalid CLI definition: $msg")
@@ -83,19 +97,15 @@ object Assemble:
   /** The command view of a value-shaped parser: one positional argument. */
   def singleValueCommand(p: Parser[?]): Command =
     val mode = p match
-      case _: Parser.Value[?]       => Mode.Single(readFn(p), false)
-      case vf: Parser.ValuedFlag[?] =>
-        Mode.Single(vf.fromValue.asInstanceOf[String => Result[Any, String]], false)
-      case _: Parser.Flag[?] =>
+      case _: Parser.Value[?]      => Mode.Single(p, false)
+      case _: Parser.ValuedFlag[?] => Mode.Single(p, false)
+      case _: Parser.Flag[?]       =>
         invalid("a flag parser without a value parser cannot be run standalone")
       case r: Parser.Repeated[?] =>
-        Mode.Repeated(
-          s => r.element.parse(s),
-          r.build.asInstanceOf[List[Any] => Result[Any, String]]
-        )
+        Mode.Repeated(r)
       case t: Parser.Trailing[?] =>
         val spec =
-          TrailingSpec(0, "", t.build, false, None)
+          TrailingSpec(0, "", t, false, None)
         return Command(
           "",
           Vector.empty,
@@ -119,47 +129,60 @@ object Assemble:
       1
     )
 
-  def sum(caseLabels: List[String], annots: Annots.Sum[?], entries: List[SubEntry]): Command =
+  def sum(
+      caseLabels: List[String],
+      annots: Annots.Sum[?],
+      entries: List[SubEntry],
+      version: Option[() => String]
+  ): Command =
     val cases = entries.zipWithIndex.map { (e, i) =>
       val anns = annots.perCase(i)
       val help = anns.help.getOrElse("")
       val cmd  = e match
         case SubEntry.Leaf(v) => Command.leaf(v, help)
         case SubEntry.Node(p) => p().command
-      SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd)
-    }
+      SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden, anns.aliases)
+    }.toVector
+    val defaultIdxs = annots.perCase.zipWithIndex.collect { case (a, i) if a.default => i }
+    if defaultIdxs.sizeIs > 1 then invalid("only one @default command is supported")
+    val defaultCase = defaultIdxs.headOption.map(cases(_))
     Command(
       annots.onType.help.getOrElse(""),
       Vector.empty,
       Vector.empty,
-      Some(SubGroup(0, false, None, cases.toVector)),
+      Some(SubGroup(0, false, None, cases, defaultCase)),
       None,
       Nil,
       arr => Result.Ok(arr(0)),
-      1
+      1,
+      version
     )
 
   // ---- product assembly -------------------------------------------------------
 
   def product(
       labels: List[String],
-      fields: List[(Parser[?], Boolean)],
+      fields: List[(Parser[?], Boolean, FieldAnnots)],
       defaults: Defaults[?],
-      annots: Annots.Product[?],
-      build: Array[Any] => Result[Any, String]
+      onType: TargetAnnots,
+      build: Array[Any] => Result[Any, String],
+      version: Option[() => String]
   ): Command =
     val n     = labels.length
-    val plans = (0 until n).toList.map { i =>
-      val anns          = annots.perField(i)
-      val (parser, opt) = fields(i)
+    val plans = labels.lazyZip(fields).lazyZip(labels.indices).map { (label, triple, i) =>
+      val (parser, opt, anns) = triple
       resolveField(
         Field(
           index = i,
-          label = labels(i),
-          long = anns.name.getOrElse(kebab(labels(i))),
+          label = label,
+          long = anns.name.getOrElse(kebab(label)),
+          nameAnn = anns.name,
           short = anns.short,
           help = anns.help.getOrElse(""),
           positional = anns.positional,
+          hidden = anns.hidden,
+          group = anns.group,
+          aliases = anns.aliases,
           optional = opt,
           default =
             if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None,
@@ -167,11 +190,8 @@ object Assemble:
         )
       )
     }
-    combine(n, plans, annots.onType, build)
+    combine(n, plans, onType, build, version)
 
-  /** The complete field matrix: one parser shape × `@positional` × `Option[_]` case at a time, each
-    * producing a [[Plan]] or a construction error.
-    */
   /** Translate one field into its [[Plan]]. Shape x annotation combinations are guaranteed by the
     * compile-time layer in `Derive`; only value-level rules (reserved/duplicate names via
     * kebab-cased labels, splice contents) are checked here.
@@ -182,7 +202,20 @@ object Assemble:
       if f.optional || f.default.nonEmpty then PosKind.Optional else PosKind.Required
     def named(metavar: String, mode: Mode): Plan =
       if f.long == "help" then bad("option name 'help' is reserved")
-      Plan.Named(OptSpec(f.long, f.short, f.help, metavar, f.index, mode, f.default))
+      Plan.Named(
+        OptSpec(
+          f.long,
+          f.short,
+          f.help,
+          metavar,
+          f.index,
+          mode,
+          f.default,
+          f.hidden,
+          f.group,
+          f.aliases
+        )
+      )
     def positional(metavar: String, mode: Mode, kind: PosKind): Plan =
       Plan.Positional(PosSpec(f.long, f.help, metavar, f.index, mode, f.default), kind)
 
@@ -196,32 +229,26 @@ object Assemble:
           bad("a spliced options group cannot contain positional fields")
         if inner.trailing.nonEmpty then
           bad("a spliced options group cannot contain a trailing field")
-        Plan.Grouped(f.index, f.label, inner)
+        Plan.Grouped(f.index, f.label, f.nameAnn, f.group, f.optional, f.default, inner)
 
       case vf: Parser.ValuedFlag[?] =>
-        val fv = vf.fromValue.asInstanceOf[String => Result[Any, String]]
-        if f.positional || f.optional then
-          val mode = Mode.Single(fv, f.optional)
-          if f.positional then positional("value", mode, posKind) else named("value", mode)
-        else named("", Mode.Flag(vf.fromCount.asInstanceOf[Int => Result[Any, String]], Some(fv)))
+        if f.positional then positional("value", Mode.Single(vf, f.optional), posKind)
+        else named("", Mode.Flag(vf, f.optional))
 
       case fl: Parser.Flag[?] =>
-        named("", Mode.Flag(fl.fromCount.asInstanceOf[Int => Result[Any, String]], None))
+        named("", Mode.Flag(fl, false))
 
       case v: Parser.Value[?] =>
-        val mode = Mode.Single(readFn(f.parser), f.optional)
+        val mode = Mode.Single(v, f.optional)
         if f.positional then positional(v.typeName, mode, posKind) else named(v.typeName, mode)
 
       case r: Parser.Repeated[?] =>
-        val mode = Mode.Repeated(
-          s => r.element.parse(s),
-          r.build.asInstanceOf[List[Any] => Result[Any, String]]
-        )
+        val mode = Mode.Repeated(r)
         if f.positional then positional(r.typeName, mode, PosKind.Repeated)
         else named(r.typeName, mode)
 
       case t: Parser.Trailing[?] =>
-        Plan.Rest(TrailingSpec(f.index, f.help, t.build, f.optional, f.default))
+        Plan.Rest(TrailingSpec(f.index, f.help, t, f.optional, f.default))
 
   /** Cross-field aggregation: name uniqueness, at-most-one subcommand/trailing field, positional
     * ordering, splice storage layout.
@@ -230,7 +257,8 @@ object Assemble:
       n: Int,
       plans: List[Plan],
       onType: TargetAnnots,
-      build: Array[Any] => Result[Any, String]
+      build: Array[Any] => Result[Any, String],
+      version: Option[() => String]
   ): Command =
     val names = NameRegistry()
 
@@ -245,27 +273,42 @@ object Assemble:
     plans.foreach {
       case Plan.Named(spec) =>
         names.register(spec.long, spec.short, from = None)
+        spec.aliases.foreach(a => names.register(a, None, from = None))
         opts += spec
       case Plan.Positional(spec, kind) =>
         posKinds += ((spec.name, kind))
         poss += spec
       case Plan.Commands(index, optional, default, inner) =>
         if sub.nonEmpty then invalid("only one subcommand field is supported per command")
-        sub = Some(SubGroup(index, optional, default, inner.sub.get.cases))
-      case Plan.Grouped(index, label, inner) =>
+        val g = inner.sub.get
+        sub = Some(SubGroup(index, optional, default, g.cases, g.defaultCase))
+      case Plan.Grouped(index, label, prefix, group, optional, default, inner) =>
         inner.opts.foreach { o =>
-          names.register(o.long, o.short, from = Some(label))
-          opts += o.copy(index = storage + o.index)
+          // a prefixed splice renames its options (--net-host) and drops their short aliases,
+          // so the same group can be spliced more than once
+          val long    = prefix.fold(o.long)(pre => s"$pre-${o.long}")
+          val short   = if prefix.isEmpty then o.short else None
+          val aliases = o.aliases.map(a => prefix.fold(a)(pre => s"$pre-$a"))
+          names.register(long, short, from = Some(label))
+          aliases.foreach(a => names.register(a, None, from = Some(label)))
+          opts += o.copy(
+            long = long,
+            short = short,
+            index = storage + o.index,
+            group = o.group.orElse(group),
+            aliases = aliases
+          )
         }
-        splices += Splice(index, storage, inner)
+        splices += Splice(index, storage, inner, optional, default)
         storage += inner.arity
       case Plan.Rest(spec) =>
         if trailing.nonEmpty then invalid("only one trailing field is supported per command")
         trailing = Some(spec)
     }
 
+    val positionals = poss.result()
     checkPositionalOrder(posKinds.result())
-    if sub.nonEmpty && poss.result().nonEmpty then
+    if sub.nonEmpty && positionals.nonEmpty then
       invalid("mixing positional fields with a subcommand field is ambiguous and not supported")
 
     val allSplices = splices.result()
@@ -275,12 +318,13 @@ object Assemble:
     Command(
       onType.help.getOrElse(""),
       opts.result(),
-      poss.result(),
+      positionals,
       sub,
       trailing,
       allSplices,
       fullBuild,
-      storage
+      storage,
+      version
     )
 
   /** Long / short option names claimed so far; duplicates are construction errors. */
@@ -299,6 +343,6 @@ object Assemble:
     kinds.zipWithIndex.foreach { case ((nm, kind), idx) =>
       if kind == PosKind.Repeated && idx != kinds.length - 1 then
         invalid(s"positional '$nm': a repeated positional must be the last positional field")
-      if kind == PosKind.Required && kinds.take(idx).exists(_._2 != PosKind.Required) then
+      if kind == PosKind.Required && kinds.take(idx).exists(_(1) != PosKind.Required) then
         invalid(s"positional '$nm': required positionals must come before optional ones")
     }
