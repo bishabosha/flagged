@@ -113,9 +113,9 @@ private[flagged] object Engine:
         if c == null then
           c = parser.collector()
           reps(index) = c
-        parser.element.readInto(raw, values, index) match
+        c.offer(raw, values, index) match
           case Err(msg) => report(s"invalid value for '$display': $msg")
-          case _        => c.add(values(index))
+          case _        => ()
 
       /** A value mention. */
       def offerValue(index: Int, mode: Mode, raw: String, display: String): Unit =

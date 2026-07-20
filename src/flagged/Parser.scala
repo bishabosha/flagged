@@ -67,9 +67,8 @@ sealed trait Parser[A]:
       (this: @unchecked) match
         case _: Parser.Flag[A]     => eval.raise(s"'$s': this flag does not take a value")
         case r: Parser.Repeated[A] =>
-          r.element.readInto(s, out, i).check
           val c = r.collector()
-          c.add(out(i))
+          c.offer(s, out, i).check
           c.finishInto(out, i).check
         case t: Parser.Trailing[A] => out(i) = t.build(List(s)).ok
         case c: Parser.Command[A]  =>
@@ -117,28 +116,41 @@ sealed trait Parser[A]:
 object Parser extends ParserLowPriority:
   def apply[A](using p: Parser[A]): Parser[A] = p
 
-  /** Engine protocol: per-parse accumulator for one repeated slot. The engine offers each
-    * successfully parsed element through [[add]]; [[finishInto]] writes the combined collection
-    * into the slot. [[size]] counts what was added, so the engine can skip the build when any
-    * element failed to parse.
+  /** Engine protocol: per-parse accumulator for one repeated slot. The engine [[offer]]s each raw
+    * element token — parsed by [[read]] into the slot (scratch until finish) and accumulated on
+    * success; [[finishInto]] writes the combined collection into the slot. [[size]] counts what was
+    * accumulated, so the engine can skip the build when any element failed to parse. Owning the
+    * element parse lets a collector reuse per-parse scratch across elements (the `Map` instance's
+    * pair slots).
     */
   private[flagged] abstract class Collector:
     private var n = 0
 
-    final def size: Int         = n
-    final def add(v: Any): Unit =
-      append(v)
-      n += 1
+    final def size: Int = n
+
+    final def offer(s: String, out: Array[Any], i: Int): Result[Unit, String] =
+      val r = read(s, out, i)
+      r match
+        case _: Err[?] => ()
+        case _         =>
+          append(out(i))
+          n += 1
+      r
+
+    protected def read(s: String, out: Array[Any], i: Int): Result[Unit, String]
 
     /** Called with `size` still at the pre-insertion count. */
     protected def append(v: Any): Unit
     def finishInto(out: Array[Any], i: Int): Result[Unit, String]
 
   /** A [[Collector]] appending to a collection builder; the built collection is the slot value. */
-  private[flagged] final class BuilderCollector[E](b: scala.collection.mutable.Builder[E, Any])
-      extends Collector:
-    protected def append(v: Any)            = b += v.asInstanceOf[E]
-    def finishInto(out: Array[Any], i: Int) =
+  private[flagged] final class BuilderCollector[E](
+      elem: Value[E],
+      b: scala.collection.mutable.Builder[E, Any]
+  ) extends Collector:
+    protected def read(s: String, out: Array[Any], i: Int) = elem.readInto(s, out, i)
+    protected def append(v: Any)                           = b += v.asInstanceOf[E]
+    def finishInto(out: Array[Any], i: Int)                =
       Result.task:
         out(i) = b.result()
 
@@ -231,9 +243,11 @@ object Parser extends ParserLowPriority:
       type Elem = self.Elem
       def element                      = self.element
       private[flagged] def collector() = new Collector:
-        private val inner                       = self.collector()
-        protected def append(v: Any)            = inner.add(v)
-        def finishInto(out: Array[Any], i: Int) =
+        private val inner = self.collector()
+        // the inner offer both parses and accumulates, so this wrapper's append adds nothing
+        protected def read(s: String, out: Array[Any], i: Int) = inner.offer(s, out, i)
+        protected def append(v: Any)                           = ()
+        def finishInto(out: Array[Any], i: Int)                =
           Result.task:
             inner.finishInto(out, i).check
             out(i) = f(out(i).asInstanceOf[A]).ok
@@ -320,9 +334,10 @@ object Parser extends ParserLowPriority:
       type Elem = E
       def element                      = elem
       private[flagged] def collector() = new Collector:
-        private val b                           = ArraySeq.untagged.newBuilder[Any]
-        protected def append(v: Any)            = b += v
-        def finishInto(out: Array[Any], i: Int) =
+        private val b                                          = ArraySeq.untagged.newBuilder[Any]
+        protected def read(s: String, out: Array[Any], i: Int) = elem.readInto(s, out, i)
+        protected def append(v: Any)                           = b += v
+        def finishInto(out: Array[Any], i: Int)                =
           intoSlot(combine(b.result().asInstanceOf[IndexedSeq[E]]), out, i)
 
   /** Opt `A` into trailing shape: it is built from the raw arguments after `--`. */
@@ -345,35 +360,48 @@ object Parser extends ParserLowPriority:
   given [A] => (elem: Value[A]) => Repeated[List[A]]:
     type Elem = A
     def element                      = elem
-    private[flagged] def collector() = BuilderCollector(List.newBuilder[A])
+    private[flagged] def collector() = BuilderCollector(elem, List.newBuilder[A])
 
   given [A] => (elem: Value[A]) => Repeated[Vector[A]]:
     type Elem = A
     def element                      = elem
-    private[flagged] def collector() = BuilderCollector(Vector.newBuilder[A])
+    private[flagged] def collector() = BuilderCollector(elem, Vector.newBuilder[A])
 
   given [A] => (elem: Value[A]) => Repeated[Seq[A]]:
     type Elem = A
     def element                      = elem
-    private[flagged] def collector() = BuilderCollector(ArraySeq.untagged.newBuilder[A])
+    private[flagged] def collector() = BuilderCollector(elem, ArraySeq.untagged.newBuilder[A])
 
   private final class PairValue[K, V](k: Value[K], v: Value[V]) extends Value[(K, V)]:
     def typeName = s"${k.typeName}=${v.typeName}"
-    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
+
+    /** Parse into `out(i)` through caller-owned pair scratch (at least 2 slots). */
+    def readInto(s: String, scratch: Array[Any], out: Array[Any], i: Int): Result[Unit, String] =
       Result.task:
         s.indexOf('=') match
           case -1 => eval.raise(s"'$s' is not in $typeName form")
           case eq =>
-            val slots = new Array[Any](2)
-            k.readInto(s.take(eq), slots, 0).check
-            v.readInto(s.drop(eq + 1), slots, 1).check
-            out(i) = (slots(0).asInstanceOf[K], slots(1).asInstanceOf[V])
+            k.readInto(s.take(eq), scratch, 0).check
+            v.readInto(s.drop(eq + 1), scratch, 1).check
+            out(i) = (scratch(0).asInstanceOf[K], scratch(1).asInstanceOf[V])
+
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
+      readInto(s, new Array[Any](2), out, i)
 
   /** Each occurrence is one `key=value` entry, split at the first `=`; later entries win. */
   given [K, V] => (k: Value[K], v: Value[V]) => Repeated[Map[K, V]]:
     type Elem = (K, V)
-    val element                      = PairValue(k, v)
-    private[flagged] def collector() = BuilderCollector(Map.newBuilder[K, V])
+    private val pair                 = PairValue(k, v)
+    def element: Value[Elem]         = pair
+    private[flagged] def collector() = new Collector:
+      private val b     = Map.newBuilder[K, V]
+      private val slots = new Array[Any](2) // pair scratch, reused across entries
+
+      protected def read(s: String, out: Array[Any], i: Int) = pair.readInto(s, slots, out, i)
+      protected def append(v: Any)                           = b += v.asInstanceOf[Elem]
+      def finishInto(out: Array[Any], i: Int)                =
+        Result.task:
+          out(i) = b.result()
 
   // built-in instances implement `readInto` directly, so the default path is plain virtual
   // dispatch with no closures; only user-constructed parsers (`of`, `emap`, ...) go through a
@@ -457,4 +485,4 @@ sealed trait ParserLowPriority:
   given [A, C] => (factory: Factory[A, C], elem: Parser.Value[A]) => Parser.Repeated[C]:
     type Elem = A
     def element                      = elem
-    private[flagged] def collector() = Parser.BuilderCollector(factory.newBuilder)
+    private[flagged] def collector() = Parser.BuilderCollector(elem, factory.newBuilder)
