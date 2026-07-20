@@ -3,9 +3,10 @@
 Produced by the suites in this directory (see `README.md` for methodology and caveats). Scores
 are JMH averages ± 99.9% confidence intervals, one forked JVM, 5 warmup + 5 measurement
 iterations. Compile-time tables were measured at `7062642` (the engine work since does not
-touch derivation); runtime tables are a single run at `23029bc`.
+touch derivation); runtime tables are a single run at `ff4a33f` (mainargs/case-app columns and
+the cross-platform table at `23029bc` — their code paths did not change in between).
 
-- Date: 2026-07-20, flagged commit `23029bc`
+- Date: 2026-07-20, flagged commit `ff4a33f`
 - Hardware: Apple M3 Max, 64 GB, macOS 26.5.1
 - JVM: Temurin OpenJDK 25.0.2, Scala 3.8.3, JMH 1.37
 - Library versions: mainargs 0.7.8, case-app 2.1.0
@@ -62,33 +63,33 @@ where user code supplies them (`Parser.of`, `emap`, custom combinators).
 
 | Scenario | flagged | mainargs | case-app |
 |---|---|---|---|
-| `empty` — µs/op | 0.067 ± 0.005 | 0.137 ± 0.002 | 0.076 ± 0.001 |
-| `empty` — B/op | 488 | 1 064 | 536 |
-| `simple` — µs/op | 0.122 ± 0.002 | 0.983 ± 0.057 | 1.273 ± 0.011 |
-| `simple` — B/op | 744 | 5 392 | 8 504 |
-| `repeated` — µs/op | 0.172 ± 0.005 | 0.937 ± 0.066 | 3.783 ± 0.055 |
-| `repeated` — B/op | 960 | 5 080 | 23 528 |
+| `empty` — µs/op | 0.041 ± 0.001 | 0.137 ± 0.002 | 0.076 ± 0.001 |
+| `empty` — B/op | 272 | 1 064 | 536 |
+| `simple` — µs/op | 0.110 ± 0.001 | 0.983 ± 0.057 | 1.273 ± 0.011 |
+| `simple` — B/op | 528 | 5 392 | 8 504 |
+| `repeated` — µs/op | 0.144 ± 0.001 | 0.937 ± 0.066 | 3.783 ± 0.055 |
+| `repeated` — B/op | 760 | 5 080 | 23 528 |
 
 ### flagged × mainargs (short clusters, typed leftover)
 
 | Scenario | flagged | mainargs |
 |---|---|---|
-| `bundled` — µs/op | 0.131 ± 0.003 | 1.153 ± 0.028 |
-| `bundled` — B/op | 784 | 6 680 |
-| `leftover` — µs/op | 0.161 ± 0.003 | 0.266 ± 0.006 |
-| `leftover` — B/op | 928 | 2 760 |
+| `bundled` — µs/op | 0.105 ± 0.001 | 1.153 ± 0.028 |
+| `bundled` — B/op | 568 | 6 680 |
+| `leftover` — µs/op | 0.163 ± 0.000 | 0.266 ± 0.006 |
+| `leftover` — B/op | 856 | 2 760 |
 
 ### flagged × case-app (counters, option groups)
 
 | Scenario | flagged | case-app |
 |---|---|---|
-| `counter` — µs/op | 0.096 ± 0.005 | 2.075 ± 0.035 |
-| `counter` — B/op | 624 | 12 008 |
-| `group` — µs/op | 0.200 ± 0.004 | 2.992 ± 0.065 |
-| `group` — B/op | 912 | 17 544 |
+| `counter` — µs/op | 0.084 ± 0.001 | 2.075 ± 0.035 |
+| `counter` — B/op | 496 | 12 008 |
+| `group` — µs/op | 0.147 ± 0.002 | 2.992 ± 0.065 |
+| `group` — B/op | 688 | 17 544 |
 
-On non-trivial argument lists flagged parses in 0.10–0.20 µs across all scenarios, 5–21×
-faster than mainargs and case-app on the same inputs, allocating 5–25× less — the remaining
+On non-trivial argument lists flagged parses in 0.08–0.16 µs across all scenarios, 6–24×
+faster than mainargs and case-app on the same inputs, allocating 6–32× less — the remaining
 bytes are the parse's actual output (the config object, `Some` wrappers for declared Option
 fields, value substrings of `=`-forms) plus one set of per-parse state arrays. The closest
 contest is mainargs' `Leftover` (1.7×), whose token pass-through is already minimal.
