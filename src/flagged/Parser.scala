@@ -67,18 +67,13 @@ sealed trait Parser[A]:
       (this: @unchecked) match
         case _: Parser.Flag[A]     => eval.raise(s"'$s': this flag does not take a value")
         case r: Parser.Repeated[A] =>
-          r.parseElemInto(s, out, i).check
-          r.buildInto(IndexedSeq(out(i)), out, i).check
+          r.element.readInto(s, out, i).check
+          val c = r.collector()
+          c.add(out(i))
+          c.finishInto(out, i).check
         case t: Parser.Trailing[A] => out(i) = t.build(List(s)).ok
         case c: Parser.Command[A]  =>
           eval.raise(s"'$s': '${c.prog}' is a command parser, not a single value")
-
-  /** [[readInto]] boxed: parse a single token to a value (tests and diagnostics). */
-  private[flagged] final def read(s: String): Result[A, String] =
-    Result:
-      val out = new Array[Any](1)
-      readInto(s, out, 0).check
-      out(0).asInstanceOf[A]
 
   /** The command grammar: command shapes directly; value shapes as a command line with one
     * positional argument.
@@ -139,6 +134,14 @@ object Parser extends ParserLowPriority:
     protected def append(v: Any): Unit
     def finishInto(out: Array[Any], i: Int): Result[Unit, String]
 
+  /** A [[Collector]] appending to a collection builder; the built collection is the slot value. */
+  private[flagged] final class BuilderCollector[E](b: scala.collection.mutable.Builder[E, Any])
+      extends Collector:
+    protected def append(v: Any)            = b += v.asInstanceOf[E]
+    def finishInto(out: Array[Any], i: Int) =
+      Result.task:
+        out(i) = b.result()
+
   /** Unbox a `Result` into a value slot: success is the shared [[Result.done]] (no allocation), an
     * `Err` passes through unchanged (no re-wrapping).
     */
@@ -157,22 +160,20 @@ object Parser extends ParserLowPriority:
     /** Engine protocol: parse `s` into `out(i)`; the shared [[Result.done]] on success (built-in
       * instances write the slot directly — no `Ok` per token).
       */
-    private[flagged] def parseInto(s: String, out: Array[Any], i: Int): Result[Unit, String]
-    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
-      parseInto(s, out, i)
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String]
 
     def emap[B](f: A => Result[B, String]): Value[B] = new Value[B]:
-      def typeName                                                       = self.typeName
-      private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
+      def typeName                                                               = self.typeName
+      override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
         Result.task:
-          self.parseInto(s, out, i).check
+          self.readInto(s, out, i).check
           out(i) = f(out(i).asInstanceOf[A]).ok
 
     /** Rename only: delegates parsing, keeping the original's allocation-free slot path. */
     def withTypeName(name: String): Value[A] = new Value[A]:
-      def typeName                                                       = name
-      private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
-        self.parseInto(s, out, i)
+      def typeName                                                               = name
+      override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
+        self.readInto(s, out, i)
 
   /** A value parser for an enum with parameterless cases, matched by its kebab-cased case name:
     * `enum Color derives Parser.Enumerated`.
@@ -204,50 +205,38 @@ object Parser extends ParserLowPriority:
     override private[flagged] def takesValue: Boolean = true
 
     /** Engine protocol: parse the explicit `--flag=value` form into `out(i)`. */
-    private[flagged] def fromValueInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-      intoSlot(fromValue(s), out, i)
     override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
-      fromValueInto(s, out, i)
+      intoSlot(fromValue(s), out, i)
     override def emap[B](f: A => Result[B, String]): ValuedFlag[B] =
       flag(n => fromCount(n).flatMap(f), s => fromValue(s).flatMap(f))
 
   /** Any number of occurrences, each parsed by a `Value` element (so repeats cannot nest, by
-    * construction), combined with `build` from an indexed view of the collected elements (an
-    * `ArraySeq` over the engine's array — also invoked empty when the argument is absent; return
-    * `Err` to require at least one occurrence).
+    * construction) and accumulated by a per-parse [[Collector]]. The collector is also finished
+    * empty when the argument is absent, so a `Parser.repeated` combining function may reject zero
+    * occurrences.
     */
   sealed trait Repeated[A] extends Parser[A]:
+    self =>
     type Elem
     def element: Value[Elem]
-    def build(l: IndexedSeq[Elem]): Result[A, String]
-    final def typeName: String                          = element.typeName
-    def emap[B](f: A => Result[B, String]): Repeated[B] =
-      repeated[Elem, B](l => build(l).flatMap(f))(using element)
-    private[flagged] final def parseElemInto(
-        s: String,
-        out: Array[Any],
-        i: Int
-    ): Result[Unit, String] = element.parseInto(s, out, i)
+    final def typeName: String = element.typeName
 
-    /** Engine protocol: combine the collected elements into `out(i)`; built-in collection instances
-      * write the slot directly — their `build` cannot fail, so no `Ok` per parse.
+    /** Engine protocol: a fresh accumulator for one parse. Collection instances append straight to
+      * the collection's builder — elements are materialised exactly once; `Parser.repeated`
+      * combinators collect an `IndexedSeq` for their combining function.
       */
-    private[flagged] def buildInto(
-        l: IndexedSeq[Any],
-        out: Array[Any],
-        i: Int
-    ): Result[Unit, String] =
-      intoSlot(build(l.asInstanceOf[IndexedSeq[Elem]]), out, i)
+    private[flagged] def collector(): Collector
 
-    /** Engine protocol: a fresh accumulator for one parse. The default collects into an array and
-      * finishes through [[buildInto]] (`build` needs the full element sequence, and the `Seq`
-      * instance wraps the array zero-copy); builder-backed collection instances override to append
-      * straight to the collection's builder — elements are materialised exactly once.
-      */
-    private[flagged] def collector(): Collector = new Collector:
-      private val b                           = ArraySeq.untagged.newBuilder[Any]
-      protected def append(v: Any)            = b += v
-      def finishInto(out: Array[Any], i: Int) = buildInto(b.result(), out, i)
+    def emap[B](f: A => Result[B, String]): Repeated[B] = new Repeated[B]:
+      type Elem = self.Elem
+      def element                      = self.element
+      private[flagged] def collector() = new Collector:
+        private val inner                       = self.collector()
+        protected def append(v: Any)            = inner.add(v)
+        def finishInto(out: Array[Any], i: Int) =
+          Result.task:
+            inner.finishInto(out, i).check
+            out(i) = f(out(i).asInstanceOf[A]).ok
 
   /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with `Nil`
     * when no `--` is given — return `Err` to require one).
@@ -284,8 +273,9 @@ object Parser extends ParserLowPriority:
 
   /** Build a single-value parser from a name and a parse function. */
   def of[A](name: String)(f: String => Result[A, String]): Value[A] = new Value[A]:
-    def typeName                                                       = name
-    private[flagged] def parseInto(s: String, out: Array[Any], i: Int) = intoSlot(f(s), out, i)
+    def typeName                                                               = name
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
+      intoSlot(f(s), out, i)
 
   private[flagged] def enumeratedOf[A](name: String, pairs: Vector[(String, A)]): Enumerated[A] =
     new Enumerated[A]:
@@ -300,8 +290,8 @@ object Parser extends ParserLowPriority:
           if names(i) == key then return i
           i += 1
         -1
-      def typeName                                                       = name
-      private[flagged] def parseInto(s: String, out: Array[Any], k: Int) =
+      def typeName                                                               = name
+      override private[flagged] def readInto(s: String, out: Array[Any], k: Int) =
         Result.task:
           val i = indexOf(s)
           if i < 0 then eval.raise(s"'$s' is not one of: ${names.mkString(", ")}")
@@ -320,15 +310,20 @@ object Parser extends ParserLowPriority:
       def fromValue(s: String) = value(s)
 
   /** Opt `A` into repeated shape: each occurrence is parsed with the element's (single-value)
-    * parser, and the collected elements are combined with `combine`.
+    * parser, and the collected elements are combined with `combine` (also invoked empty when the
+    * argument is absent; return `Err` to require at least one occurrence).
     */
   def repeated[E, A](combine: IndexedSeq[E] => Result[A, String])(
       using elem: Value[E]
   ): Repeated[A] =
     new Repeated[A]:
       type Elem = E
-      def element                 = elem
-      def build(l: IndexedSeq[E]) = combine(l)
+      def element                      = elem
+      private[flagged] def collector() = new Collector:
+        private val b                           = ArraySeq.untagged.newBuilder[Any]
+        protected def append(v: Any)            = b += v
+        def finishInto(out: Array[Any], i: Int) =
+          intoSlot(combine(b.result().asInstanceOf[IndexedSeq[E]]), out, i)
 
   /** Opt `A` into trailing shape: it is built from the raw arguments after `--`. */
   def trailing[A](combine: List[String] => Result[A, String]): Trailing[A] = new Trailing[A]:
@@ -349,68 +344,38 @@ object Parser extends ParserLowPriority:
 
   given [A] => (elem: Value[A]) => Repeated[List[A]]:
     type Elem = A
-    def element                 = elem
-    def build(l: IndexedSeq[A]) = Ok(l.toList)
-    override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
-      Result.task:
-        out(i) = l.toList
-    override private[flagged] def collector() = new Collector:
-      private val b                           = List.newBuilder[Any]
-      protected def append(v: Any)            = b += v
-      def finishInto(out: Array[Any], i: Int) =
-        Result.task:
-          out(i) = b.result()
+    def element                      = elem
+    private[flagged] def collector() = BuilderCollector(List.newBuilder[A])
 
   given [A] => (elem: Value[A]) => Repeated[Vector[A]]:
     type Elem = A
-    def element                 = elem
-    def build(l: IndexedSeq[A]) = Ok(l.toVector)
-    override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
-      Result.task:
-        out(i) = l.toVector
-    override private[flagged] def collector() = new Collector:
-      private val b                           = Vector.newBuilder[Any]
-      protected def append(v: Any)            = b += v
-      def finishInto(out: Array[Any], i: Int) =
-        Result.task:
-          out(i) = b.result()
+    def element                      = elem
+    private[flagged] def collector() = BuilderCollector(Vector.newBuilder[A])
 
   given [A] => (elem: Value[A]) => Repeated[Seq[A]]:
     type Elem = A
-    def element                 = elem
-    def build(l: IndexedSeq[A]) = Ok(l) // the engine's ArraySeq, zero-copy
-    override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
-      Result.task:
-        out(i) = l
+    def element                      = elem
+    private[flagged] def collector() = BuilderCollector(ArraySeq.untagged.newBuilder[A])
 
   private final class PairValue[K, V](k: Value[K], v: Value[V]) extends Value[(K, V)]:
     def typeName = s"${k.typeName}=${v.typeName}"
-    private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
       Result.task:
         s.indexOf('=') match
           case -1 => eval.raise(s"'$s' is not in $typeName form")
           case eq =>
             val slots = new Array[Any](2)
-            k.parseInto(s.take(eq), slots, 0).check
-            v.parseInto(s.drop(eq + 1), slots, 1).check
+            k.readInto(s.take(eq), slots, 0).check
+            v.readInto(s.drop(eq + 1), slots, 1).check
             out(i) = (slots(0).asInstanceOf[K], slots(1).asInstanceOf[V])
 
   /** Each occurrence is one `key=value` entry, split at the first `=`; later entries win. */
   given [K, V] => (k: Value[K], v: Value[V]) => Repeated[Map[K, V]]:
     type Elem = (K, V)
-    val element                    = PairValue(k, v)
-    def build(l: IndexedSeq[Elem]) = Ok(l.toMap)
-    override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
-      Result.task:
-        out(i) = l.asInstanceOf[IndexedSeq[Elem]].toMap
-    override private[flagged] def collector() = new Collector:
-      private val b                           = Map.newBuilder[K, V]
-      protected def append(v: Any)            = b += v.asInstanceOf[Elem]
-      def finishInto(out: Array[Any], i: Int) =
-        Result.task:
-          out(i) = b.result()
+    val element                      = PairValue(k, v)
+    private[flagged] def collector() = BuilderCollector(Map.newBuilder[K, V])
 
-  // built-in instances implement `parseInto` directly, so the default path is plain virtual
+  // built-in instances implement `readInto` directly, so the default path is plain virtual
   // dispatch with no closures; only user-constructed parsers (`of`, `emap`, ...) go through a
   // function value. `numInto` takes its conversion inline, so each numeric parse body is direct
   // code.
@@ -422,8 +387,8 @@ object Parser extends ParserLowPriority:
       catch case _: NumberFormatException => eval.raise(s"'$s' is not a valid $name")
 
   given Value[String]:
-    def typeName                                                       = "string"
-    private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
+    def typeName                                                               = "string"
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
       Result.task:
         out(i) = s
 
@@ -432,8 +397,8 @@ object Parser extends ParserLowPriority:
     */
   @nowarn("msg=New anonymous class definition will be duplicated at each inline site")
   private inline def numValue[A](name: String)(inline f: String => A): Value[A] = new Value[A]:
-    def typeName                                                       = name
-    private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
+    def typeName                                                               = name
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
       numInto(s, name, out, i)(f)
 
   given Value[Int]        = numValue("int")(_.toInt)
@@ -453,25 +418,25 @@ object Parser extends ParserLowPriority:
     override private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
       Result.task:
         out(i) = n > 0
-    override private[flagged] def fromValueInto(s: String, out: Array[Any], i: Int) =
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
       internal.Runtime.parseBoolInto(s, out, i)
 
   given Value[Char]:
-    def typeName                                                       = "char"
-    private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
+    def typeName                                                               = "char"
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
       Result.task:
         if s.length != 1 then eval.raise(s"'$s' is not a single character")
         out(i) = s.charAt(0)
 
   given Value[File]:
-    def typeName                                                       = "file"
-    private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
+    def typeName                                                               = "file"
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
       Result.task:
         out(i) = new File(s)
 
   given Value[UUID]:
-    def typeName                                                       = "uuid"
-    private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
+    def typeName                                                               = "uuid"
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
       Result.task:
         try out(i) = UUID.fromString(s.trim)
         catch case _: IllegalArgumentException => eval.raise(s"'$s' is not a valid UUID")
@@ -491,14 +456,5 @@ sealed trait ParserLowPriority:
   // Value summon then uses
   given [A, C] => (factory: Factory[A, C], elem: Parser.Value[A]) => Parser.Repeated[C]:
     type Elem = A
-    def element                 = elem
-    def build(l: IndexedSeq[A]) = Ok(l.to(factory))
-    override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
-      Result.task:
-        out(i) = l.asInstanceOf[IndexedSeq[A]].to(factory)
-    override private[flagged] def collector() = new Parser.Collector:
-      private val b                           = factory.newBuilder
-      protected def append(v: Any)            = b += v.asInstanceOf[A]
-      def finishInto(out: Array[Any], i: Int) =
-        Result.task:
-          out(i) = b.result()
+    def element                      = elem
+    private[flagged] def collector() = Parser.BuilderCollector(factory.newBuilder)

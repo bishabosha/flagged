@@ -286,13 +286,12 @@ A parser's *shape* is its subtype — `Parser.Value`, `Parser.Flag`,
 builds single-value parsers; `Parser.repeated` builds parsers whose argument may
 appear any number of times, each occurrence parsed by a `Parser.Value` element (so
 repeats cannot nest, by construction) and the collected elements combined by a
-function of your choice, from an `IndexedSeq` view of the collected elements. The
-provided `List`/`Seq`/`Vector`/`Map` instances are ordinary `Parser.repeated`
-definitions, any other collection with a `scala.collection.Factory` works out of
-the box (`Set`, `ArraySeq`, sorted collections, ...), and any type can opt in the
-same way — including with constraints,
-since the combining function may fail (it is also invoked empty when the argument
-is absent):
+function of your choice, from an `IndexedSeq` view of the collected elements. Any
+collection with a `scala.collection.Factory` works out of the box (`List`, `Set`,
+`ArraySeq`, sorted collections, ..., and `Map[K, V]` from `key=value` entries) —
+occurrences append straight to the collection's builder — and any other type can
+opt in through `Parser.repeated`, including with constraints, since the combining
+function may fail (it is also invoked empty when the argument is absent):
 
 ```scala
 given Parser.Repeated[Set[String]] = Parser.repeated[String, Set[String]](l => Ok(l.toSet))

@@ -18,10 +18,15 @@ class ValueParserSuite extends munit.FunSuite:
     case Ok(a) => a
     case other => fail(s"expected success, got $other")
 
+  /** Parse a single token through the engine's slot protocol, boxed for assertions. */
+  def read[A](s: String)(using p: Parser[A]): Result[A, String] =
+    val out = new Array[Any](1)
+    p.readInto(s, out, 0).map(_ => out(0).asInstanceOf[A])
+
   test("by-name enum Parser parses by kebab-cased name") {
-    assertEquals(summon[Parser[LogLevel]].read("warn"), Ok(LogLevel.Warn))
-    assert(summon[Parser[LogLevel]].read("DEBUG").isErr) // exact match, like clap/click/argmatch
-    assert(summon[Parser[LogLevel]].read("nope").isErr)
+    assertEquals(read[LogLevel]("warn"), Ok(LogLevel.Warn))
+    assert(read[LogLevel]("DEBUG").isErr) // exact match, like clap/click/argmatch
+    assert(read[LogLevel]("nope").isErr)
     assertEquals(summon[Parser[LogLevel]].typeName, "debug|info|warn|error")
   }
 
@@ -67,9 +72,9 @@ class ValueParserSuite extends munit.FunSuite:
   }
 
   test("boolean reader accepts unix-y spellings") {
-    assertEquals(summon[Parser[Boolean]].read("on"), Ok(true))
-    assertEquals(summon[Parser[Boolean]].read("0"), Ok(false))
-    assert(summon[Parser[Boolean]].read("maybe").isErr)
+    assertEquals(read[Boolean]("on"), Ok(true))
+    assertEquals(read[Boolean]("0"), Ok(false))
+    assert(read[Boolean]("maybe").isErr)
   }
 
   test("flags can accumulate occurrences (counter)") {

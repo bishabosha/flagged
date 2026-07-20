@@ -113,7 +113,7 @@ private[flagged] object Engine:
         if c == null then
           c = parser.collector()
           reps(index) = c
-        parser.parseElemInto(raw, values, index) match
+        parser.element.readInto(raw, values, index) match
           case Err(msg) => report(s"invalid value for '$display': $msg")
           case _        => c.add(values(index))
 
@@ -267,7 +267,7 @@ private[flagged] object Engine:
             else
               parser match
                 case vf: flagged.Parser.ValuedFlag[?] if lastRaw(index) != null =>
-                  reportInvalid(vf.fromValueInto(lastRaw(index), values, index), lastDisp(index))
+                  reportInvalid(vf.readInto(lastRaw(index), values, index), lastDisp(index))
                 case _ =>
                   // bare mentions only — or a pure flag whose value mention (its lastRaw latch)
                   // was already reported during routing
