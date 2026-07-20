@@ -3,10 +3,12 @@
 Produced by the suites in this directory (see `README.md` for methodology and caveats). Scores
 are JMH averages ± 99.9% confidence intervals, one forked JVM, 5 warmup + 5 measurement
 iterations. Compile-time tables were measured at `7062642` (the engine work since does not
-touch derivation); runtime tables are a single run at `ff4a33f` (mainargs/case-app columns and
-the cross-platform table at `23029bc` — their code paths did not change in between).
+touch derivation); JMH runtime tables are a single run at `ff4a33f` (a spot-check at `3869d4f`
+matched within noise, allocations byte-identical); the cross-platform table's flagged rows are
+at `3869d4f`, its mainargs/case-app rows at `23029bc` — their code paths did not change in
+between.
 
-- Date: 2026-07-20, flagged commit `ff4a33f`
+- Date: 2026-07-20, flagged commit `3869d4f`
 - Hardware: Apple M3 Max, 64 GB, macOS 26.5.1
 - JVM: Temurin OpenJDK 25.0.2, Scala 3.8.3, JMH 1.37
 - Library versions: mainargs 0.7.8, case-app 2.1.0
@@ -108,39 +110,41 @@ ns per parse, best of 5 rounds:
 
 | Benchmark | JVM | JS | JS/Wasm | Native | Native (max) |
 |---|---|---|---|---|---|
-| empty — flagged | 131 | 305 | 185 | 436 | 253 |
+| empty — flagged | 39 | 278 | 162 | 162 | 110 |
 | empty — mainargs | 226 | 1 317 | 1 017 | 624 | 448 |
 | empty — case-app | 138 | 354 | 265 | 256 | 164 |
-| simple — flagged | 196 | 864 | 800 | 692 | 455 |
+| simple — flagged | 130 | 850 | 768 | 390 | 280 |
 | simple — mainargs | 1 422 | 6 577 | 6 585 | 3 380 | 2 369 |
 | simple — case-app | 1 643 | 4 927 | 3 313 | 5 911 | 3 252 |
-| repeated — flagged | 267 | 1 364 | 1 028 | 799 | 534 |
+| repeated — flagged | 192 | 1 278 | 995 | 511 | 382 |
 | repeated — mainargs | 1 185 | 6 941 | 6 622 | 3 520 | 2 372 |
 | repeated — case-app | 4 396 | 12 948 | 9 439 | 18 052 | 9 315 |
-| bundled — flagged | 117 | 860 | 539 | 623 | 434 |
+| bundled — flagged | 92 | 809 | 516 | 332 | 241 |
 | bundled — mainargs | 1 305 | 7 670 | 6 415 | 3 819 | 3 014 |
-| counter — flagged | 103 | 826 | 617 | 501 | 336 |
+| counter — flagged | 82 | 778 | 590 | 347 | 234 |
 | counter — case-app | 2 015 | 6 992 | 4 125 | 8 325 | 4 833 |
-| group — flagged | 191 | 1 352 | 1 059 | 873 | 604 |
+| group — flagged | 149 | 1 268 | 994 | 551 | 403 |
 | group — case-app | 3 390 | 9 899 | 6 273 | 12 428 | 7 085 |
-| leftover — flagged | 213 | 2 095 | 851 | 623 | 456 |
+| leftover — flagged | 177 | 2 066 | 843 | 575 | 438 |
 | leftover — mainargs | 368 | 2 615 | 1 570 | 1 238 | 1 133 |
 
-flagged is the fastest of the three on every non-trivial scenario on every platform (the
-`empty` scenario remains case-app's near-no-op win on the AOT targets). In the maxed Native
-build flagged parses in 0.34–0.60 µs — ~2–3× the JVM and well ahead of Scala.js. The
-WebAssembly backend now beats the JavaScript one on most flagged scenarios (its allocation
-paths profit more from the leaner engine).
+flagged is the fastest of the three on every scenario on every platform — including `empty`,
+which used to be case-app's near-no-op win on Native. In the maxed Native build
+flagged parses in 0.23–0.44 µs — ~2–3× the JVM and ahead of Scala.js by 2–5×. The WebAssembly
+backend beats the JavaScript one on every flagged scenario (its allocation paths profit more
+from the leaner engine).
 
 Why Native trails the JVM: an ahead-of-time build has no profile-guided optimization, so the
 remaining polymorphic dispatch and the workload's own allocations stay real, where HotSpot
 devirtualizes and escape-analyzes them after profiling. The gap has been engineered down in
-three steps — removing deliberate closures from the hot path, the slot-write protocol that
-eliminated per-token parse allocations (`Occ` records, occurrence buffers, `Ok` boxing), and
-an Option-free routing loop (null-returning lookups, token-as-display, sentinel state, lazy
-error buffers) — and the recommended build configuration does the rest: thin LTO inlines across module boundaries into
-the Scala Native runtime, and for a parse-once-and-exit CLI binary, no-GC-plus-process-teardown
-is a sound memory strategy, not a benchmark trick.
+four steps — removing deliberate closures from the hot path, the slot-write protocol that
+eliminated per-token parse allocations (`Occ` records, occurrence buffers, `Ok` boxing), an
+Option-free routing loop (null-returning lookups, token-as-display, sentinel state, lazy
+error buffers), and dropping the boxed `parse` path so each value parser exposes a single
+virtual method (the smaller dispatch surface is what the AOT optimizer rewards most: −30–55%
+across scenarios) — and the recommended build configuration does the rest: thin LTO inlines
+across module boundaries into the Scala Native runtime, and for a parse-once-and-exit CLI
+binary, no-GC-plus-process-teardown is a sound memory strategy, not a benchmark trick.
 
 CLI parsing happens once per process, so parse latency is rarely a deciding factor; the compile
 table is the practically relevant one, and the allocation column mostly matters as a proxy for
