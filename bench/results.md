@@ -2,9 +2,10 @@
 
 Produced by the suites in this directory (see `README.md` for methodology and caveats). Scores
 are JMH averages ± 99.9% confidence intervals, one forked JVM, 5 warmup + 5 measurement
-iterations; all tables below are from a single run.
+iterations. Compile-time tables were measured at `7062642` (the engine work since does not
+touch derivation); runtime tables are a single run at `23029bc`.
 
-- Date: 2026-07-20, flagged commit `7062642`
+- Date: 2026-07-20, flagged commit `23029bc`
 - Hardware: Apple M3 Max, 64 GB, macOS 26.5.1
 - JVM: Temurin OpenJDK 25.0.2, Scala 3.8.3, JMH 1.37
 - Library versions: mainargs 0.7.8, case-app 2.1.0
@@ -51,45 +52,46 @@ single hotspot — implicit search and match-type reduction are negligible — a
 ## Parse latency and allocation
 
 Time and bytes allocated per successful parse (`gc.alloc.rate.norm`), parser instances built
-once in setup. The engine's hot path allocates no per-token objects: parsers write successes
-into value slots (`Result.done` signalling, no `Ok` boxing), per-slot state is primitive
-arrays, and function values appear only where user code supplies them (`Parser.of`, `emap`,
-custom combinators).
+once in setup. The engine's hot path allocates nothing per token: parsers write successes into
+value slots (`Result.done` signalling, no `Ok` boxing), per-slot state is primitive arrays,
+lookups return null instead of `Option`, a long token is its own display spelling, and no
+string is created unless it is part of an error being reported. Function values appear only
+where user code supplies them (`Parser.of`, `emap`, custom combinators).
 
 ### Scenarios all three libraries support
 
 | Scenario | flagged | mainargs | case-app |
 |---|---|---|---|
-| `empty` — µs/op | 0.070 ± 0.002 | 0.139 ± 0.003 | 0.076 ± 0.001 |
-| `empty` — B/op | 544 | 1 064 | 536 |
-| `simple` — µs/op | 0.203 ± 0.004 | 0.982 ± 0.014 | 1.223 ± 0.038 |
-| `simple` — B/op | 1 152 | 5 392 | 8 144 |
-| `repeated` — µs/op | 0.300 ± 0.029 | 0.960 ± 0.017 | 3.859 ± 0.022 |
-| `repeated` — B/op | 1 776 | 5 200 | 24 200 |
+| `empty` — µs/op | 0.067 ± 0.005 | 0.137 ± 0.002 | 0.076 ± 0.001 |
+| `empty` — B/op | 488 | 1 064 | 536 |
+| `simple` — µs/op | 0.122 ± 0.002 | 0.983 ± 0.057 | 1.273 ± 0.011 |
+| `simple` — B/op | 744 | 5 392 | 8 504 |
+| `repeated` — µs/op | 0.172 ± 0.005 | 0.937 ± 0.066 | 3.783 ± 0.055 |
+| `repeated` — B/op | 960 | 5 080 | 23 528 |
 
 ### flagged × mainargs (short clusters, typed leftover)
 
 | Scenario | flagged | mainargs |
 |---|---|---|
-| `bundled` — µs/op | 0.184 ± 0.033 | 1.186 ± 0.013 |
-| `bundled` — B/op | 1 160 | 6 776 |
-| `leftover` — µs/op | 0.176 ± 0.002 | 0.266 ± 0.002 |
-| `leftover` — B/op | 992 | 2 760 |
+| `bundled` — µs/op | 0.131 ± 0.003 | 1.153 ± 0.028 |
+| `bundled` — B/op | 784 | 6 680 |
+| `leftover` — µs/op | 0.161 ± 0.003 | 0.266 ± 0.006 |
+| `leftover` — B/op | 928 | 2 760 |
 
 ### flagged × case-app (counters, option groups)
 
 | Scenario | flagged | case-app |
 |---|---|---|
-| `counter` — µs/op | 0.137 ± 0.006 | 2.032 ± 0.029 |
-| `counter` — B/op | 872 | 12 224 |
-| `group` — µs/op | 0.264 ± 0.009 | 2.976 ± 0.086 |
-| `group` — B/op | 1 440 | 17 544 |
+| `counter` — µs/op | 0.096 ± 0.005 | 2.075 ± 0.035 |
+| `counter` — B/op | 624 | 12 008 |
+| `group` — µs/op | 0.200 ± 0.004 | 2.992 ± 0.065 |
+| `group` — B/op | 912 | 17 544 |
 
-On non-trivial argument lists flagged parses in 0.14–0.30 µs across all scenarios, 3–15×
-faster than mainargs and case-app on the same inputs, allocating 3–17× less — the remaining
-bytes are the parse's actual output (the config object, `Some` wrappers, string slices) plus
-one set of per-parse state arrays. The closest contest is mainargs' `Leftover` (1.5×), whose
-token pass-through is already minimal.
+On non-trivial argument lists flagged parses in 0.10–0.20 µs across all scenarios, 5–21×
+faster than mainargs and case-app on the same inputs, allocating 5–25× less — the remaining
+bytes are the parse's actual output (the config object, `Some` wrappers for declared Option
+fields, value substrings of `=`-forms) plus one set of per-parse state arrays. The closest
+contest is mainargs' `Leftover` (1.7×), whose token pass-through is already minimal.
 
 ### Cross-platform (Scala.js, Wasm, Scala Native)
 
@@ -105,36 +107,37 @@ ns per parse, best of 5 rounds:
 
 | Benchmark | JVM | JS | JS/Wasm | Native | Native (max) |
 |---|---|---|---|---|---|
-| empty — flagged | 150 | 313 | 318 | 548 | 319 |
-| empty — mainargs | 274 | 1 333 | 1 033 | 651 | 444 |
-| empty — case-app | 134 | 366 | 274 | 254 | 167 |
-| simple — flagged | 261 | 707 | 946 | 1 080 | 668 |
-| simple — mainargs | 1 299 | 6 533 | 6 530 | 3 469 | 2 366 |
-| simple — case-app | 1 626 | 4 769 | 3 407 | 6 023 | 3 237 |
-| repeated — flagged | 369 | 1 168 | 1 396 | 1 516 | 1 010 |
-| repeated — mainargs | 1 095 | 6 688 | 6 524 | 3 539 | 2 481 |
-| repeated — case-app | 5 550 | 12 388 | 9 729 | 18 191 | 9 664 |
-| bundled — flagged | 191 | 650 | 717 | 928 | 604 |
-| bundled — mainargs | 1 254 | 7 546 | 6 347 | 3 835 | 2 848 |
-| counter — flagged | 173 | 553 | 724 | 745 | 499 |
-| counter — case-app | 2 322 | 6 545 | 4 256 | 8 390 | 4 640 |
-| group — flagged | 283 | 998 | 1 152 | 1 438 | 950 |
-| group — case-app | 3 615 | 9 779 | 6 396 | 12 471 | 7 011 |
-| leftover — flagged | 285 | 1 299 | 833 | 887 | 639 |
-| leftover — mainargs | 344 | 2 515 | 1 601 | 1 266 | 1 065 |
+| empty — flagged | 131 | 305 | 185 | 436 | 253 |
+| empty — mainargs | 226 | 1 317 | 1 017 | 624 | 448 |
+| empty — case-app | 138 | 354 | 265 | 256 | 164 |
+| simple — flagged | 196 | 864 | 800 | 692 | 455 |
+| simple — mainargs | 1 422 | 6 577 | 6 585 | 3 380 | 2 369 |
+| simple — case-app | 1 643 | 4 927 | 3 313 | 5 911 | 3 252 |
+| repeated — flagged | 267 | 1 364 | 1 028 | 799 | 534 |
+| repeated — mainargs | 1 185 | 6 941 | 6 622 | 3 520 | 2 372 |
+| repeated — case-app | 4 396 | 12 948 | 9 439 | 18 052 | 9 315 |
+| bundled — flagged | 117 | 860 | 539 | 623 | 434 |
+| bundled — mainargs | 1 305 | 7 670 | 6 415 | 3 819 | 3 014 |
+| counter — flagged | 103 | 826 | 617 | 501 | 336 |
+| counter — case-app | 2 015 | 6 992 | 4 125 | 8 325 | 4 833 |
+| group — flagged | 191 | 1 352 | 1 059 | 873 | 604 |
+| group — case-app | 3 390 | 9 899 | 6 273 | 12 428 | 7 085 |
+| leftover — flagged | 213 | 2 095 | 851 | 623 | 456 |
+| leftover — mainargs | 368 | 2 615 | 1 570 | 1 238 | 1 133 |
 
 flagged is the fastest of the three on every non-trivial scenario on every platform (the
-`empty` scenario remains case-app's near-no-op win). Cross-platform slowdowns for flagged are
-roughly 2.5–4.5× on Scala.js and, in the maxed Native build, ~2.5–3.5× versus the JVM — with
-the maxed build ahead of Scala.js. The WebAssembly backend is broadly comparable to the
-JavaScript one on these workloads.
+`empty` scenario remains case-app's near-no-op win on the AOT targets). In the maxed Native
+build flagged parses in 0.34–0.60 µs — ~2–3× the JVM and well ahead of Scala.js. The
+WebAssembly backend now beats the JavaScript one on most flagged scenarios (its allocation
+paths profit more from the leaner engine).
 
 Why Native trails the JVM: an ahead-of-time build has no profile-guided optimization, so the
 remaining polymorphic dispatch and the workload's own allocations stay real, where HotSpot
 devirtualizes and escape-analyzes them after profiling. The gap has been engineered down in
-two steps — removing deliberate closures from the hot path, then the slot-write protocol that
-eliminated per-token allocations (`Occ` records, occurrence buffers, `Ok` boxing) — and the
-recommended build configuration does the rest: thin LTO inlines across module boundaries into
+three steps — removing deliberate closures from the hot path, the slot-write protocol that
+eliminated per-token parse allocations (`Occ` records, occurrence buffers, `Ok` boxing), and
+an Option-free routing loop (null-returning lookups, token-as-display, sentinel state, lazy
+error buffers) — and the recommended build configuration does the rest: thin LTO inlines across module boundaries into
 the Scala Native runtime, and for a parse-once-and-exit CLI binary, no-GC-plus-process-teardown
 is a sound memory strategy, not a benchmark trick.
 
