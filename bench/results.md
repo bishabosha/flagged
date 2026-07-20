@@ -96,6 +96,36 @@ fields, value substrings of `=`-forms and `k=v` entries) plus one set of per-par
 arrays. The closest contests are mainargs' `Leftover` and `Map` (1.8×), whose per-token work
 is already minimal.
 
+### Against hand-written parsers and `@main`
+
+`bench.BaselineBench` parses the same argument lists with non-library baselines for the
+`simple` grammar: a *naive loop* (the typical quick hand-rolled parser — long options only, no
+`=` forms, first error wins), a *feature-parity* hand-rolled parser (short options, clusters,
+attached values, `--opt=v`, last-wins, error accumulation — ~60 lines for this one fixed
+grammar), and Scala's built-in `@main` machinery (`scala.util.CommandLineParser`), which has no
+named options at all and parses the same data positionally — a floor, not a like-for-like
+parser.
+
+| Scenario | flagged | naive loop | feature-parity | `@main` (positional) |
+|---|---|---|---|---|
+| `empty` — µs/op | 0.038 | 0.003 | 0.003 | |
+| `empty` — B/op | 256 | 48 | 48 | |
+| `simple` — µs/op | 0.098 | 0.013 | 0.035 | 0.004 |
+| `simple` — B/op | 512 | 48 | 48 | 32 |
+| `repeated` — µs/op | 0.126 | 0.019 | 0.074 | |
+| `repeated` — B/op | 704 | 144 | 144 | |
+| `bundled` — µs/op | 0.101 | unsupported | 0.021 | |
+| `bundled` — B/op | 552 | unsupported | 96 | |
+
+Hand-written parsers assign straight into local variables of the known types, so they carry
+none of the generic machinery — no per-parse state arrays sized by the command's arity, no
+erased value slots, no `Mirror`-based construction, no dispatch through parser instances, and
+no help/suggestion/subcommand plumbing reachable from the hot path. That machinery costs
+flagged ~1.7–3× over the feature-parity baseline (50–90 ns and ~500 B per parse) and ~7× over
+the naive loop. The naive loop is what library-free code usually looks like in practice, and
+the delta to the feature-parity column is what its missing behavior costs to write by hand —
+per grammar, rather than once.
+
 ### Cross-platform (Scala.js, Wasm, Scala Native)
 
 `bench-portable/` re-runs the same scenarios against the same parser definitions on the
