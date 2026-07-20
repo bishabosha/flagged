@@ -257,10 +257,6 @@ private[flagged] object Engine:
         case Err(msg) => report(s"invalid value for '$display': $msg")
         case _        => ()
 
-      def storeBuilt(r: Result[Any, String], index: Int, display: String): Unit = r match
-        case Ok(v)    => values(index) = v
-        case Err(msg) => report(s"invalid value for '$display': $msg")
-
       def fromCount(parser: flagged.Parser.Flag[?], index: Int, display: String): Unit =
         parser.countInto(counts(index), values, index) match
           case Err(msg) => report(s"flag '$display': $msg")
@@ -300,11 +296,15 @@ private[flagged] object Engine:
             if counts(index) == 0 then
               default match
                 case Some(d) => values(index) = d()
-                case None    => storeBuilt(parser.buildErased(ArraySeq.empty[Any]), index, display)
+                case None    =>
+                  reportInvalid(parser.buildInto(ArraySeq.empty[Any], values, index), display)
             else if len == counts(index) then // no element failed (failures were reported)
               val buf   = repBufs(index)
               val exact = if len == buf.length then buf else copyOf(buf, len)
-              storeBuilt(parser.buildErased(ArraySeq.unsafeWrapArray(exact)), index, display)
+              reportInvalid(
+                parser.buildInto(ArraySeq.unsafeWrapArray(exact), values, index),
+                display
+              )
             true
 
       var missing: mutable.ListBuffer[String] = null

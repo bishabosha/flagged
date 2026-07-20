@@ -66,7 +66,7 @@ sealed trait Parser[A]:
         case _: Parser.Flag[A]     => eval.raise(s"'$s': this flag does not take a value")
         case r: Parser.Repeated[A] =>
           r.parseElemInto(s, out, i).check
-          out(i) = r.buildErased(IndexedSeq(out(i))).ok
+          r.buildInto(IndexedSeq(out(i)), out, i).check
         case t: Parser.Trailing[A] => out(i) = t.build(List(s)).ok
         case c: Parser.Command[A]  =>
           eval.raise(s"'$s': '${c.prog}' is a command parser, not a single value")
@@ -204,8 +204,16 @@ object Parser:
         out: Array[Any],
         i: Int
     ): Result[Unit, String] = element.parseInto(s, out, i)
-    private[flagged] final def buildErased(l: IndexedSeq[Any]): Result[A, String] =
-      build(l.asInstanceOf[IndexedSeq[Elem]])
+
+    /** Engine protocol: combine the collected elements into `out(i)`; built-in collection instances
+      * write the slot directly — their `build` cannot fail, so no `Ok` per parse.
+      */
+    private[flagged] def buildInto(
+        l: IndexedSeq[Any],
+        out: Array[Any],
+        i: Int
+    ): Result[Unit, String] =
+      intoSlot(build(l.asInstanceOf[IndexedSeq[Elem]]), out, i)
 
   /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with `Nil`
     * when no `--` is given — return `Err` to require one).
@@ -309,16 +317,25 @@ object Parser:
     type Elem = A
     def element                 = elem
     def build(l: IndexedSeq[A]) = Ok(l.toList)
+    override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
+      Result.task:
+        out(i) = l.toList
 
   given [A] => (elem: Value[A]) => Repeated[Vector[A]]:
     type Elem = A
     def element                 = elem
     def build(l: IndexedSeq[A]) = Ok(l.toVector)
+    override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
+      Result.task:
+        out(i) = l.toVector
 
   given [A] => (elem: Value[A]) => Repeated[Seq[A]]:
     type Elem = A
     def element                 = elem
     def build(l: IndexedSeq[A]) = Ok(l) // the engine's ArraySeq, zero-copy
+    override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
+      Result.task:
+        out(i) = l
 
   private final class PairValue[K, V](k: Value[K], v: Value[V]) extends Value[(K, V)]:
     def typeName = s"${k.typeName}=${v.typeName}"
@@ -337,6 +354,9 @@ object Parser:
     type Elem = (K, V)
     val element                    = PairValue(k, v)
     def build(l: IndexedSeq[Elem]) = Ok(l.toMap)
+    override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
+      Result.task:
+        out(i) = l.asInstanceOf[IndexedSeq[Elem]].toMap
 
   // built-in instances implement `parseInto` directly, so the default path is plain virtual
   // dispatch with no closures; only user-constructed parsers (`of`, `emap`, ...) go through a
