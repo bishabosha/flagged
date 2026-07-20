@@ -3,11 +3,12 @@
 Produced by the suites in this directory (see `README.md` for methodology and caveats). Scores
 are JMH averages ± 99.9% confidence intervals, one forked JVM, 5 warmup + 5 measurement
 iterations. Compile-time tables were measured at `7062642` (the engine work since does not
-touch derivation); JMH runtime tables are a single run at `0e8ccc4`; the cross-platform
-table's flagged rows are at `3869d4f`, its mainargs/case-app rows at `23029bc` — their code
-paths did not change in between.
+touch derivation); JMH runtime tables: flagged columns at `97f2024`,
+mainargs/case-app columns at `0e8ccc4`; the cross-platform table's flagged rows are at
+`3869d4f`, its mainargs/case-app rows at `23029bc` — their code paths did not change in
+between.
 
-- Date: 2026-07-20, flagged commit `0e8ccc4`
+- Date: 2026-07-20, flagged commit `97f2024`
 - Hardware: Apple M3 Max, 64 GB, macOS 26.5.1
 - JVM: Temurin OpenJDK 25.0.2, Scala 3.8.3, JMH 1.37
 - Library versions: mainargs 0.7.8, case-app 2.1.0
@@ -62,39 +63,39 @@ where user code supplies them (`Parser.of`, `emap`, custom combinators).
 
 | Scenario | flagged | mainargs | case-app |
 |---|---|---|---|
-| `empty` — µs/op | 0.038 ± 0.001 | 0.137 ± 0.005 | 0.076 ± 0.003 |
-| `empty` — B/op | 256 | 1 064 | 536 |
-| `simple` — µs/op | 0.098 ± 0.002 | 0.959 ± 0.012 | 1.230 ± 0.068 |
-| `simple` — B/op | 512 | 5 392 | 8 144 |
-| `repeated` — µs/op | 0.126 ± 0.004 | 0.904 ± 0.040 | 3.782 ± 0.071 |
-| `repeated` — B/op | 704 | 5 488 | 23 528 |
+| `empty` — µs/op | 0.036 ± 0.001 | 0.137 ± 0.005 | 0.076 ± 0.003 |
+| `empty` — B/op | 224 | 1 064 | 536 |
+| `simple` — µs/op | 0.099 ± 0.001 | 0.959 ± 0.012 | 1.230 ± 0.068 |
+| `simple` — B/op | 480 | 5 392 | 8 144 |
+| `repeated` — µs/op | 0.124 ± 0.004 | 0.904 ± 0.040 | 3.782 ± 0.071 |
+| `repeated` — B/op | 672 | 5 488 | 23 528 |
 
 ### flagged × mainargs (short clusters, typed leftover, `Map[K,V]`)
 
 | Scenario | flagged | mainargs |
 |---|---|---|
-| `bundled` — µs/op | 0.101 ± 0.003 | 1.182 ± 0.035 |
-| `bundled` — B/op | 552 | 6 776 |
-| `leftover` — µs/op | 0.148 ± 0.004 | 0.267 ± 0.005 |
-| `leftover` — B/op | 752 | 2 760 |
-| `map` — µs/op | 0.256 ± 0.006 | 0.470 ± 0.016 |
-| `map` — B/op | 952 | 3 512 |
+| `bundled` — µs/op | 0.096 ± 0.005 | 1.182 ± 0.035 |
+| `bundled` — B/op | 520 | 6 776 |
+| `leftover` — µs/op | 0.142 ± 0.003 | 0.267 ± 0.005 |
+| `leftover` — B/op | 728 | 2 760 |
+| `map` — µs/op | 0.272 ± 0.010 | 0.470 ± 0.016 |
+| `map` — B/op | 936 | 3 512 |
 
 ### flagged × case-app (counters, option groups)
 
 | Scenario | flagged | case-app |
 |---|---|---|
-| `counter` — µs/op | 0.081 ± 0.005 | 1.808 ± 0.064 |
-| `counter` — B/op | 480 | 11 984 |
-| `group` — µs/op | 0.142 ± 0.004 | 2.775 ± 0.084 |
-| `group` — B/op | 672 | 17 496 |
+| `counter` — µs/op | 0.078 ± 0.003 | 1.808 ± 0.064 |
+| `counter` — B/op | 456 | 11 984 |
+| `group` — µs/op | 0.147 ± 0.040 | 2.775 ± 0.084 |
+| `group` — B/op | 624 | 17 496 |
 
-On non-trivial argument lists flagged parses in 0.08–0.26 µs across all scenarios, 1.8–30×
-faster than mainargs and case-app on the same inputs, allocating 4–33× less — the remaining
+On non-trivial argument lists flagged parses in 0.08–0.27 µs across all scenarios, 1.7–30×
+faster than mainargs and case-app on the same inputs, allocating 3.8–35× less — the remaining
 bytes are the parse's actual output (the config object, `Some` wrappers for declared Option
 fields, value substrings of `=`-forms and `k=v` entries) plus one set of per-parse state
-arrays. The closest contests are mainargs' `Leftover` and `Map` (1.8×), whose per-token work
-is already minimal.
+arrays. The closest contests are mainargs' `Leftover` and `Map` (1.7–1.9×), whose per-token
+work is already minimal.
 
 ### Against hand-written parsers and `@main`
 
@@ -110,34 +111,34 @@ as all-`@positional` fields, the one grammar both can express.
 
 | Scenario | flagged | typical hand-rolled | feature-parity | `@main` |
 |---|---|---|---|---|
-| `empty` — µs/op | 0.038 | 0.003 | 0.003 | |
-| `empty` — B/op | 256 | 48 | 48 | |
-| `simple` — µs/op | 0.098 | 0.014 | 0.035 | |
-| `simple` — B/op | 512 | 144 | 48 | |
-| `repeated` — µs/op | 0.126 | 0.116 | 0.074 | |
-| `repeated` — B/op | 704 | 560 | 144 | |
-| `bundled` — µs/op | 0.101 | unsupported | 0.021 | |
-| `bundled` — B/op | 552 | unsupported | 96 | |
-| `wide25` — µs/op | 0.561 | 1.444 | | |
-| `wide25` — B/op | 792 | 2 928 | | |
-| `positional` — µs/op | 0.089 | | | 0.004 |
-| `positional` — B/op | 584 | | | 32 |
-| `positional25` — µs/op | 0.342 | | | 0.024 |
-| `positional25` — B/op | 872 | | | 112 |
+| `empty` — µs/op | 0.036 | 0.003 | 0.003 | |
+| `empty` — B/op | 224 | 48 | 48 | |
+| `simple` — µs/op | 0.099 | 0.014 | 0.035 | |
+| `simple` — B/op | 480 | 144 | 48 | |
+| `repeated` — µs/op | 0.124 | 0.116 | 0.074 | |
+| `repeated` — B/op | 672 | 560 | 144 | |
+| `bundled` — µs/op | 0.096 | unsupported | 0.021 | |
+| `bundled` — B/op | 520 | unsupported | 96 | |
+| `wide25` — µs/op | 0.547 | 1.444 | | |
+| `wide25` — B/op | 672 | 2 928 | | |
+| `positional` — µs/op | 0.078 | | | 0.004 |
+| `positional` — B/op | 488 | | | 32 |
+| `positional25` — µs/op | 0.274 | | | 0.024 |
+| `positional25` — B/op | 512 | | | 112 |
 
 Hand-written parsers assign straight into locals or a small accumulator of the known types, so
 they carry none of the generic machinery — no per-parse state arrays sized by the command's
 arity, no erased value slots, no `Mirror`-based construction, no dispatch through parser
 instances, and no help/suggestion/subcommand plumbing reachable from the hot path. That
-machinery costs flagged ~1.7–3× over the feature-parity baseline (50–90 ns and ~500 B per
-parse). Against the typical parser the gap is 7× on `simple`, nearly closes on `repeated`
+machinery costs flagged 50–75 ns and ~450 B per parse over the feature-parity baseline
+(1.7–4.6×). Against the typical parser the gap is 7× on `simple`, nearly closes on `repeated`
 (1.1× — the accumulator `copy` per token and `:+` append cost about what the whole engine
 does), and inverts at `wide25`: the match chain tests up to 25 exact strings per token and
-copies a 25-field accumulator per option, ending up 2.6× slower and 3.7× more allocating than
+copies a 25-field accumulator per option, ending up 2.6× slower and 4.4× more allocating than
 the engine's per-token hash lookup and value slots — and the idiom's cost grows with
 options × tokens where the engine's grows with tokens.
 
-`@main` remains 14–22× faster on the positional grammars — sequential typed reads with no
+`@main` remains 11–20× faster on the positional grammars — sequential typed reads with no
 option routing, no error accumulation, and no help — but positionals are all it can express,
 and errors are thrown, not reported.
 
