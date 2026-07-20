@@ -96,9 +96,10 @@ final case class Splice(
     false
 
   /** Whether the group is left unbuilt, falling back to `None` or the field default (its required
-    * options are then not enforced).
+    * options are then not enforced). Inline: as an outlined call it perturbs the JIT's inlining
+    * plan for the parse path enough to cost ~50% on the group benchmark.
     */
-  def skipped(counts: Array[Int], base: Int): Boolean =
+  inline def skipped(counts: Array[Int], base: Int): Boolean =
     (optional || default.nonEmpty) && !mentioned(counts, base)
 
 /** A field collecting the raw arguments after `--`, verbatim. */
