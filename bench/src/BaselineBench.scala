@@ -2,12 +2,13 @@ package bench
 
 import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.*
-import bench.defs.BaselineDefs
+import bench.defs.{BaselineDefs, FlaggedDefs}
 
-/** Parse latency of non-library baselines on the `simple` grammar, for comparison with the flagged
-  * rows of [[RuntimeBench]] (same argument lists, same JMH settings, one forked JVM per benchmark
-  * either way). `scalamain` parses the same data positionally — Scala's built-in `@main` machinery
-  * has no named options — so it is a floor, not a like-for-like parser.
+/** Parse latency of non-library baselines, next to flagged on identical argument lists (the
+  * `empty`/`simple`/`repeated`/`bundled` flagged rows live in [[RuntimeBench]]; same JMH settings,
+  * one forked JVM per benchmark either way). `wide25` scales the typical hand-rolled idiom to 25
+  * named options; `positional` compares Scala's built-in `@main` machinery against flagged parsing
+  * the same tokens as all-`@positional` fields — the only grammar `@main` can express.
   */
 @State(Scope.Benchmark)
 @BenchmarkMode(Array(Mode.AverageTime))
@@ -21,28 +22,37 @@ class BaselineBench:
   private val simpleArgs   = Seq("--foo", "hello", "--bar", "42", "--baz")
   private val repeatedArgs = Seq("--qux", "a", "--qux", "b", "--qux", "c", "--qux", "d")
   private val bundledArgs  = Seq("-bfhello", "--bar", "7")
-  private val mainArgs     = Array("hello", "42", "true")
+  private val posArgs      = Seq("hello", "42", "true")
+  private val mainArgs     = posArgs.toArray
+  private val wide25Args   = (1 to 25).flatMap(i => Seq(s"--opt-$i", i.toString))
   private val emptyList    = emptyArgs.toList
   private val simpleList   = simpleArgs.toList
   private val repeatedList = repeatedArgs.toList
+  private val wide25List   = wide25Args.toList
 
   @Setup
   def validate(): Unit =
+    def fOk(r: flagged.ParseResult[?]): Boolean = r match
+      case flagged.Ok(_) => true
+      case _             => false
     val checks = Seq(
-      "empty_hand"        -> BaselineDefs.naive(emptyArgs.toList).isRight,
-      "simple_hand"       -> BaselineDefs.naive(simpleArgs.toList).isRight,
-      "repeated_hand"     -> BaselineDefs.naive(repeatedArgs.toList).isRight,
-      "empty_handfull"    -> BaselineDefs.full(emptyArgs).isRight,
-      "simple_handfull"   -> BaselineDefs.full(simpleArgs).isRight,
-      "repeated_handfull" -> BaselineDefs.full(repeatedArgs).isRight,
-      "bundled_handfull"  -> BaselineDefs.full(bundledArgs).isRight,
-      "simple_scalamain"  -> (BaselineDefs.scalaMain(mainArgs).bar == 42)
+      "empty_hand"           -> BaselineDefs.naive(emptyList).isRight,
+      "simple_hand"          -> BaselineDefs.naive(simpleList).isRight,
+      "repeated_hand"        -> BaselineDefs.naive(repeatedList).isRight,
+      "empty_handfull"       -> BaselineDefs.full(emptyArgs).isRight,
+      "simple_handfull"      -> BaselineDefs.full(simpleArgs).isRight,
+      "repeated_handfull"    -> BaselineDefs.full(repeatedArgs).isRight,
+      "bundled_handfull"     -> BaselineDefs.full(bundledArgs).isRight,
+      "wide25_hand"          -> BaselineDefs.naive25(wide25List).exists(_.opt25 == 25),
+      "wide25_flagged"       -> fOk(FlaggedDefs.wide25.parse(wide25Args)),
+      "positional_scalamain" -> (BaselineDefs.scalaMain(mainArgs).bar == 42),
+      "positional_flagged"   -> fOk(FlaggedDefs.mainStyle.parse(posArgs))
     )
     val failing = checks.collect { case (name, false) => name }
     if failing.nonEmpty then
       throw new IllegalStateException(s"scenarios do not parse: ${failing.mkString(", ")}")
 
-  // the typical quick hand-rolled loop (long options only)
+  // the typical quick hand-rolled tailrec/match parser (long options only)
   @Benchmark def empty_hand: Any    = BaselineDefs.naive(emptyList)
   @Benchmark def simple_hand: Any   = BaselineDefs.naive(simpleList)
   @Benchmark def repeated_hand: Any = BaselineDefs.naive(repeatedList)
@@ -53,5 +63,10 @@ class BaselineBench:
   @Benchmark def repeated_handfull: Any = BaselineDefs.full(repeatedArgs)
   @Benchmark def bundled_handfull: Any  = BaselineDefs.full(bundledArgs)
 
-  // Scala's @main machinery, parsing the same data positionally
-  @Benchmark def simple_scalamain: Any = BaselineDefs.scalaMain(mainArgs)
+  // 25 named options, all provided: the match chain's per-token 25-field copy vs the engine
+  @Benchmark def wide25_hand: Any    = BaselineDefs.naive25(wide25List)
+  @Benchmark def wide25_flagged: Any = FlaggedDefs.wide25.parse(wide25Args)
+
+  // Scala's @main machinery vs flagged on the same all-positional grammar and tokens
+  @Benchmark def positional_scalamain: Any = BaselineDefs.scalaMain(mainArgs)
+  @Benchmark def positional_flagged: Any   = FlaggedDefs.mainStyle.parse(posArgs)

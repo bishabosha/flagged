@@ -89,6 +89,69 @@ object BaselineDefs:
       else err(s"unexpected argument '$tok'")
     if errs.nonEmpty then Left(errs.reverse) else Right(HSimple(foo, bar, baz, qux.result()))
 
+  final case class H25(
+      opt1: Int = 0,
+      opt2: Int = 0,
+      opt3: Int = 0,
+      opt4: Int = 0,
+      opt5: Int = 0,
+      opt6: Int = 0,
+      opt7: Int = 0,
+      opt8: Int = 0,
+      opt9: Int = 0,
+      opt10: Int = 0,
+      opt11: Int = 0,
+      opt12: Int = 0,
+      opt13: Int = 0,
+      opt14: Int = 0,
+      opt15: Int = 0,
+      opt16: Int = 0,
+      opt17: Int = 0,
+      opt18: Int = 0,
+      opt19: Int = 0,
+      opt20: Int = 0,
+      opt21: Int = 0,
+      opt22: Int = 0,
+      opt23: Int = 0,
+      opt24: Int = 0,
+      opt25: Int = 0
+  )
+
+  /** The same tail-recursive idiom scaled to 25 named options: one exact-string case and one
+    * 25-field `copy` per token (invalid numbers just throw, as quick code does).
+    */
+  def naive25(args: List[String]): Either[String, H25] =
+    @scala.annotation.tailrec
+    def loop(rest: List[String], acc: H25): Either[String, H25] = rest match
+      case Nil                     => Right(acc)
+      case "--opt-1" :: v :: rest  => loop(rest, acc.copy(opt1 = v.toInt))
+      case "--opt-2" :: v :: rest  => loop(rest, acc.copy(opt2 = v.toInt))
+      case "--opt-3" :: v :: rest  => loop(rest, acc.copy(opt3 = v.toInt))
+      case "--opt-4" :: v :: rest  => loop(rest, acc.copy(opt4 = v.toInt))
+      case "--opt-5" :: v :: rest  => loop(rest, acc.copy(opt5 = v.toInt))
+      case "--opt-6" :: v :: rest  => loop(rest, acc.copy(opt6 = v.toInt))
+      case "--opt-7" :: v :: rest  => loop(rest, acc.copy(opt7 = v.toInt))
+      case "--opt-8" :: v :: rest  => loop(rest, acc.copy(opt8 = v.toInt))
+      case "--opt-9" :: v :: rest  => loop(rest, acc.copy(opt9 = v.toInt))
+      case "--opt-10" :: v :: rest => loop(rest, acc.copy(opt10 = v.toInt))
+      case "--opt-11" :: v :: rest => loop(rest, acc.copy(opt11 = v.toInt))
+      case "--opt-12" :: v :: rest => loop(rest, acc.copy(opt12 = v.toInt))
+      case "--opt-13" :: v :: rest => loop(rest, acc.copy(opt13 = v.toInt))
+      case "--opt-14" :: v :: rest => loop(rest, acc.copy(opt14 = v.toInt))
+      case "--opt-15" :: v :: rest => loop(rest, acc.copy(opt15 = v.toInt))
+      case "--opt-16" :: v :: rest => loop(rest, acc.copy(opt16 = v.toInt))
+      case "--opt-17" :: v :: rest => loop(rest, acc.copy(opt17 = v.toInt))
+      case "--opt-18" :: v :: rest => loop(rest, acc.copy(opt18 = v.toInt))
+      case "--opt-19" :: v :: rest => loop(rest, acc.copy(opt19 = v.toInt))
+      case "--opt-20" :: v :: rest => loop(rest, acc.copy(opt20 = v.toInt))
+      case "--opt-21" :: v :: rest => loop(rest, acc.copy(opt21 = v.toInt))
+      case "--opt-22" :: v :: rest => loop(rest, acc.copy(opt22 = v.toInt))
+      case "--opt-23" :: v :: rest => loop(rest, acc.copy(opt23 = v.toInt))
+      case "--opt-24" :: v :: rest => loop(rest, acc.copy(opt24 = v.toInt))
+      case "--opt-25" :: v :: rest => loop(rest, acc.copy(opt25 = v.toInt))
+      case other :: _              => Left(s"unknown option: $other")
+    loop(args, H25())
+
   /** What the compiler generates for `@main def run(foo: String, bar: Int, baz: Boolean, qux:
     * String*)`. The built-in support has no named options at all, so it parses the same data
     * positionally — less work than any option grammar.

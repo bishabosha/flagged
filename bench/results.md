@@ -98,35 +98,46 @@ is already minimal.
 
 ### Against hand-written parsers and `@main`
 
-`bench.BaselineBench` parses the same argument lists with non-library baselines for the
-`simple` grammar: the *typical* quick hand-rolled parser (a tail-recursive match over the token
-list with exact-string patterns and a copied accumulator — long options only, no `=` forms,
-first error wins), a *feature-parity* hand-rolled parser (short options, clusters, attached
-values, `--opt=v`, last-wins, error accumulation — a mutable cursor loop, ~60 lines for this
-one fixed grammar), and Scala's built-in `@main` machinery (`scala.util.CommandLineParser`),
-which has no named options at all and parses the same data positionally — a floor, not a
-like-for-like parser.
+`bench.BaselineBench` parses the same argument lists with non-library baselines: the *typical*
+quick hand-rolled parser (a tail-recursive match over the token list with exact-string patterns
+and a copied accumulator — long options only, no `=` forms, first error wins), a
+*feature-parity* hand-rolled parser (short options, clusters, attached values, `--opt=v`,
+last-wins, error accumulation — a mutable cursor loop, ~60 lines for this one fixed grammar),
+and Scala's built-in `@main` machinery (`scala.util.CommandLineParser`). `wide25` scales the
+typical idiom to 25 named `Int` options, all provided; `positional` is `@main`'s fair
+comparison — `@main` has no named options, so flagged parses the same tokens as
+all-`@positional` fields, the one grammar both can express.
 
-| Scenario | flagged | typical hand-rolled | feature-parity | `@main` (positional) |
+| Scenario | flagged | typical hand-rolled | feature-parity | `@main` |
 |---|---|---|---|---|
 | `empty` — µs/op | 0.038 | 0.003 | 0.003 | |
 | `empty` — B/op | 256 | 48 | 48 | |
-| `simple` — µs/op | 0.098 | 0.014 | 0.035 | 0.004 |
-| `simple` — B/op | 512 | 144 | 48 | 32 |
+| `simple` — µs/op | 0.098 | 0.014 | 0.035 | |
+| `simple` — B/op | 512 | 144 | 48 | |
 | `repeated` — µs/op | 0.126 | 0.116 | 0.074 | |
 | `repeated` — B/op | 704 | 560 | 144 | |
 | `bundled` — µs/op | 0.101 | unsupported | 0.021 | |
 | `bundled` — B/op | 552 | unsupported | 96 | |
+| `wide25` — µs/op | 0.635 | 16.887 | | |
+| `wide25` — B/op | 792 | 2 928 | | |
+| `positional` — µs/op | 0.089 | | | 0.004 |
+| `positional` — B/op | 584 | | | 32 |
 
 Hand-written parsers assign straight into locals or a small accumulator of the known types, so
 they carry none of the generic machinery — no per-parse state arrays sized by the command's
 arity, no erased value slots, no `Mirror`-based construction, no dispatch through parser
 instances, and no help/suggestion/subcommand plumbing reachable from the hot path. That
 machinery costs flagged ~1.7–3× over the feature-parity baseline (50–90 ns and ~500 B per
-parse). Against the typical parser the gap is 7× on `simple` but nearly closes on `repeated`
-(1.1×): the idiomatic accumulator `copy` per token and `:+` list append cost about what the
-whole engine does. The delta between the two hand-rolled columns is what the typical version's
-missing behavior costs to write by hand — per grammar, rather than once.
+parse). Against the typical parser the gap is 7× on `simple`, nearly closes on `repeated`
+(1.1× — the accumulator `copy` per token and `:+` append cost about what the whole engine
+does), and inverts completely at `wide25`: the match chain tests up to 25 exact strings per
+token and copies a 25-field accumulator per option, ending up 27× slower and 3.7× more
+allocating than the engine's per-token hash lookup and value slots. The typical idiom's cost
+grows with options × tokens; the engine's with tokens.
+
+`@main` remains 22× faster on the positional grammar — it parses three tokens with no option
+routing, no error accumulation, and no help — but that grammar is all it can express, and
+errors are thrown, not reported.
 
 ### Cross-platform (Scala.js, Wasm, Scala Native)
 
