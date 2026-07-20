@@ -50,7 +50,7 @@ across the three libraries live in `bench/` (see `bench/README.md`).
 | Scala versions | 3 only | 2.12, 2.13, 3 | 2.12, 2.13, 3 |
 | Platforms | JVM, JS, Native (`java.time`/`Path` instances per platform) | JVM, JS, Native | JVM, JS, Native |
 
-## Deliberate differences (kept, covered by ParitySuite)
+## Deliberate differences (covered by ParitySuite)
 
 - **Last-wins for repeated options, flags included.** Both libraries error on repetition by
   default. Last-wins matches common Unix tooling and makes shell aliases composable
@@ -66,25 +66,14 @@ across the three libraries live in `bench/` (see `bench/README.md`).
   field. mainargs treats all-dash tokens as plain values; case-app agrees with flagged here.
 - **`--help` works at every level and position.** mainargs only recognizes it as the first token.
 
-## Gaps in flagged
+## Features only flagged has
 
-Remaining after the parity round (everything else in the original list is implemented):
-unrecognized-argument passthrough modes, shell completions, argument index tracking, Scala 2.
-
-## Features neither library has
-
-For context, not gaps: hierarchical subcommands derived from nested enums, per-level help with
+For context: hierarchical subcommands derived from nested enums, per-level help with
 suggestions, compile-time duplicate/shape/ordering checks, typed `Trailing`, shape-preserving
 `map`/`emap` on every parser (including whole commands, giving cross-field validation before the
 run function), pluggable flag/repeated shapes.
 
-## Follow-ups, ranked
-
-Implemented from the original list: error accumulation, O(log n) derivation depth for wide
-commands, `@hidden`, `@version`/`--version`, `@group` help sections, repeatable `@name` aliases
-(options and commands), `Option[Group]`, prefixed splices, `Map[K,V]`, `@default` command,
-digit-aware kebab-casing, presence semantics for optional valued flags, and `--help-all` for
-revealing `@hidden` options and commands (case-app's `--full-help`). Still open:
+## Gaps in flagged, ranked
 
 1. **Shell completions.** bash/zsh completion generation from the command model; the static model
    makes this mechanical, but it is a sizable feature (case-app ships it).
