@@ -26,9 +26,7 @@ shape. Only comparisons within a row are meaningful.
 | `commands` (3 subcommands) | 47.1 ± 4.8 | 119.3 ± 8.3 | 250.4 ± 19.5 | 473.8 ± 42.6 |
 
 Derivation cost over the baseline: flagged adds ~63–87 ms, mainargs ~185–203 ms, case-app
-~420–465 ms; flagged is the cheapest of the three in every scenario. (Before the optimization
-rounds — per-field expansion collapse, bottom-up mergeable walk summaries, match-type field
-computation — flagged was at 178/296/175 ms and lost `options25` to mainargs.)
+~420–465 ms; flagged is the cheapest of the three in every scenario.
 
 ### Scaling with field count
 
@@ -128,23 +126,19 @@ ns per parse, best of 5 rounds:
 | leftover — flagged | 177 | 2 066 | 843 | 575 | 438 |
 | leftover — mainargs | 368 | 2 615 | 1 570 | 1 238 | 1 133 |
 
-flagged is the fastest of the three on every scenario on every platform — including `empty`,
-which used to be case-app's near-no-op win on Native. In the maxed Native build
-flagged parses in 0.23–0.44 µs — ~2–3× the JVM and ahead of Scala.js by 2–5×. The WebAssembly
-backend beats the JavaScript one on every flagged scenario (its allocation paths profit more
-from the leaner engine).
+flagged is the fastest of the three on every scenario on every platform. In the maxed Native
+build flagged parses in 0.23–0.44 µs — ~2–3× the JVM and ahead of Scala.js by 2–5×. The
+WebAssembly backend beats the JavaScript one on every flagged scenario.
 
 Why Native trails the JVM: an ahead-of-time build has no profile-guided optimization, so the
 remaining polymorphic dispatch and the workload's own allocations stay real, where HotSpot
-devirtualizes and escape-analyzes them after profiling. The gap has been engineered down in
-four steps — removing deliberate closures from the hot path, the slot-write protocol that
-eliminated per-token parse allocations (`Occ` records, occurrence buffers, `Ok` boxing), an
-Option-free routing loop (null-returning lookups, token-as-display, sentinel state, lazy
-error buffers), and dropping the boxed `parse` path so each value parser exposes a single
-virtual method (the smaller dispatch surface is what the AOT optimizer rewards most: −30–55%
-across scenarios) — and the recommended build configuration does the rest: thin LTO inlines
-across module boundaries into the Scala Native runtime, and for a parse-once-and-exit CLI
-binary, no-GC-plus-process-teardown is a sound memory strategy, not a benchmark trick.
+devirtualizes and escape-analyzes them after profiling. The engine keeps that residue small —
+no closures on the hot path, successes written straight into value slots, an Option-free
+routing loop, and one virtual method per value parser (a small dispatch surface is what an
+AOT optimizer rewards most) — and the recommended build configuration does the rest: thin
+LTO inlines across module boundaries into the Scala Native runtime, and for a
+parse-once-and-exit CLI binary, no-GC-plus-process-teardown is a sound memory strategy, not
+a benchmark trick.
 
 CLI parsing happens once per process, so parse latency is rarely a deciding factor; the compile
 table is the practically relevant one, and the allocation column mostly matters as a proxy for
