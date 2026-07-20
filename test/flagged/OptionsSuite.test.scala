@@ -137,11 +137,18 @@ class OptionsSuite extends munit.FunSuite:
   }
 
   test("repeated options grow past the initial buffer") {
-    // more than four occurrences: exercises the element buffer's growth path
+    // more than four occurrences of a List (builder collector) and of a custom repeated (the
+    // default array collector, exercising its growth path)
     val many = (1 to 9).flatMap(i => Seq("--file", i.toString))
     assertEquals(
       ok(Flagged.parse[Collections](many)).file,
       (1 to 9).map(_.toString).toList
+    )
+    given Parser.Repeated[String] = Parser.repeated[String, String](l => Ok(l.mkString(",")))
+    case class Joined(file: String = "") derives Parser.Command
+    assertEquals(
+      ok(Flagged.parse[Joined](many)).file,
+      (1 to 9).mkString(",")
     )
   }
 

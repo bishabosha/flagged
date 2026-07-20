@@ -3,6 +3,7 @@ package flagged
 import java.io.File
 import java.util.UUID
 import scala.collection.Factory
+import scala.collection.immutable.ArraySeq
 import scala.deriving.Mirror
 import flagged.internal.{Assemble, Engine, HelpFmt}
 import scala.annotation.nowarn
@@ -121,6 +122,23 @@ sealed trait Parser[A]:
 object Parser extends ParserLowPriority:
   def apply[A](using p: Parser[A]): Parser[A] = p
 
+  /** Engine protocol: per-parse accumulator for one repeated slot. The engine offers each
+    * successfully parsed element through [[add]]; [[finishInto]] writes the combined collection
+    * into the slot. [[size]] counts what was added, so the engine can skip the build when any
+    * element failed to parse.
+    */
+  private[flagged] abstract class Collector:
+    private var n = 0
+
+    final def size: Int         = n
+    final def add(v: Any): Unit =
+      append(v)
+      n += 1
+
+    /** Called with `size` still at the pre-insertion count. */
+    protected def append(v: Any): Unit
+    def finishInto(out: Array[Any], i: Int): Result[Unit, String]
+
   /** Unbox a `Result` into a value slot: success is the shared [[Result.done]] (no allocation), an
     * `Err` passes through unchanged (no re-wrapping).
     */
@@ -220,6 +238,30 @@ object Parser extends ParserLowPriority:
         i: Int
     ): Result[Unit, String] =
       intoSlot(build(l.asInstanceOf[IndexedSeq[Elem]]), out, i)
+
+    /** Engine protocol: a fresh accumulator for one parse. The default collects into an array and
+      * finishes through [[buildInto]] (`build` needs the full element sequence, and the `Seq`
+      * instance wraps the array zero-copy); builder-backed collection instances override to append
+      * straight to the collection's builder — elements are materialised exactly once.
+      */
+    private[flagged] def collector(): Collector = new Collector:
+      private var buf = new Array[Any](4)
+
+      protected def append(v: Any) =
+        if size == buf.length then
+          val g = new Array[Any](buf.length * 2)
+          System.arraycopy(buf, 0, g, 0, buf.length)
+          buf = g
+        buf(size) = v
+
+      def finishInto(out: Array[Any], i: Int) =
+        val exact =
+          if size == buf.length then buf
+          else
+            val e = new Array[Any](size)
+            System.arraycopy(buf, 0, e, 0, size)
+            e
+        buildInto(ArraySeq.unsafeWrapArray(exact), out, i)
 
   /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with `Nil`
     * when no `--` is given — return `Err` to require one).
@@ -326,6 +368,12 @@ object Parser extends ParserLowPriority:
     override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
       Result.task:
         out(i) = l.toList
+    override private[flagged] def collector() = new Collector:
+      private val b                           = List.newBuilder[Any]
+      protected def append(v: Any)            = b += v
+      def finishInto(out: Array[Any], i: Int) =
+        Result.task:
+          out(i) = b.result()
 
   given [A] => (elem: Value[A]) => Repeated[Vector[A]]:
     type Elem = A
@@ -334,6 +382,12 @@ object Parser extends ParserLowPriority:
     override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
       Result.task:
         out(i) = l.toVector
+    override private[flagged] def collector() = new Collector:
+      private val b                           = Vector.newBuilder[Any]
+      protected def append(v: Any)            = b += v
+      def finishInto(out: Array[Any], i: Int) =
+        Result.task:
+          out(i) = b.result()
 
   given [A] => (elem: Value[A]) => Repeated[Seq[A]]:
     type Elem = A
@@ -363,6 +417,12 @@ object Parser extends ParserLowPriority:
     override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
       Result.task:
         out(i) = l.asInstanceOf[IndexedSeq[Elem]].toMap
+    override private[flagged] def collector() = new Collector:
+      private val b                           = Map.newBuilder[K, V]
+      protected def append(v: Any)            = b += v.asInstanceOf[Elem]
+      def finishInto(out: Array[Any], i: Int) =
+        Result.task:
+          out(i) = b.result()
 
   // built-in instances implement `parseInto` directly, so the default path is plain virtual
   // dispatch with no closures; only user-constructed parsers (`of`, `emap`, ...) go through a
@@ -450,3 +510,9 @@ sealed trait ParserLowPriority:
     override private[flagged] def buildInto(l: IndexedSeq[Any], out: Array[Any], i: Int) =
       Result.task:
         out(i) = l.asInstanceOf[IndexedSeq[A]].to(factory)
+    override private[flagged] def collector() = new Parser.Collector:
+      private val b                           = factory.newBuilder
+      protected def append(v: Any)            = b += v.asInstanceOf[A]
+      def finishInto(out: Array[Any], i: Int) =
+        Result.task:
+          out(i) = b.result()

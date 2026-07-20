@@ -4,7 +4,6 @@ import flagged.{ParseError, ParseResult}
 import steps.result.Result
 import steps.result.Result.{Ok, Err, eval}
 import steps.result.Result.eval.ok
-import scala.collection.immutable.ArraySeq
 import scala.collection.mutable
 
 /** The token-stream parser, in two orthogonal phases:
@@ -12,8 +11,8 @@ import scala.collection.mutable
   *   1. *routing* — a cursor walk over the argument array, deciding which spec each token belongs
   *      to and whether it consumes a value, and recording per-slot scalars: a mention count plus
   *      the last raw value and the spelling it arrived under (repeated specs parse their elements
-  *      eagerly into growable buffers instead; subcommands and `--` trailing divert the remaining
-  *      tokens immediately);
+  *      eagerly into per-slot collectors — collection builders for the built-in instances;
+  *      subcommands and `--` trailing divert the remaining tokens immediately);
   *   1. *finishing* — one pass per spec interprets those scalars (count flags, last-wins singles,
   *      combined repeats), parsing single values exactly once — an overridden earlier mention is
   *      never parsed — and falling back to defaults, then builds the command's value.
@@ -55,9 +54,8 @@ private[flagged] object Engine:
       val lastRaw  = new Array[String](n) // null while only bare mentions have been seen
       val lastDisp = new Array[String](n)
 
-      // element buffers for repeated specs, allocated only when one occurs
-      var repBufs: Array[Array[Any]] = null
-      var repLens: Array[Int]        = null
+      // element collectors for repeated specs, allocated only when one occurs
+      var reps: Array[flagged.Parser.Collector] = null
 
       var subValue   = Option.empty[Any]
       var subErrored = false
@@ -101,31 +99,23 @@ private[flagged] object Engine:
         case Mode.Flag(_, _) => true
         case _               => false
 
-      def copyOf(src: Array[Any], newLength: Int): Array[Any] =
-        val out = new Array[Any](newLength)
-        System.arraycopy(src, 0, out, 0, math.min(src.length, newLength))
-        out
-
-      /** Repeated elements parse eagerly: every element counts, none is overridden. */
+      /** Repeated elements parse eagerly into the spec's collector: every element counts, none is
+        * overridden. The value slot is scratch space until the collector's finish overwrites it.
+        */
       def addElem(
           index: Int,
           parser: flagged.Parser.Repeated[?],
           raw: String,
           display: String
       ): Unit =
-        if repBufs == null then
-          repBufs = new Array[Array[Any]](n)
-          repLens = new Array[Int](n)
-        var buf = repBufs(index)
-        if buf == null then
-          buf = new Array[Any](4)
-          repBufs(index) = buf
-        else if repLens(index) == buf.length then
-          buf = copyOf(buf, buf.length * 2)
-          repBufs(index) = buf
-        parser.parseElemInto(raw, buf, repLens(index)) match
+        if reps == null then reps = new Array[flagged.Parser.Collector](n)
+        var c = reps(index)
+        if c == null then
+          c = parser.collector()
+          reps(index) = c
+        parser.parseElemInto(raw, values, index) match
           case Err(msg) => report(s"invalid value for '$display': $msg")
-          case _        => repLens(index) += 1
+          case _        => c.add(values(index))
 
       /** A value mention. */
       def offerValue(index: Int, mode: Mode, raw: String, display: String): Unit =
@@ -295,19 +285,16 @@ private[flagged] object Engine:
               if optional then values(index) = Some(values(index))
             true
           case Mode.Repeated(parser) =>
-            val len = if repLens == null then 0 else repLens(index)
             if counts(index) == 0 then
               default match
                 case Some(d) => values(index) = d()
                 case None    =>
-                  reportInvalid(parser.buildInto(ArraySeq.empty[Any], values, index), display)
-            else if len == counts(index) then // no element failed (failures were reported)
-              val buf   = repBufs(index)
-              val exact = if len == buf.length then buf else copyOf(buf, len)
-              reportInvalid(
-                parser.buildInto(ArraySeq.unsafeWrapArray(exact), values, index),
-                display
-              )
+                  // an empty collector: `build` still decides (it may require an occurrence)
+                  reportInvalid(parser.collector().finishInto(values, index), display)
+            else
+              val c = reps(index)
+              if c.size == counts(index) then // no element failed (failures were reported)
+                reportInvalid(c.finishInto(values, index), display)
             true
 
       var missing: mutable.ListBuffer[String] = null
