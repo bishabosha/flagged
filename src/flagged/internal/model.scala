@@ -128,6 +128,10 @@ final case class Command(
   lazy val shortChars: Array[Char]         = shorts.map(_.short.get).toArray
   lazy val shortSpecs: Array[OptSpec]      = shorts.toArray
 
+  // hot-loop views: Vector.apply walks a tree per element; the engine indexes these instead
+  lazy val optSpecs: Array[OptSpec] = opts.toArray
+  lazy val posSpecs: Array[PosSpec] = positionals.toArray
+
   /** Build spliced children from their storage slices, then build this command's value; the first
     * failing build (e.g. an `emap` validation) short-circuits. `counts` holds per-slot mention
     * counts, indexed from `base` for this command's storage: an optional splice none of whose slots

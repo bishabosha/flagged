@@ -76,6 +76,8 @@ private[flagged] object Engine:
 
       val shortChars = cmd.shortChars
       val shortSpecs = cmd.shortSpecs
+      val posSpecs   = cmd.posSpecs
+      val subGroup   = cmd.sub.orNull
 
       /** With a `@default` command and no own options, unrecognized tokens are its arguments. */
       val defaultSubCase: SubCase =
@@ -160,36 +162,35 @@ private[flagged] object Engine:
         idx = args.length
 
       def handleFree(tok: String): Unit =
-        cmd.sub match
-          case Some(g) =>
-            val sc = findCase(g, tok)
-            if sc != null then runSub(sc, idx)
-            else if defaultSubCase != null then runSub(defaultSubCase, idx - 1)
-            else
-              val sug = Runtime
-                .suggest(tok, g.cases.filterNot(_.hidden).flatMap(c => c.name :: c.aliases))
-                .map(s => s" (did you mean '$s'?)")
-                .getOrElse("")
-              report(s"unknown command '$tok'$sug")
-              subErrored = true
-              idx = args.length // the remaining tokens belong to the unknown command
-          case None =>
-            if posIdx >= cmd.positionals.length then report(s"unexpected argument '$tok'")
-            else
-              val p = cmd.positionals(posIdx)
-              p.mode match
-                case Mode.Repeated(_) =>
-                  offerValue(p.index, p.mode, tok, p.display) // keep filling the last positional
-                case Mode.Single(parser, _) =>
-                  // a single positional is never overridden: parse it now, nothing staged
-                  counts(p.index) += 1
-                  parser.readInto(tok, values, p.index) match
-                    case Err(msg) => report(s"invalid value for '${p.display}': $msg")
-                    case _        => ()
-                  posIdx += 1
-                case Mode.Flag(_, _) => // positionals never resolve to Flag mode
-                  offerValue(p.index, p.mode, tok, p.display)
-                  posIdx += 1
+        if subGroup != null then
+          val g  = subGroup
+          val sc = findCase(g, tok)
+          if sc != null then runSub(sc, idx)
+          else if defaultSubCase != null then runSub(defaultSubCase, idx - 1)
+          else
+            val sug = Runtime
+              .suggest(tok, g.cases.filterNot(_.hidden).flatMap(c => c.name :: c.aliases))
+              .map(s => s" (did you mean '$s'?)")
+              .getOrElse("")
+            report(s"unknown command '$tok'$sug")
+            subErrored = true
+            idx = args.length // the remaining tokens belong to the unknown command
+        else if posIdx >= posSpecs.length then report(s"unexpected argument '$tok'")
+        else
+          val p = posSpecs(posIdx)
+          p.mode match
+            case Mode.Repeated(_) =>
+              offerValue(p.index, p.mode, tok, p.display) // keep filling the last positional
+            case Mode.Single(parser, _) =>
+              // a single positional is never overridden: parse it now, nothing staged
+              counts(p.index) += 1
+              parser.readInto(tok, values, p.index) match
+                case Err(msg) => report(s"invalid value for '${p.display}': $msg")
+                case _        => ()
+              posIdx += 1
+            case Mode.Flag(_, _) => // positionals never resolve to Flag mode
+              offerValue(p.index, p.mode, tok, p.display)
+              posIdx += 1
 
       // ---- phase 1: routing ---------------------------------------------------
 
@@ -334,15 +335,16 @@ private[flagged] object Engine:
       val skipIdx: Set[Int] =
         if cmd.splices.isEmpty then Set.empty else absentRanges(cmd.splices, 0).flatten.toSet
 
-      var oi = 0
-      while oi < cmd.opts.length do
-        val o = cmd.opts(oi)
+      val optSpecs = cmd.optSpecs
+      var oi       = 0
+      while oi < optSpecs.length do
+        val o = optSpecs(oi)
         if !skipIdx(o.index) then
           if !finishSlot(o.index, o.longDisplay, o.mode, o.default) then addMissing(o.longDisplay)
         oi += 1
       var pi = 0
-      while pi < cmd.positionals.length do
-        val p = cmd.positionals(pi)
+      while pi < posSpecs.length do
+        val p = posSpecs(pi)
         if !finishSlot(p.index, p.display, p.mode, p.default) then addMissing(p.display)
         pi += 1
       if missing != null then
