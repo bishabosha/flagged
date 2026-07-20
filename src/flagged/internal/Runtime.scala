@@ -13,6 +13,16 @@ object Runtime:
       case "false" | "no" | "off" | "0" => Ok(false)
       case other => Err(s"'$other' is not a valid bool (expected true/false)")
 
+  def parseBoolInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
+    s.trim.toLowerCase match
+      case "true" | "yes" | "on" | "1" =>
+        out(i) = true
+        Result.done
+      case "false" | "no" | "off" | "0" =>
+        out(i) = false
+        Result.done
+      case other => Err(s"'$other' is not a valid bool (expected true/false)")
+
   /** Value parser for enums whose cases are all parameterless, matching kebab-cased names. */
   def enumParser[A](name: String, pairs: Vector[(String, A)]): Parser.Enumerated[A] =
     Parser.enumeratedOf(name, pairs)
