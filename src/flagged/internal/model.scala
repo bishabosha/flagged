@@ -34,7 +34,8 @@ final case class OptSpec(
     hidden: Boolean = false,
     group: Option[String] = None,
     aliases: List[String] = Nil
-)
+):
+  lazy val shortDisplay: String = short.fold("--" + long)("-" + _)
 
 final case class PosSpec(
     name: String,
@@ -96,29 +97,45 @@ final case class Command(
     arity: Int,                    // value-storage size: own fields plus spliced children's storage
     version: Option[String] = None // printed by --version and in the help header
 ):
-  // per-token lookups go through these instead of per-token scans with predicate closures
-  lazy val longIndex: Map[String, OptSpec] =
-    opts.iterator.flatMap(o => (o.long :: o.aliases).iterator.map(_ -> o)).toMap
-  lazy val shortIndex: Map[Char, OptSpec] =
-    opts.iterator.flatMap(o => o.short.iterator.map(_ -> o)).toMap
+  // per-token lookups: java.util maps return null instead of allocating an Option, and the
+  // long keys carry their `--` prefix so a plain long token needs no substring at all (and the
+  // key doubles as the option's display spelling)
+  lazy val longLookup: java.util.HashMap[String, OptSpec] =
+    val m = new java.util.HashMap[String, OptSpec]
+    opts.foreach { o =>
+      m.put("--" + o.long, o)
+      o.aliases.foreach(a => m.put("--" + a, o))
+    }
+    m
+  private lazy val shorts: Vector[OptSpec] = opts.filter(_.short.isDefined)
+  lazy val shortChars: Array[Char]         = shorts.map(_.short.get).toArray
+  lazy val shortSpecs: Array[OptSpec]      = shorts.toArray
 
   /** Build spliced children from their storage slices, then build this command's value; the first
-    * failing build (e.g. an `emap` validation) short-circuits. `occupied` reports whether the value
-    * slot at an index (relative to this command's storage) saw any command-line occurrence: an
-    * optional splice none of whose slots are occupied becomes `None` without being built.
+    * failing build (e.g. an `emap` validation) short-circuits. `counts` holds per-slot mention
+    * counts, indexed from `base` for this command's storage: an optional splice none of whose slots
+    * were mentioned becomes `None` without being built.
     */
-  def finish(values: Array[Any], occupied: Int => Boolean = _ => true): Result[Any, String] =
+  def finish(values: Array[Any], counts: Array[Int], base: Int): Result[Any, String] =
     def loop(remaining: List[Splice]): Result[Any, String] = remaining match
       case Nil       => build(values)
       case s :: rest =>
-        val range = s.offset until s.offset + s.command.arity
-        if s.optional && !range.exists(occupied) then
-          values(s.slot) = s.default.map(_()).getOrElse(None)
+        var occupied = false
+        var i        = base + s.offset
+        val end      = base + s.offset + s.command.arity
+        while i < end && !occupied do
+          if counts(i) > 0 then occupied = true
+          i += 1
+        if s.optional && !occupied then
+          values(s.slot) = s.default match
+            case Some(d) => d()
+            case None    => None
           loop(rest)
         else
           s.command.finish(
             values.slice(s.offset, s.offset + s.command.arity),
-            i => occupied(s.offset + i)
+            counts,
+            base + s.offset
           ) match
             case Result.Ok(v) =>
               values(s.slot) = if s.optional then Some(v) else v

@@ -86,7 +86,10 @@ sealed trait Parser[A]:
   final def parse(args: Seq[String]): ParseResult[A] = parse(args, typeName)
 
   final def parse(args: Seq[String], prog: String): ParseResult[A] =
-    Engine.run(command, prog, Nil, args.toList).asInstanceOf[ParseResult[A]]
+    val indexed = args match
+      case ix: IndexedSeq[String] => ix // varargs arrive as ArraySeq: zero-copy
+      case other                  => other.toIndexedSeq
+    Engine.run(command, prog, Nil, indexed, 0).asInstanceOf[ParseResult[A]]
 
   /** Parse `args`; on `--help` print the help screen and exit 0, on error print a message to stderr
     * and exit 2. Intended for `@main` methods and scripts.

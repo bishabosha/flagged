@@ -9,18 +9,20 @@ import scala.collection.mutable
 
 /** The token-stream parser, in two orthogonal phases:
   *
-  *   1. *routing* — walk the tokens, decide which spec each one belongs to and whether it consumes
-  *      a value, and record per-slot scalars: a mention count, the last raw value and the spelling
-  *      it arrived under, and whether the last mention carried a value (repeated specs parse their
-  *      elements eagerly into growable buffers instead; subcommands and `--` trailing divert the
-  *      remaining tokens immediately);
+  *   1. *routing* — a cursor walk over the argument array, deciding which spec each token belongs
+  *      to and whether it consumes a value, recording per-slot scalars: a mention count, the last
+  *      raw value and the spelling it arrived under, and whether the last mention carried a value
+  *      (repeated specs parse their elements eagerly into growable buffers instead; subcommands and
+  *      `--` trailing divert the remaining tokens immediately);
   *   1. *finishing* — one pass per spec interprets those scalars (count flags, last-wins singles,
   *      combined repeats), parsing single values exactly once — an overridden earlier mention is
   *      never parsed — and falling back to defaults, then builds the command's value.
   *
-  * The hot path allocates no per-token objects: parsers write successful values straight into the
-  * value slots through the `*Into` protocol (success is the shared `Result.done`), and the per-slot
-  * state is primitive arrays.
+  * The hot path allocates nothing per token: parsers write successful values straight into the
+  * value slots through the `*Into` protocol (success is the shared `Result.done`), per-slot state
+  * is primitive arrays, lookups return null instead of `Option`, and a long option's display
+  * spelling is the token itself (the lookup keys carry the `--` prefix). Error buffers exist only
+  * once something is reported.
   *
   * Errors do not stop parsing: routing and finishing both record every problem they find (unknown
   * options, missing values, invalid values, missing required arguments), and the parse fails at the
@@ -28,13 +30,24 @@ import scala.collection.mutable
   */
 private[flagged] object Engine:
 
-  def run(cmd: Command, prog: String, path: List[String], args: List[String]): ParseResult[Any] =
+  /** Sentinel distinguishing "never set" from any real value (including null). */
+  private object Unset
+
+  def run(
+      cmd: Command,
+      prog: String,
+      path: List[String],
+      args: IndexedSeq[String],
+      from: Int
+  ): ParseResult[Any] =
     Result:
-      val full                      = (prog :: path).mkString(" ")
-      def hint                      = s"Try '$full --help' for more information."
-      val errors                    = mutable.ListBuffer.empty[String]
-      def report(msg: String): Unit = errors += msg
-      def helpNow(): Nothing        = eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path)))
+      val full                                      = (prog :: path).mkString(" ")
+      def hint                                      = s"Try '$full --help' for more information."
+      var errors: mutable.ListBuffer[String] | Null = null
+      def report(msg: String): Unit                 =
+        if errors == null then errors = mutable.ListBuffer.empty[String]
+        errors.nn += msg
+      def helpNow(): Nothing = eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path)))
 
       val n         = cmd.arity
       val values    = new Array[Any](n)
@@ -44,18 +57,31 @@ private[flagged] object Engine:
       val lastIsVal = new Array[Boolean](n) // for pure flags: value-mention already reported
 
       // element buffers for repeated specs, allocated only when one occurs
-      var repBufs: Array[Array[Any]] = null
-      var repLens: Array[Int]        = null
+      var repBufs: Array[Array[Any]] | Null = null
+      var repLens: Array[Int] | Null        = null
 
-      var subValue   = Option.empty[Any]
-      var subErrored = false
-      var trailValue = Option.empty[Any]
-      var rest       = args
-      var posIdx     = 0
-      var noMoreOpts = false
+      var subValue: Any   = Unset
+      var subErrored      = false
+      var trailValue: Any = Unset
+      var idx             = from
+      var posIdx          = 0
+      var noMoreOpts      = false
 
-      def longOf(nm: String) = cmd.longIndex.get(nm)
-      def shortOf(c: Char)   = cmd.shortIndex.get(c)
+      /** With a `@default` command and no own options, unrecognized tokens are its arguments. */
+      val defaultSubCase: SubCase | Null =
+        if cmd.opts.isEmpty then
+          cmd.sub match
+            case Some(g) => g.defaultCase.orNull
+            case None    => null
+        else null
+
+      def shortSpec(c: Char): OptSpec | Null =
+        val chars = cmd.shortChars
+        var i     = 0
+        while i < chars.length do
+          if chars(i) == c then return cmd.shortSpecs(i)
+          i += 1
+        null
 
       def isNegativeNumber(s: String): Boolean =
         s.length > 1 && s(0) == '-' &&
@@ -64,15 +90,15 @@ private[flagged] object Engine:
       def looksLikeOption(s: String): Boolean =
         s.length > 1 && s.startsWith("-") && !isNegativeNumber(s)
 
-      /** `None` after reporting when the value is missing. */
-      def takeValue(display: String): Option[String] =
-        rest match
-          case v :: tail if !looksLikeOption(v) =>
-            rest = tail
-            Some(v)
-          case _ =>
-            report(s"option '$display' requires a value")
-            None
+      /** Null after reporting when the value is missing. */
+      def takeValue(display: String): String | Null =
+        if idx < args.length && !looksLikeOption(args(idx)) then
+          val v = args(idx)
+          idx += 1
+          v
+        else
+          report(s"option '$display' requires a value")
+          null
 
       def isFlag(spec: OptSpec): Boolean = spec.mode match
         case Mode.Flag(_, _) => true
@@ -85,28 +111,28 @@ private[flagged] object Engine:
           index: Int,
           parser: flagged.Parser.Repeated[?],
           raw: String,
-          display: String
+          display: String | Null
       ): Unit =
         if repBufs == null then
           repBufs = new Array[Array[Any]](n)
           repLens = new Array[Int](n)
-        var buf = repBufs(index)
+        var buf = repBufs.nn(index)
         if buf == null then
           buf = new Array[Any](4)
-          repBufs(index) = buf
-        else if repLens(index) == buf.length then
+          repBufs.nn(index) = buf
+        else if repLens.nn(index) == buf.length then
           val grown = new Array[Any](buf.length * 2)
           System.arraycopy(buf, 0, grown, 0, buf.length)
           buf = grown
-          repBufs(index) = buf
-        parser.parseElemInto(raw, buf, repLens(index)) match
+          repBufs.nn(index) = buf
+        parser.parseElemInto(raw, buf, repLens.nn(index)) match
           case Err(msg) =>
             val disp = if display == null then posName(index) else display
             report(s"invalid value for '$disp': $msg")
-          case _ => repLens(index) += 1
+          case _ => repLens.nn(index) += 1
 
       /** A value mention. `display` is null for positionals (rebuilt from the spec at finish). */
-      def offerValue(index: Int, mode: Mode, raw: String, display: String): Unit =
+      def offerValue(index: Int, mode: Mode, raw: String, display: String | Null): Unit =
         counts(index) += 1
         mode match
           case Mode.Repeated(p) =>
@@ -118,7 +144,7 @@ private[flagged] object Engine:
               lastIsVal(index) = true
           case _ =>
             lastRaw(index) = raw
-            lastDisp(index) = display
+            lastDisp(index) = display.asInstanceOf[String]
             lastIsVal(index) = true
 
       def offerBare(index: Int): Unit =
@@ -128,22 +154,33 @@ private[flagged] object Engine:
       def posName(index: Int): String =
         s"<${cmd.positionals.find(_.index == index).fold("value")(_.name)}>"
 
+      def findCase(g: SubGroup, tok: String): SubCase | Null =
+        var i = 0
+        while i < g.cases.length do
+          val c = g.cases(i)
+          if c.name == tok || c.aliases.contains(tok) then return c
+          i += 1
+        null
+
+      def runSub(sc: SubCase, fromIdx: Int): Unit =
+        // .ok propagates the subcommand's Help/Failure to our caller unchanged
+        subValue = run(sc.command, prog, path :+ sc.name, args, fromIdx).ok
+        idx = args.length
+
       def handleFree(tok: String): Unit =
         cmd.sub match
           case Some(g) =>
-            g.cases.find(c => c.name == tok || c.aliases.contains(tok)) match
-              case Some(sc) => runSub(sc, rest)
-              case None     =>
-                defaultSub match
-                  case Some(dc) => runSub(dc, tok :: rest)
-                  case None     =>
-                    val sug = Runtime
-                      .suggest(tok, g.cases.filterNot(_.hidden).flatMap(c => c.name :: c.aliases))
-                      .map(s => s" (did you mean '$s'?)")
-                      .getOrElse("")
-                    report(s"unknown command '$tok'$sug")
-                    subErrored = true
-                    rest = Nil // the remaining tokens belong to the unknown command
+            val sc = findCase(g, tok)
+            if sc != null then runSub(sc.nn, idx)
+            else if defaultSubCase != null then runSub(defaultSubCase.nn, idx - 1)
+            else
+              val sug = Runtime
+                .suggest(tok, g.cases.filterNot(_.hidden).flatMap(c => c.name :: c.aliases))
+                .map(s => s" (did you mean '$s'?)")
+                .getOrElse("")
+              report(s"unknown command '$tok'$sug")
+              subErrored = true
+              idx = args.length // the remaining tokens belong to the unknown command
           case None =>
             if posIdx >= cmd.positionals.length then report(s"unexpected argument '$tok'")
             else
@@ -153,86 +190,75 @@ private[flagged] object Engine:
                 case Mode.Repeated(_) => () // keep filling the last positional
                 case _                => posIdx += 1
 
-      /** With a `@default` command and no own options, unrecognized tokens are its arguments. */
-      def defaultSub: Option[SubCase] =
-        if cmd.opts.isEmpty then cmd.sub.flatMap(_.defaultCase) else None
-
-      def runSub(sc: SubCase, args: List[String]): Unit =
-        // .ok propagates the subcommand's Help/Failure to our caller unchanged
-        subValue = Some(run(sc.command, prog, path :+ sc.name, args).ok)
-        rest = Nil
-
       // ---- phase 1: routing ---------------------------------------------------
 
-      while rest.nonEmpty do
-        val tok = rest.head
-        rest = rest.tail
+      while idx < args.length do
+        val tok = args(idx)
+        idx += 1
         // `-2` is a positional value unless a short option `-2` is actually defined
         val isFree =
           noMoreOpts || tok == "-" || !tok.startsWith("-") ||
-            (isNegativeNumber(tok) && shortOf(tok(1)).isEmpty)
+            (isNegativeNumber(tok) && shortSpec(tok(1)) == null)
         if isFree then handleFree(tok)
         else if tok == "--" then
           cmd.trailing match
             case Some(t) =>
               // divert everything after `--` to the trailing field, verbatim
-              t.build(rest) match
-                case Ok(v)    => trailValue = Some(v)
+              t.build(args.drop(idx).toList) match
+                case Ok(v)    => trailValue = v
                 case Err(msg) => report(s"invalid arguments after '--': $msg")
-              rest = Nil
+              idx = args.length
             case None => noMoreOpts = true
         else if tok.startsWith("--") then
-          val body              = tok.drop(2)
-          val (nm, inlineValue) = body.indexOf('=') match
-            case -1 => (body, None)
-            case i  => (body.take(i), Some(body.drop(i + 1)))
-          if nm == "help" then helpNow()
-          longOf(nm) match
-            case None if nm == "version" && cmd.version.nonEmpty =>
-              // a user option named `version` takes precedence (longOf matched above)
+          // the lookup keys carry the `--` prefix: a plain long token needs no substring and
+          // doubles as its own display spelling
+          val eq                         = tok.indexOf('=')
+          val key                        = if eq == -1 then tok else tok.substring(0, eq)
+          val inlineValue: String | Null = if eq == -1 then null else tok.substring(eq + 1)
+          if key == "--help" then helpNow()
+          val spec = cmd.longLookup.get(key)
+          if spec == null then
+            if key == "--version" && cmd.version.nonEmpty then
+              // a user option named `version` takes precedence (the lookup ran first)
               eval.raise(ParseError.Help(cmd.version.get))
-            case None if defaultSub.nonEmpty =>
-              runSub(defaultSub.get, tok :: rest)
-            case None =>
+            else if defaultSubCase != null then runSub(defaultSubCase.nn, idx - 1)
+            else
               val sug = Runtime
                 .suggest(
-                  nm,
+                  key.drop(2),
                   cmd.opts.filterNot(_.hidden).flatMap(o => o.long :: o.aliases) :+ "help"
                 )
                 .map(s => s" (did you mean '--$s'?)")
                 .getOrElse("")
-              report(s"unknown option '--$nm'$sug")
-            case Some(spec) =>
-              inlineValue match
-                case Some(v)              => offerValue(spec.index, spec.mode, v, s"--$nm")
-                case None if isFlag(spec) => offerBare(spec.index)
-                case None                 =>
-                  takeValue(s"--$nm").foreach(v => offerValue(spec.index, spec.mode, v, s"--$nm"))
+              report(s"unknown option '$key'$sug")
+          else if inlineValue != null then offerValue(spec.index, spec.mode, inlineValue.nn, key)
+          else if isFlag(spec) then offerBare(spec.index)
+          else
+            val v = takeValue(key)
+            if v != null then offerValue(spec.index, spec.mode, v.nn, key)
         else
           // short option cluster: -v, -abc, -o value, -ovalue, -o=value
           var i    = 1
           var stop = false
           while i < tok.length && !stop do
             val c = tok(i)
-            if c == 'h' && shortOf('h').isEmpty then helpNow()
-            shortOf(c) match
-              case None if i == 1 && defaultSub.nonEmpty =>
-                runSub(defaultSub.get, tok :: rest)
-                stop = true
-              case None =>
-                report(s"unknown option '-$c'")
-                stop = true // the rest of the cluster is unintelligible
-              case Some(spec) if isFlag(spec) =>
-                offerBare(spec.index)
-                i += 1
-              case Some(spec) =>
-                val attached = tok.drop(i + 1)
-                val raw      =
-                  if attached.nonEmpty then
-                    Some(if attached.startsWith("=") then attached.drop(1) else attached)
-                  else takeValue(s"-$c")
-                raw.foreach(v => offerValue(spec.index, spec.mode, v, s"-$c"))
-                stop = true
+            if c == 'h' && shortSpec('h') == null then helpNow()
+            val spec = shortSpec(c)
+            if spec == null then
+              if i == 1 && defaultSubCase != null then runSub(defaultSubCase.nn, idx - 1)
+              else report(s"unknown option '-$c'")
+              stop = true // the rest of the cluster is unintelligible
+            else if isFlag(spec.nn) then
+              offerBare(spec.nn.index)
+              i += 1
+            else
+              val raw: String | Null =
+                if i + 1 < tok.length then
+                  if tok(i + 1) == '=' then tok.substring(i + 2) else tok.substring(i + 1)
+                else takeValue(spec.nn.shortDisplay)
+              if raw != null then
+                offerValue(spec.nn.index, spec.nn.mode, raw.nn, spec.nn.shortDisplay)
+              stop = true
 
       // ---- phase 2: finishing ---------------------------------------------------
 
@@ -276,7 +302,7 @@ private[flagged] object Engine:
               if optional then values(index) = Some(values(index))
             true
           case Mode.Repeated(parser) =>
-            val len = if repLens == null then 0 else repLens(index)
+            val len = if repLens == null then 0 else repLens.nn(index)
             if counts(index) == 0 then
               default match
                 case Some(d) => values(index) = d()
@@ -285,7 +311,7 @@ private[flagged] object Engine:
                     case Ok(v)    => values(index) = v
                     case Err(msg) => report(s"invalid value for '$display': $msg")
             else if len == counts(index) then // no element failed (failures were reported)
-              val buf   = repBufs(index)
+              val buf   = repBufs.nn(index)
               val exact =
                 if len == buf.length then buf
                 else
@@ -297,7 +323,10 @@ private[flagged] object Engine:
                 case Err(msg) => report(s"invalid value for '$display': $msg")
             true
 
-      val missing = mutable.ListBuffer.empty[String]
+      var missing: mutable.ListBuffer[String] | Null = null
+      def addMissing(display: String): Unit          =
+        if missing == null then missing = mutable.ListBuffer.empty[String]
+        missing.nn += display
 
       // slots of optional splices none of whose options occurred: the group parses to None, so
       // its required options are not enforced (nested optional splices recurse)
@@ -307,56 +336,68 @@ private[flagged] object Engine:
           if s.optional && !range.exists(i => counts(i) > 0) then List(range)
           else absentRanges(s.command.splices, base + s.offset)
         }
-      val skipIdx = absentRanges(cmd.splices, 0).flatten.toSet
+      val skipIdx: Set[Int] | Null =
+        if cmd.splices.isEmpty then null else absentRanges(cmd.splices, 0).flatten.toSet
 
-      cmd.opts.foreach { o =>
-        if !skipIdx(o.index) then
-          if !finishSlot(o.index, s"--${o.long}", o.mode, o.default) then missing += s"--${o.long}"
-      }
-      cmd.positionals.foreach { p =>
-        if !finishSlot(p.index, s"<${p.name}>", p.mode, p.default) then missing += s"<${p.name}>"
-      }
-      if missing.nonEmpty then
-        val what = if missing.sizeIs == 1 then "argument" else "arguments"
-        report(s"missing required $what: ${missing.mkString(", ")}")
+      var oi = 0
+      while oi < cmd.opts.length do
+        val o = cmd.opts(oi)
+        if skipIdx == null || !skipIdx.nn(o.index) then
+          if !finishSlot(o.index, s"--${o.long}", o.mode, o.default) then addMissing(s"--${o.long}")
+        oi += 1
+      var pi = 0
+      while pi < cmd.positionals.length do
+        val p = cmd.positionals(pi)
+        if !finishSlot(p.index, s"<${p.name}>", p.mode, p.default) then addMissing(s"<${p.name}>")
+        pi += 1
+      if missing != null then
+        val ms   = missing.nn
+        val what = if ms.sizeIs == 1 then "argument" else "arguments"
+        report(s"missing required $what: ${ms.mkString(", ")}")
 
-      cmd.trailing.foreach { t =>
-        values(t.index) = trailValue match
-          case Some(v) => if t.optional then Some(v) else v
-          case None    =>
-            t.default.map(_()).getOrElse {
-              if t.optional then None
-              else
-                t.build(Nil) match
-                  case Ok(v)    => v
-                  case Err(msg) =>
-                    report(s"missing arguments after '--': $msg")
-                    null
-            }
-      }
-
-      cmd.sub.foreach { g =>
-        values(g.index) = subValue match
-          case Some(v) => if g.optional then Some(v) else v
-          case None    =>
-            g.default.map(_()).getOrElse {
-              g.defaultCase match
-                case Some(dc) =>
-                  val v = run(dc.command, prog, path :+ dc.name, Nil).ok
-                  if g.optional then Some(v) else v
-                case None =>
-                  if g.optional then None
+      cmd.trailing match
+        case Some(t) =>
+          values(t.index) =
+            if trailValue.asInstanceOf[AnyRef] ne Unset then
+              if t.optional then Some(trailValue) else trailValue
+            else
+              t.default match
+                case Some(d) => d()
+                case None    =>
+                  if t.optional then None
                   else
-                    if !subErrored then
-                      report(
-                        s"missing command (expected one of: ${g.cases.map(_.name).mkString(", ")})"
-                      )
-                    null
-            }
-      }
+                    t.build(Nil) match
+                      case Ok(v)    => v
+                      case Err(msg) =>
+                        report(s"missing arguments after '--': $msg")
+                        null
+        case None => ()
 
-      if errors.nonEmpty then eval.raise(ParseError.Failure(errors.mkString("\n"), hint))
+      cmd.sub match
+        case Some(g) =>
+          values(g.index) =
+            if subValue.asInstanceOf[AnyRef] ne Unset then
+              if g.optional then Some(subValue) else subValue
+            else
+              g.default match
+                case Some(d) => d()
+                case None    =>
+                  g.defaultCase match
+                    case Some(dc) =>
+                      val v = run(dc.command, prog, path :+ dc.name, args, args.length).ok
+                      if g.optional then Some(v) else v
+                    case None =>
+                      if g.optional then None
+                      else
+                        if !subErrored then
+                          report(
+                            s"missing command (expected one of: ${g.cases.map(_.name).mkString(", ")})"
+                          )
+                        null
+        case None => ()
 
-      cmd.finish(values, i => counts(i) > 0) match
+      if errors != null then eval.raise(ParseError.Failure(errors.nn.mkString("\n"), hint))
+
+      cmd.finish(values, counts, 0) match
         case Ok(v)    => v
         case Err(msg) => eval.raise(ParseError.Failure(msg, hint))
