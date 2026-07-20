@@ -2,7 +2,7 @@ package flagged.internal
 
 import flagged.Parser
 import steps.result.Result
-import steps.result.Result.{Ok, Err}
+import steps.result.Result.eval
 
 /** Runtime helpers referenced by derivation. Not intended for direct use. */
 object Runtime:
@@ -14,21 +14,20 @@ object Runtime:
       case "false" | "no" | "off" | "0" => 0
       case _                            => -1
 
-  private def notABool(s: String) = Err(
+  private def notABool(s: String): String =
     s"'${s.trim.toLowerCase}' is not a valid bool (expected true/false)"
-  )
 
   def parseBool(s: String): Result[Boolean, String] =
-    boolOf(s) match
-      case -1 => notABool(s)
-      case b  => Ok(b == 1)
+    Result:
+      val b = boolOf(s)
+      if b < 0 then eval.raise(notABool(s))
+      b == 1
 
   def parseBoolInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-    boolOf(s) match
-      case -1 => notABool(s)
-      case b  =>
-        out(i) = b == 1
-        Result.done
+    Result.task:
+      val b = boolOf(s)
+      if b < 0 then eval.raise(notABool(s))
+      out(i) = b == 1
 
   /** Value parser for enums whose cases are all parameterless, matching kebab-cased names. */
   def enumParser[A](name: String, pairs: Vector[(String, A)]): Parser.Enumerated[A] =
