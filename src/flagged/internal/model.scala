@@ -147,6 +147,15 @@ final case class Command(
     * [[Splice.skipped]]) becomes `None` or its field default without being built.
     */
   def finish(values: Array[Any], counts: Array[Int], base: Int): Result[Any, String] =
+    // fast path: keeps the hot no-splice case free of the splice loop's bytecode, which the JIT
+    // otherwise weighs against inlining `finish` into the parse path
+    if splices.isEmpty then build(values) else finishSplices(values, counts, base)
+
+  private def finishSplices(
+      values: Array[Any],
+      counts: Array[Int],
+      base: Int
+  ): Result[Any, String] =
     def loop(remaining: List[Splice]): Result[Any, String] = remaining match
       case Nil       => build(values)
       case s :: rest =>
