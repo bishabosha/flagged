@@ -143,6 +143,16 @@ object Parser extends ParserLowPriority:
     protected def append(v: Any): Unit
     def finishInto(out: Array[Any], i: Int): Result[Unit, String]
 
+  object Collector:
+    class WrapperCollector[A, B](inner: Collector, f: A => Result[B, String]) extends Collector:
+      // the inner offer both parses and accumulates, so this wrapper's append adds nothing
+      protected def read(s: String, out: Array[Any], i: Int) = inner.read(s, out, i)
+      protected def append(v: Any)                           = inner.append(v)
+      def finishInto(out: Array[Any], i: Int)                =
+        Result.task:
+          inner.finishInto(out, i).check
+          out(i) = f(out(i).asInstanceOf[A]).ok
+
   /** A [[Collector]] appending to a collection builder; the built collection is the slot value. */
   private[flagged] final class BuilderCollector[E](
       elem: Value[E],
@@ -242,15 +252,7 @@ object Parser extends ParserLowPriority:
     def emap[B](f: A => Result[B, String]): Repeated[B] = new Repeated[B]:
       type Elem = self.Elem
       def element                      = self.element
-      private[flagged] def collector() = new Collector:
-        private val inner = self.collector()
-        // the inner offer both parses and accumulates, so this wrapper's append adds nothing
-        protected def read(s: String, out: Array[Any], i: Int) = inner.offer(s, out, i)
-        protected def append(v: Any)                           = ()
-        def finishInto(out: Array[Any], i: Int)                =
-          Result.task:
-            inner.finishInto(out, i).check
-            out(i) = f(out(i).asInstanceOf[A]).ok
+      private[flagged] def collector() = new Collector.WrapperCollector(self.collector(), f)
 
   /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with `Nil`
     * when no `--` is given — return `Err` to require one).
