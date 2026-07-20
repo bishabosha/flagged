@@ -24,7 +24,9 @@ class BaselineBench:
   private val bundledArgs  = Seq("-bfhello", "--bar", "7")
   private val posArgs      = Seq("hello", "42", "true")
   private val mainArgs     = posArgs.toArray
-  private val wide25Args   = (1 to 25).flatMap(i => Seq(s"--opt-$i", i.toString))
+  private val wide25Args   = (1 to 25).flatMap(i => Seq(s"--opt-$i", s"v$i"))
+  private val pos25Args    = (1 to 25).map(i => s"v$i")
+  private val main25Args   = pos25Args.toArray
   private val emptyList    = emptyArgs.toList
   private val simpleList   = simpleArgs.toList
   private val repeatedList = repeatedArgs.toList
@@ -36,17 +38,19 @@ class BaselineBench:
       case flagged.Ok(_) => true
       case _             => false
     val checks = Seq(
-      "empty_hand"           -> BaselineDefs.naive(emptyList).isRight,
-      "simple_hand"          -> BaselineDefs.naive(simpleList).isRight,
-      "repeated_hand"        -> BaselineDefs.naive(repeatedList).isRight,
-      "empty_handfull"       -> BaselineDefs.full(emptyArgs).isRight,
-      "simple_handfull"      -> BaselineDefs.full(simpleArgs).isRight,
-      "repeated_handfull"    -> BaselineDefs.full(repeatedArgs).isRight,
-      "bundled_handfull"     -> BaselineDefs.full(bundledArgs).isRight,
-      "wide25_hand"          -> BaselineDefs.naive25(wide25List).exists(_.opt25 == 25),
-      "wide25_flagged"       -> fOk(FlaggedDefs.wide25.parse(wide25Args)),
-      "positional_scalamain" -> (BaselineDefs.scalaMain(mainArgs).bar == 42),
-      "positional_flagged"   -> fOk(FlaggedDefs.mainStyle.parse(posArgs))
+      "empty_hand"             -> BaselineDefs.naive(emptyList).isRight,
+      "simple_hand"            -> BaselineDefs.naive(simpleList).isRight,
+      "repeated_hand"          -> BaselineDefs.naive(repeatedList).isRight,
+      "empty_handfull"         -> BaselineDefs.full(emptyArgs).isRight,
+      "simple_handfull"        -> BaselineDefs.full(simpleArgs).isRight,
+      "repeated_handfull"      -> BaselineDefs.full(repeatedArgs).isRight,
+      "bundled_handfull"       -> BaselineDefs.full(bundledArgs).isRight,
+      "wide25_hand"            -> BaselineDefs.naive25(wide25List).exists(_.opt25 == "v25"),
+      "wide25_flagged"         -> fOk(FlaggedDefs.wide25.parse(wide25Args)),
+      "positional_scalamain"   -> (BaselineDefs.scalaMain(mainArgs).bar == 42),
+      "positional_flagged"     -> fOk(FlaggedDefs.mainStyle.parse(posArgs)),
+      "positional25_scalamain" -> (BaselineDefs.scalaMain25(main25Args).opt25 == "v25"),
+      "positional25_flagged"   -> fOk(FlaggedDefs.pos25.parse(pos25Args))
     )
     val failing = checks.collect { case (name, false) => name }
     if failing.nonEmpty then
@@ -70,3 +74,7 @@ class BaselineBench:
   // Scala's @main machinery vs flagged on the same all-positional grammar and tokens
   @Benchmark def positional_scalamain: Any = BaselineDefs.scalaMain(mainArgs)
   @Benchmark def positional_flagged: Any   = FlaggedDefs.mainStyle.parse(posArgs)
+
+  // the same comparison at 25 positional String parameters
+  @Benchmark def positional25_scalamain: Any = BaselineDefs.scalaMain25(main25Args)
+  @Benchmark def positional25_flagged: Any   = FlaggedDefs.pos25.parse(pos25Args)
