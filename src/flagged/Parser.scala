@@ -150,8 +150,8 @@ object Parser:
       private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
         self.parseInto(s, out, i)
 
-  /** A value parser for an enum with parameterless cases, matched by kebab-cased case name,
-    * case-insensitively: `enum Color derives Parser.Enumerated`.
+  /** A value parser for an enum with parameterless cases, matched by its kebab-cased case name:
+    * `enum Color derives Parser.Enumerated`.
     */
   sealed trait Enumerated[A] extends Value[A]
   object Enumerated:
@@ -250,12 +250,12 @@ object Parser:
       private val names  = pairs.map(_(0)).toArray
       private val values = pairs.map(_(1)).toArray[Any]
 
-      /** Index of the case-insensitive match, or -1. */
+      /** Index of the matching name, or -1. */
       private def indexOf(s: String): Int =
         val key = s.trim
         var i   = 0
         while i < names.length do
-          if names(i).equalsIgnoreCase(key) then return i
+          if names(i) == key then return i
           i += 1
         -1
       def typeName                                                       = name

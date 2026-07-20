@@ -108,10 +108,11 @@ class SubcommandSuite extends munit.FunSuite:
     )
   }
 
-  test("enum value is matched case-insensitively and errors list alternatives") {
-    assertEquals(ok(Flagged.parse[Paint](Seq("--color", "RED"))), Paint(Color.Red))
-    val m = err(Flagged.parse[Paint](Seq("--color", "mauve")))
+  test("enum value is matched exactly (case-sensitive) and errors list alternatives") {
+    val m = err(Flagged.parse[Paint](Seq("--color", "RED")))
     assert(m.contains("red, green, deep-blue"), m)
+    val m2 = err(Flagged.parse[Paint](Seq("--color", "mauve")))
+    assert(m2.contains("red, green, deep-blue"), m2)
   }
 
   test("optional subcommand: absent") {

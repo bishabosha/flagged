@@ -335,5 +335,5 @@ enum LogLevel derives Parser.Enumerated:
   case Debug, Info, Warn, Error
 ```
 
-gives you `--level warn` (case-insensitive, kebab-cased) and the metavar
+gives you `--level warn` (kebab-cased, matched exactly) and the metavar
 `<debug|info|warn|error>`.

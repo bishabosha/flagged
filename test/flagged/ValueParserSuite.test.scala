@@ -20,7 +20,7 @@ class ValueParserSuite extends munit.FunSuite:
 
   test("by-name enum Parser parses by kebab-cased name") {
     assertEquals(summon[Parser[LogLevel]].read("warn"), Ok(LogLevel.Warn))
-    assertEquals(summon[Parser[LogLevel]].read("DEBUG"), Ok(LogLevel.Debug))
+    assert(summon[Parser[LogLevel]].read("DEBUG").isErr) // exact match, like clap/click/argmatch
     assert(summon[Parser[LogLevel]].read("nope").isErr)
     assertEquals(summon[Parser[LogLevel]].typeName, "debug|info|warn|error")
   }
