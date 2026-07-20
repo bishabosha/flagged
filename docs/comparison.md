@@ -39,7 +39,7 @@ across the three libraries live in `bench/` (see `bench/README.md`).
 | Shape/annotation misuse | compile-time errors | some compile, most runtime | runtime |
 | Hidden options / commands | `@hidden` (options and commands), revealed by `--help-all` | `hidden = true` (options) | `@Hidden`, hidden commands, `--full-help` |
 | Help sections/groups | `@group` (also on spliced groups) | no | `@Group`, sorted groups |
-| App name/version in help | `@version` + `--version` (`@name` sets the prog name) | no | `@AppName`, `@AppVersion` |
+| App name/version in help | `@version` + a `Versioned` instance, `--version` (`@name` sets the prog name) | no | `@AppName`, `@AppVersion` |
 | Multiple names per option | repeatable `@name` + one short | one long + one short | any number (`@Name` stacks) |
 | Command aliases / default command | repeatable `@name` / `@default` (with arg forwarding) | no / no | yes / yes |
 | Unrecognized-argument passthrough | no | `Leftover` absorbs | `stopAtFirstUnrecognized`, `ignoreUnrecognized` |

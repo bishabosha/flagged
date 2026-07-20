@@ -27,10 +27,11 @@ final case class positional() extends StaticAnnotation derives Defaults
   */
 final case class hidden() extends StaticAnnotation derives Defaults
 
-/** Program version, shown in the help header and printed by `--version`. Valid on the top-level
-  * type of a command or command group.
+/** Opt into a `--version` flag and a version line in the help header. Valid on the top-level type
+  * of a command or command group; requires a given [[Versioned]] instance for the type, which
+  * supplies the version string when it is printed.
   */
-final case class version(value: String) extends StaticAnnotation derives Defaults
+final case class version() extends StaticAnnotation derives Defaults
 
 /** Put an option under a titled section in help output (`Output options:`). On a spliced options
   * group field, titles all of the group's options that have no group of their own.

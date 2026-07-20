@@ -30,14 +30,33 @@ object Derive:
           fieldsOf[m.MirroredElemTypes, am.MirroredAnnotations],
           Defaults.derived[A],
           onType,
-          arr => steps.result.Result.Ok(m.fromProduct(Tuple.fromArray(arr)))
+          arr => steps.result.Result.Ok(m.fromProduct(Tuple.fromArray(arr))),
+          versionOf[A, am.MirroredSelfAnnotations]
         )
         Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], onType))
 
   inline def sum[A](using m: Mirror.SumOf[A]): Parser.CommandGroup[A] =
-    val annots = Annots.sumAnnots[A]
-    val cmd = Assemble.sum(labelsOf[m.MirroredElemLabels], annots, entriesOf[m.MirroredElemTypes])
-    Parser.makeGroup[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
+    summonFrom:
+      case am: AnnotMirror.Sum[A] =>
+        val annots = Annots.sumAnnots[A]
+        val cmd    = Assemble.sum(
+          labelsOf[m.MirroredElemLabels],
+          annots,
+          entriesOf[m.MirroredElemTypes],
+          versionOf[A, am.MirroredSelfAnnotations]
+        )
+        Parser.makeGroup[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
+
+  /** `@version` on the type requires a [[flagged.Versioned]] instance; the string is requested when
+    * printed, not captured at derivation.
+    */
+  inline def versionOf[A, Anns]: Option[() => String] =
+    inline erasedValue[Anns] match
+      case _: EmptyTuple                        => None
+      case _: (Ann[flagged.version, ?, ?] *: _) =>
+        val v = summonInline[flagged.Versioned[A]]
+        Some(() => v.version)
+      case _: (_ *: t) => versionOf[A, t]
 
   /** Value parser for an enum whose cases are all parameterless, for `Parser.Enumerated`. */
   inline def enumParser[A](using m: Mirror.SumOf[A]): Parser.Enumerated[A] =

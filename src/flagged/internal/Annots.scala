@@ -11,7 +11,6 @@ final case class TargetAnnots(
     name: Option[String],
     help: Option[String],
     hidden: Boolean = false,
-    version: Option[String] = None,
     aliases: List[String] = Nil,
     default: Boolean = false
 )
@@ -95,8 +94,6 @@ object Annots:
         collectTarget[t](acc, const1[args].asInstanceOf[String] :: revNames)
       case _: (Ann[flagged.help, args, ?] *: t) =>
         collectTarget[t](acc.copy(help = Some(const1[args].asInstanceOf[String])), revNames)
-      case _: (Ann[flagged.version, args, ?] *: t) =>
-        collectTarget[t](acc.copy(version = Some(const1[args].asInstanceOf[String])), revNames)
       case _: (Ann[flagged.hidden, ?, ?] *: t) =>
         collectTarget[t](acc.copy(hidden = true), revNames)
       case _: (Ann[flagged.default, ?, ?] *: t) =>

@@ -103,8 +103,8 @@ final case class Command(
     trailing: Option[TrailingSpec],
     splices: List[Splice],
     build: Array[Any] => Result[Any, String], // fallible: `emap` validation composes here
-    arity: Int,                    // value-storage size: own fields plus spliced children's storage
-    version: Option[String] = None // printed by --version and in the help header
+    arity: Int, // value-storage size: own fields plus spliced children's storage
+    version: Option[() => String] = None // from Versioned[A]; called by --version and help
 ):
   // per-token lookups: java.util maps return null instead of allocating an Option, and the
   // long keys carry their `--` prefix so a plain long token needs no substring at all (and the

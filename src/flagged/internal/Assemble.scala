@@ -128,7 +128,12 @@ object Assemble:
       1
     )
 
-  def sum(caseLabels: List[String], annots: Annots.Sum[?], entries: List[SubEntry]): Command =
+  def sum(
+      caseLabels: List[String],
+      annots: Annots.Sum[?],
+      entries: List[SubEntry],
+      version: Option[() => String]
+  ): Command =
     val cases = entries.zipWithIndex.map { (e, i) =>
       val anns = annots.perCase(i)
       val help = anns.help.getOrElse("")
@@ -149,7 +154,7 @@ object Assemble:
       Nil,
       arr => Result.Ok(arr(0)),
       1,
-      annots.onType.version
+      version
     )
 
   // ---- product assembly -------------------------------------------------------
@@ -159,7 +164,8 @@ object Assemble:
       fields: List[(Parser[?], Boolean, FieldAnnots)],
       defaults: Defaults[?],
       onType: TargetAnnots,
-      build: Array[Any] => Result[Any, String]
+      build: Array[Any] => Result[Any, String],
+      version: Option[() => String]
   ): Command =
     val n     = labels.length
     val plans = (0 until n).toList.map { i =>
@@ -183,7 +189,7 @@ object Assemble:
         )
       )
     }
-    combine(n, plans, onType, build)
+    combine(n, plans, onType, build, version)
 
   /** The complete field matrix: one parser shape × `@positional` × `Option[_]` case at a time, each
     * producing a [[Plan]] or a construction error.
@@ -253,7 +259,8 @@ object Assemble:
       n: Int,
       plans: List[Plan],
       onType: TargetAnnots,
-      build: Array[Any] => Result[Any, String]
+      build: Array[Any] => Result[Any, String],
+      version: Option[() => String]
   ): Command =
     val names = NameRegistry()
 
@@ -318,7 +325,7 @@ object Assemble:
       allSplices,
       fullBuild,
       storage,
-      onType.version
+      version
     )
 
   /** Long / short option names claimed so far; duplicates are construction errors. */

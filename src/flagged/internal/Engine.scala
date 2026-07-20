@@ -213,7 +213,7 @@ private[flagged] object Engine:
           if spec == null then
             if key == "--version" && cmd.version.nonEmpty then
               // a user option named `version` takes precedence (the lookup ran first)
-              eval.raise(ParseError.Help(cmd.version.get))
+              eval.raise(ParseError.Help(cmd.version.get()))
             else if key == "--help-all" then helpNow(all = true)
             else if defaultSubCase != null then runSub(defaultSubCase, idx - 1)
             else

@@ -8,7 +8,7 @@ private[flagged] object HelpFmt:
     val b    = new StringBuilder
 
     cmd.version.foreach { v =>
-      b ++= s"$full $v"
+      b ++= s"$full ${v()}"
       b ++= "\n\n"
     }
 

@@ -130,7 +130,7 @@ Fine-tune with annotations:
 | `@positional` | positional argument instead of named option |
 | `@hidden` | omit from help (still parses); on an enum case, an unlisted command. `--help-all` shows them |
 | `@group("Network")` | put the option under a titled help section; on a spliced group field, titles the whole group |
-| `@version("1.2.3")` | on the top-level type: help header line plus a `--version` flag |
+| `@version` | on the top-level type: help header line plus a `--version` flag; requires a `given Versioned[A]` supplying the version string (constant or computed) |
 | `@default` | on one command-group case: the default command, run when no command token is given (remaining arguments are forwarded to it) |
 
 On a spliced group field, `@name("net")` prefixes the group's option names

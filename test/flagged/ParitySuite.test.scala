@@ -94,10 +94,24 @@ enum ParityTool derives Parser.CommandGroup:
   case Run(fast: Boolean = false)
   @hidden case Debug(level: Int = 0)
 
-@version("1.2.3")
+@version
 case class ParityVersioned(
     input: String = ""
 ) derives Parser.Command
+
+object ParityVersioned:
+  given Versioned[ParityVersioned]:
+    def version = "1.2.3"
+
+@version
+case class ParityDynVersioned(
+    input: String = ""
+) derives Parser.Command
+
+object ParityDynVersioned:
+  var current = "0.1.0"
+  given Versioned[ParityDynVersioned]:
+    def version = current
 
 case class ParityAliased(
     @name("color") @name("colour") color: Boolean = false
@@ -324,9 +338,26 @@ class ParitySuite extends munit.FunSuite:
 
   test("@version on a field is a compile error") {
     val e = compileErrors(
-      "case class C(@version(\"1.0\") x: Int = 0) derives Parser.Command"
+      "case class C(@version x: Int = 0) derives Parser.Command"
     )
     assert(e.contains("@version has no effect on a field"), e)
+  }
+
+  test("@version without a Versioned instance is a compile error") {
+    val e = compileErrors(
+      "@version case class NoV(x: Int = 0) derives Parser.Command"
+    )
+    assert(e.contains("requires a given Versioned"), e)
+  }
+
+  test("Versioned is consulted when printed, not at derivation") {
+    def versionOut(): String = Flagged.parse[ParityDynVersioned](Seq("--version")) match
+      case Err(ParseError.Help(t)) => t
+      case other                   => fail(s"expected version output, got $other")
+    ParityDynVersioned.current = "0.1.0"
+    assertEquals(versionOut(), "0.1.0")
+    ParityDynVersioned.current = "0.2.0"
+    assertEquals(versionOut(), "0.2.0")
   }
 
   test("repeated @name adds option aliases (case-app stacked @Name: same)") {
