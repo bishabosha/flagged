@@ -169,7 +169,8 @@ object Assemble:
       version: Option[() => String]
   ): Command =
     val n     = labels.length
-    val plans = labels.zip(fields).zipWithIndex.map { case ((label, (parser, opt, anns)), i) =>
+    val plans = labels.lazyZip(fields).lazyZip(labels.indices).map { (label, triple, i) =>
+      val (parser, opt, anns) = triple
       resolveField(
         Field(
           index = i,
