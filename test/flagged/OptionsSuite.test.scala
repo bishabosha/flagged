@@ -130,6 +130,15 @@ class OptionsSuite extends munit.FunSuite:
     assert(m.contains("requires a value"), m)
   }
 
+  test("repeated options grow past the initial buffer") {
+    // more than four occurrences: exercises the element buffer's growth path
+    val many = (1 to 9).flatMap(i => Seq("--file", i.toString))
+    assertEquals(
+      ok(Flagged.parse[Collections](many)).file,
+      (1 to 9).map(_.toString).toList
+    )
+  }
+
   test("repeated list option") {
     assertEquals(
       ok(Flagged.parse[Collections](Seq("-f", "a", "--file", "b", "-fc"))),

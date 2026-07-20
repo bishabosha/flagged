@@ -1,7 +1,6 @@
 package flagged
 
 import java.io.File
-import scala.collection.immutable.ArraySeq
 import java.util.UUID
 import scala.deriving.Mirror
 import flagged.internal.{Assemble, Engine, HelpFmt}
@@ -67,13 +66,11 @@ sealed trait Parser[A]:
       Err(s"'$s': '${c.prog}' is a command parser, not a single value")
 
   /** Engine protocol mirror of [[read]]: parse into `out(i)` instead of boxing the success. Returns
-    * the shared [[Result.done]] on success — the hot path allocates nothing.
+    * the shared [[Result.done]] on success — the hot path allocates nothing. `Value` and
+    * `ValuedFlag` override with their direct slot writes.
     */
-  private[flagged] final def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-    (this: @unchecked) match
-      case v: Parser.Value[A]       => v.parseInto(s, out, i)
-      case vf: Parser.ValuedFlag[A] => vf.fromValueInto(s, out, i)
-      case other                    => Parser.intoSlot(other.read(s), out, i)
+  private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
+    Parser.intoSlot(read(s), out, i)
 
   /** The command grammar: command shapes directly; value shapes as a command line with one
     * positional argument.
@@ -129,15 +126,24 @@ object Parser:
 
   /** One token per occurrence. */
   sealed trait Value[A] extends Parser[A]:
+    self =>
     def parse(s: String): Result[A, String]
     def emap[B](f: A => Result[B, String]): Value[B] = of(typeName)(s => parse(s).flatMap(f))
-    def withTypeName(name: String): Value[A]         = of(name)(parse)
+
+    /** Rename only: delegates parsing, keeping the original's allocation-free slot path. */
+    def withTypeName(name: String): Value[A] = new Value[A]:
+      def typeName                                                                = name
+      def parse(s: String)                                                        = self.parse(s)
+      override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
+        self.parseInto(s, out, i)
 
     /** Engine protocol: parse `s` into `out(i)`; [[Result.done]] on success (built-in instances
       * override with direct bodies — no `Ok` per token).
       */
     private[flagged] def parseInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
       intoSlot(parse(s), out, i)
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
+      parseInto(s, out, i)
 
   /** A value parser for an enum with parameterless cases, matched by kebab-cased case name,
     * case-insensitively: `enum Color derives Parser.Enumerated`.
@@ -154,6 +160,9 @@ object Parser:
     final def typeName: String                      = "flag"
     def emap[B](f: A => Result[B, String]): Flag[B] = flag(n => fromCount(n).flatMap(f))
 
+    /** Whether this flag accepts the explicit `--flag=value` form ([[ValuedFlag]] does). */
+    private[flagged] def takesValue: Boolean = false
+
     /** Engine protocol: build from the mention count into `out(i)`. */
     private[flagged] def countInto(n: Int, out: Array[Any], i: Int): Result[Unit, String] =
       intoSlot(fromCount(n), out, i)
@@ -163,10 +172,13 @@ object Parser:
     */
   sealed trait ValuedFlag[A] extends Flag[A]:
     def fromValue(s: String): Result[A, String]
+    override private[flagged] def takesValue: Boolean = true
 
     /** Engine protocol: parse the explicit `--flag=value` form into `out(i)`. */
     private[flagged] def fromValueInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
       intoSlot(fromValue(s), out, i)
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
+      fromValueInto(s, out, i)
     override def emap[B](f: A => Result[B, String]): ValuedFlag[B] =
       flag(n => fromCount(n).flatMap(f), s => fromValue(s).flatMap(f))
 
@@ -230,23 +242,29 @@ object Parser:
 
   private[flagged] def enumeratedOf[A](name: String, pairs: Vector[(String, A)]): Enumerated[A] =
     new Enumerated[A]:
+      private val names  = pairs.map(_._1).toArray
+      private val values = pairs.map(_._2).toArray[Any]
+
+      /** Index of the case-insensitive match, or -1. */
+      private def indexOf(s: String): Int =
+        val key = s.trim
+        var i   = 0
+        while i < names.length do
+          if names(i).equalsIgnoreCase(key) then return i
+          i += 1
+        -1
+      private def noMatch(s: String) = Err(s"'$s' is not one of: ${names.mkString(", ")}")
+
       def typeName         = name
       def parse(s: String) =
-        val key = s.trim
-        var i   = 0
-        while i < pairs.length do
-          if pairs(i)._1.equalsIgnoreCase(key) then return Ok(pairs(i)._2)
-          i += 1
-        Err(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")
+        val i = indexOf(s)
+        if i >= 0 then Ok(values(i).asInstanceOf[A]) else noMatch(s)
       override private[flagged] def parseInto(s: String, out: Array[Any], k: Int) =
-        val key = s.trim
-        var i   = 0
-        while i < pairs.length do
-          if pairs(i)._1.equalsIgnoreCase(key) then
-            out(k) = pairs(i)._2
-            return Result.done
-          i += 1
-        Err(s"'$s' is not one of: ${pairs.map(_._1).mkString(", ")}")
+        val i = indexOf(s)
+        if i >= 0 then
+          out(k) = values(i)
+          Result.done
+        else noMatch(s)
 
   /** Opt `A` into flag shape: the field takes no value and is built from the number of occurrences
     * on the command line.
@@ -313,6 +331,10 @@ object Parser:
             key   <- k.parse(s.take(i))
             value <- v.parse(s.drop(i + 1))
           yield (key, value)
+    override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
+      parse(s) match // entries are per-token, but the tuple is the value: only drop the Ok
+        case Ok(pair)  => out(i) = pair; Result.done
+        case e: Err[?] => e.asInstanceOf[Err[String]]
 
   /** Each occurrence is one `key=value` entry, split at the first `=`; later entries win. */
   given [K, V] => (k: Value[K], v: Value[V]) => Repeated[Map[K, V]]:
@@ -342,53 +364,23 @@ object Parser:
       out(i) = s
       Result.done
 
-  given Value[Int]:
-    def typeName         = "int"
-    def parse(s: String) = num(s, typeName)(_.toInt)
+  /** Numeric instances share one shape; `f` is inlined, so each instance's parse bodies are direct
+    * code — no function values, no `Ok` per token on the slot path.
+    */
+  private inline def numValue[A](name: String)(inline f: String => A): Value[A] = new Value[A]:
+    def typeName                                                                = name
+    def parse(s: String)                                                        = num(s, name)(f)
     override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
-      numInto(s, typeName, out, i)(_.toInt)
+      numInto(s, name, out, i)(f)
 
-  given Value[Long]:
-    def typeName         = "long"
-    def parse(s: String) = num(s, typeName)(_.toLong)
-    override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
-      numInto(s, typeName, out, i)(_.toLong)
-
-  given Value[Short]:
-    def typeName         = "short"
-    def parse(s: String) = num(s, typeName)(_.toShort)
-    override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
-      numInto(s, typeName, out, i)(_.toShort)
-
-  given Value[Byte]:
-    def typeName         = "byte"
-    def parse(s: String) = num(s, typeName)(_.toByte)
-    override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
-      numInto(s, typeName, out, i)(_.toByte)
-
-  given Value[Float]:
-    def typeName         = "float"
-    def parse(s: String) = num(s, typeName)(_.toFloat)
-    override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
-      numInto(s, typeName, out, i)(_.toFloat)
-
-  given Value[Double]:
-    def typeName         = "double"
-    def parse(s: String) = num(s, typeName)(_.toDouble)
-    override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
-      numInto(s, typeName, out, i)(_.toDouble)
-
-  given Value[BigInt]:
-    def typeName         = "integer"
-    def parse(s: String) = num(s, typeName)(BigInt(_))
-    override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
-      numInto(s, typeName, out, i)(BigInt(_))
-
-  given Value[BigDecimal]:
-    def typeName         = "decimal"
-    def parse(s: String) = num(s, typeName)(BigDecimal(_))
-    override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
-      numInto(s, typeName, out, i)(BigDecimal(_))
+  given Value[Int]        = numValue("int")(_.toInt)
+  given Value[Long]       = numValue("long")(_.toLong)
+  given Value[Short]      = numValue("short")(_.toShort)
+  given Value[Byte]       = numValue("byte")(_.toByte)
+  given Value[Float]      = numValue("float")(_.toFloat)
+  given Value[Double]     = numValue("double")(_.toDouble)
+  given Value[BigInt]     = numValue("integer")(BigInt(_))
+  given Value[BigDecimal] = numValue("decimal")(BigDecimal(_))
 
   // repetition policy belongs to the flag's count parser: repeating a Boolean flag replaces the
   // previous value (the last mention wins, like value options); counting is opt-in via Count
@@ -422,6 +414,11 @@ object Parser:
     def typeName         = "uuid"
     def parse(s: String) =
       try Ok(UUID.fromString(s.trim))
+      catch case _: IllegalArgumentException => Err(s"'$s' is not a valid UUID")
+    override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
+      try
+        out(i) = UUID.fromString(s.trim)
+        Result.done
       catch case _: IllegalArgumentException => Err(s"'$s' is not a valid UUID")
 
   // platform-dependent value instances (java.nio.file.Path is unavailable on Scala.js,

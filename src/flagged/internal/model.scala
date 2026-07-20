@@ -18,8 +18,8 @@ enum Mode:
   case Single(parser: flagged.Parser[?], optional: Boolean)
 
   /** Option that may appear multiple times; elements are parsed with the parser's element and
-    * combined with its build (also invoked with `Nil` when absent; may fail, e.g. to require at
-    * least one occurrence).
+    * combined with its build from an indexed view (also invoked empty when absent; may fail, e.g.
+    * to require at least one occurrence).
     */
   case Repeated(parser: flagged.Parser.Repeated[?])
 
@@ -75,7 +75,15 @@ final case class Splice(
     command: Command,
     optional: Boolean = false,
     default: Option[() => Any] = None
-)
+):
+  /** Whether any of this splice's slots was mentioned on the command line. */
+  def mentioned(counts: Array[Int], base: Int): Boolean =
+    var i   = base + offset
+    val end = base + offset + command.arity
+    while i < end do
+      if counts(i) > 0 then return true
+      i += 1
+    false
 
 /** A field collecting the raw arguments after `--`, verbatim. */
 final case class TrailingSpec(
@@ -85,8 +93,7 @@ final case class TrailingSpec(
     optional: Boolean,
     default: Option[() => Any]
 ):
-  def build(l: List[String]): Result[Any, String] =
-    parser.build(l).asInstanceOf[Result[Any, String]]
+  def build(l: List[String]): Result[Any, String] = parser.build(l)
 
 final case class Command(
     description: String,
@@ -105,7 +112,7 @@ final case class Command(
   lazy val longLookup: java.util.HashMap[String, OptSpec] =
     val m = new java.util.HashMap[String, OptSpec]
     opts.foreach { o =>
-      m.put("--" + o.long, o)
+      m.put(o.longDisplay, o)
       o.aliases.foreach(a => m.put("--" + a, o))
     }
     m
@@ -122,13 +129,7 @@ final case class Command(
     def loop(remaining: List[Splice]): Result[Any, String] = remaining match
       case Nil       => build(values)
       case s :: rest =>
-        var occupied = false
-        var i        = base + s.offset
-        val end      = base + s.offset + s.command.arity
-        while i < end && !occupied do
-          if counts(i) > 0 then occupied = true
-          i += 1
-        if s.optional && !occupied then
+        if s.optional && !s.mentioned(counts, base) then
           values(s.slot) = s.default match
             case Some(d) => d()
             case None    => None

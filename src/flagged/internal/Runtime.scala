@@ -7,21 +7,28 @@ import steps.result.Result.{Ok, Err}
 /** Runtime helpers referenced by derivation. Not intended for direct use. */
 object Runtime:
 
-  def parseBool(s: String): Result[Boolean, String] =
+  /** 1 = true, 0 = false, -1 = not a recognized spelling. */
+  private def boolOf(s: String): Int =
     s.trim.toLowerCase match
-      case "true" | "yes" | "on" | "1"  => Ok(true)
-      case "false" | "no" | "off" | "0" => Ok(false)
-      case other => Err(s"'$other' is not a valid bool (expected true/false)")
+      case "true" | "yes" | "on" | "1"  => 1
+      case "false" | "no" | "off" | "0" => 0
+      case _                            => -1
+
+  private def notABool(s: String) = Err(
+    s"'${s.trim.toLowerCase}' is not a valid bool (expected true/false)"
+  )
+
+  def parseBool(s: String): Result[Boolean, String] =
+    boolOf(s) match
+      case -1 => notABool(s)
+      case b  => Ok(b == 1)
 
   def parseBoolInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-    s.trim.toLowerCase match
-      case "true" | "yes" | "on" | "1" =>
-        out(i) = true
+    boolOf(s) match
+      case -1 => notABool(s)
+      case b  =>
+        out(i) = b == 1
         Result.done
-      case "false" | "no" | "off" | "0" =>
-        out(i) = false
-        Result.done
-      case other => Err(s"'$other' is not a valid bool (expected true/false)")
 
   /** Value parser for enums whose cases are all parameterless, matching kebab-cased names. */
   def enumParser[A](name: String, pairs: Vector[(String, A)]): Parser.Enumerated[A] =
