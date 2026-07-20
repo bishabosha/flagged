@@ -3,7 +3,7 @@ package flagged.internal
 /** Renders `--help` screens and usage lines. */
 private[flagged] object HelpFmt:
 
-  def render(cmd: Command, prog: String, path: List[String]): String =
+  def render(cmd: Command, prog: String, path: List[String], showHidden: Boolean = false): String =
     val full = (prog :: path).mkString(" ")
     val b    = new StringBuilder
 
@@ -22,9 +22,11 @@ private[flagged] object HelpFmt:
 
     cmd.sub.foreach { g =>
       b ++= "\nCommands:\n"
-      b ++= table(g.cases.filterNot(_.hidden).map { c =>
-        val marker = if g.defaultCase.exists(_.name == c.name) then " (default)" else ""
-        c.name -> s"${c.help}$marker".stripLeading()
+      val cases = if showHidden then g.cases else g.cases.filterNot(_.hidden)
+      b ++= table(cases.map { c =>
+        val default = if g.defaultCase.exists(_.name == c.name) then " (default)" else ""
+        val hidden  = if showHidden && c.hidden then " (hidden)" else ""
+        c.name -> s"${c.help}$default$hidden".stripLeading()
       })
       b += '\n'
     }
@@ -40,13 +42,17 @@ private[flagged] object HelpFmt:
       b += '\n'
     }
 
-    val visible                 = cmd.opts.filterNot(_.hidden)
+    val visible                 = if showHidden then cmd.opts else cmd.opts.filterNot(_.hidden)
     val (ungrouped, inSections) = visible.partition(_.group.isEmpty)
+    val hasHidden          = cmd.opts.exists(_.hidden) || cmd.sub.exists(_.cases.exists(_.hidden))
+    def optRow(o: OptSpec) = optLeft(o) -> withExtras(o.help, optExtras(o, showHidden))
 
     b ++= "\nOptions:\n"
     val optRows =
-      ungrouped.map(o => optLeft(o) -> withExtras(o.help, optExtras(o))) ++
+      ungrouped.map(optRow) ++
         Seq("-h, --help" -> "Show this message and exit") ++
+        (if hasHidden then Seq("    --help-all" -> "Show this message with hidden options and exit")
+         else Nil) ++
         cmd.version.map(_ => "    --version" -> "Show version and exit")
     b ++= table(optRows)
     b += '\n'
@@ -54,11 +60,7 @@ private[flagged] object HelpFmt:
     // sections in first-appearance order
     inSections.map(_.group.get).distinct.foreach { g =>
       b ++= s"\n$g options:\n"
-      b ++= table(
-        inSections
-          .filter(_.group.contains(g))
-          .map(o => optLeft(o) -> withExtras(o.help, optExtras(o)))
-      )
+      b ++= table(inSections.filter(_.group.contains(g)).map(optRow))
       b += '\n'
     }
 
@@ -100,7 +102,7 @@ private[flagged] object HelpFmt:
       case Mode.Repeated(_)  => s" <${o.metavar}>"
     s"$short--${o.long}$value"
 
-  private def optExtras(o: OptSpec): List[String] =
+  private def optExtras(o: OptSpec, showHidden: Boolean): List[String] =
     val default = o.default.map(d => d()).filterNot { v =>
       // a flag default equal to the absent-value (fromCount(0)) conveys nothing
       o.mode match
@@ -123,7 +125,8 @@ private[flagged] object HelpFmt:
       dflt,
       Option.when(required)("required"),
       Option.when(repeatable)("repeatable"),
-      alias
+      alias,
+      Option.when(showHidden && o.hidden)("hidden")
     ).flatten
 
   private def posExtras(p: PosSpec): List[String] =

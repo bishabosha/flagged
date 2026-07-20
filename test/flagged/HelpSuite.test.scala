@@ -1,5 +1,9 @@
 package flagged
 
+case class OwnsHelpAll(
+    @name("help-all") all: Boolean = false
+) derives Parser.Command
+
 class HelpSuite extends munit.FunSuite:
 
   def helpText[A](args: Seq[String])(using Parser[A]): String =
@@ -78,4 +82,36 @@ class HelpSuite extends munit.FunSuite:
         assert(m.contains("<repo>"), m)
         assert(hint.contains("git clone --help"), hint)
       case other => fail(s"expected failure, got $other")
+  }
+
+  test("--help-all reveals hidden options, marked; plain help only advertises the toggle") {
+    val plain = helpText[ParityHidden](Seq("--help"))
+    assert(plain.contains("--help-all"), plain)
+    assert(!plain.contains("--secret"), plain)
+
+    val full = helpText[ParityHidden](Seq("--help-all"))
+    assert(full.contains("--secret"), full)
+    assert(full.contains("default: b, hidden"), full)
+  }
+
+  test("--help-all reveals hidden subcommands, marked") {
+    val t = helpText[ParityTool](Seq("--help-all"))
+    assert(t.contains("debug"), t)
+    assert(t.contains("(hidden)"), t)
+  }
+
+  test("--help-all is not advertised when nothing is hidden") {
+    val t = helpText[Git](Seq("--help"))
+    assert(!t.contains("--help-all"), t)
+  }
+
+  test("Flagged.helpAll renders the --help-all screen without parsing") {
+    assert(Flagged.helpAll[ParityHidden].contains("--secret"))
+    assert(!Flagged.help[ParityHidden].contains("--secret"))
+  }
+
+  test("a user option named help-all takes precedence over the toggle") {
+    Flagged.parse[OwnsHelpAll](Seq("--help-all")) match
+      case Ok(v) => assertEquals(v, OwnsHelpAll(all = true))
+      case other => fail(s"expected the user option to parse, got $other")
   }

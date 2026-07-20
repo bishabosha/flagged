@@ -37,7 +37,7 @@ across the three libraries live in `bench/` (see `bench/README.md`).
 | Error aggregation | all error kinds together | missing + unknown + duplicate together | all error kinds together |
 | Duplicate name detection | compile time (constant names) + construction | none documented | opt-in runtime check (`ensureNoDuplicates`) |
 | Shape/annotation misuse | compile-time errors | some compile, most runtime | runtime |
-| Hidden options / commands | `@hidden` (options and commands) | `hidden = true` (options) | `@Hidden`, hidden commands, `--full-help` |
+| Hidden options / commands | `@hidden` (options and commands), revealed by `--help-all` | `hidden = true` (options) | `@Hidden`, hidden commands, `--full-help` |
 | Help sections/groups | `@group` (also on spliced groups) | no | `@Group`, sorted groups |
 | App name/version in help | `@version` + `--version` (`@name` sets the prog name) | no | `@AppName`, `@AppVersion` |
 | Multiple names per option | repeatable `@name` + one short | one long + one short | any number (`@Name` stacks) |
@@ -69,8 +69,7 @@ across the three libraries live in `bench/` (see `bench/README.md`).
 ## Gaps in flagged
 
 Remaining after the parity round (everything else in the original list is implemented):
-unrecognized-argument passthrough modes, shell completions, a `--full-help`-style toggle for
-revealing hidden options, argument index tracking, Scala 2.
+unrecognized-argument passthrough modes, shell completions, argument index tracking, Scala 2.
 
 ## Features neither library has
 
@@ -84,7 +83,8 @@ run function), pluggable flag/repeated shapes.
 Implemented from the original list: error accumulation, O(log n) derivation depth for wide
 commands, `@hidden`, `@version`/`--version`, `@group` help sections, repeatable `@name` aliases
 (options and commands), `Option[Group]`, prefixed splices, `Map[K,V]`, `@default` command,
-digit-aware kebab-casing, and presence semantics for optional valued flags. Still open:
+digit-aware kebab-casing, presence semantics for optional valued flags, and `--help-all` for
+revealing `@hidden` options and commands (case-app's `--full-help`). Still open:
 
 1. **Shell completions.** bash/zsh completion generation from the command model; the static model
    makes this mechanical, but it is a sizable feature (case-app ships it).
@@ -92,8 +92,6 @@ digit-aware kebab-casing, and presence semantics for optional valued flags. Stil
    CLIs that forward arguments (case-app has both; `Trailing` covers the explicit `--` case, and
    `@default`-command forwarding covers the leading-command case). Needs an API-surface decision:
    a parse-time flag does not fit the typed model as well as a `Passthrough`-shaped field would.
-3. **Detailed help toggle.** A `--help-all` that reveals `@hidden` options and commands
-   (case-app's `--full-help`).
-4. **Low priority.** `--usage` (condensed help), alphabetical help sorting toggle, pluggable name
+3. **Low priority.** `--usage` (condensed help), alphabetical help sorting toggle, pluggable name
    mapper (snake_case), argument index tracking (`Indexed`), runtime name/doc overrides, Scala 2
    support (not planned: the design depends on Scala 3 inline derivation).

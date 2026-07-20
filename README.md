@@ -128,7 +128,7 @@ Fine-tune with annotations:
 | `@short('o')` | add a short alias |
 | `@help("...")` | help text for fields, cases, and top-level types |
 | `@positional` | positional argument instead of named option |
-| `@hidden` | omit from help (still parses); on an enum case, an unlisted command |
+| `@hidden` | omit from help (still parses); on an enum case, an unlisted command. `--help-all` shows them |
 | `@group("Network")` | put the option under a titled help section; on a spliced group field, titles the whole group |
 | `@version("1.2.3")` | on the top-level type: help header line plus a `--version` flag |
 | `@default` | on one command-group case: the default command, run when no command token is given (remaining arguments are forwarded to it) |

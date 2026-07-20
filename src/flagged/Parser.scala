@@ -112,6 +112,11 @@ sealed trait Parser[A]:
 
   final def help(prog: String): String = HelpFmt.render(command, prog, Nil)
 
+  /** [[help]] including `@hidden` options and subcommands — what `--help-all` prints. */
+  final def helpAll: String = helpAll(typeName)
+
+  final def helpAll(prog: String): String = HelpFmt.render(command, prog, Nil, showHidden = true)
+
 object Parser:
   def apply[A](using p: Parser[A]): Parser[A] = p
 

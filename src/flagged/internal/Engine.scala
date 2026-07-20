@@ -46,7 +46,8 @@ private[flagged] object Engine:
       def report(msg: String): Unit          =
         if errors == null then errors = mutable.ListBuffer.empty[String]
         errors += msg
-      def helpNow(): Nothing = eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path)))
+      def helpNow(all: Boolean = false): Nothing =
+        eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path, all)))
 
       val n        = cmd.arity
       val values   = new Array[Any](n)
@@ -213,12 +214,14 @@ private[flagged] object Engine:
             if key == "--version" && cmd.version.nonEmpty then
               // a user option named `version` takes precedence (the lookup ran first)
               eval.raise(ParseError.Help(cmd.version.get))
+            else if key == "--help-all" then helpNow(all = true)
             else if defaultSubCase != null then runSub(defaultSubCase, idx - 1)
             else
               val sug = Runtime
                 .suggest(
                   key.drop(2),
-                  cmd.opts.filterNot(_.hidden).flatMap(o => o.long :: o.aliases) :+ "help"
+                  cmd.opts.filterNot(_.hidden).flatMap(o => o.long :: o.aliases)
+                    :+ "help" :+ "help-all"
                 )
                 .map(s => s" (did you mean '--$s'?)")
                 .getOrElse("")
