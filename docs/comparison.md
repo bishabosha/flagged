@@ -11,7 +11,7 @@ across the three libraries live in `bench/` (see `bench/README.md`).
 
 | Feature | flagged | mainargs | case-app |
 | --- | --- | --- | --- |
-| Definition style | case class / enum `derives` | `@main` methods or case class | case class |
+| Definition style | case class / enum `derives`; `@run` methods (`Parser.method(s)`) | `@main` methods or case class | case class |
 | Derivation mechanism | `Mirror` + inline (one macro pair for annotations/defaults) | macros | shapeless (Scala 2) / macros (Scala 3) |
 | `--name value` / `--name=value` | yes / yes | yes / yes | yes / yes |
 | Short options `-s value`, `-svalue`, `-s=value` | yes | yes | no attached form |

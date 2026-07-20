@@ -358,6 +358,26 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
   def trailing[A](combine: List[String] => Result[A, String]): Trailing[A] = new Trailing[A]:
     def build(l: List[String]) = combine(l)
 
+  /** Derive a command from the single `@run` method of object `o`: its parameters become the
+    * options and positionals (same annotations and rules as case-class fields), and a successful
+    * parse invokes it.
+    */
+  inline def method[T](o: T)(using mm: meta.MethodsMirror[T]): Command[mm.MirroredResult] =
+    val (cmd, prog) = internal.DeriveMethods.single[T, mm.type](o, mm)
+    make[mm.MirroredResult](cmd, prog)
+
+  /** Derive subcommands from the `@run` methods and nested `@run` objects of `o`; parsing selects
+    * and invokes one, producing its result.
+    */
+  inline def methods[T](o: T)(using mm: meta.MethodsMirror[T]): CommandGroup[mm.MirroredResult] =
+    makeGroup[mm.MirroredResult](
+      internal.DeriveMethods.group[T, mm.type](o, mm),
+      internal.Assemble.progName(
+        scala.compiletime.constValue[mm.MirroredLabel],
+        internal.Annots.targetAnnotsOf[mm.MirroredSelfAnnotations]
+      )
+    )
+
   /** Called by derivation. Not intended for direct use. */
   def make[A](cmd: flagged.internal.Command, name: String): Command[A] = new Command[A]:
     private[flagged] def impl = cmd

@@ -19,11 +19,13 @@ object AnnotationMacros:
     * constructed. Mirrored: case-class `StaticAnnotation`s applied with exactly one argument list
     * of literal constants. Curried annotation constructors (secondary argument lists) are rejected
     * as not generic — their shape cannot be rebuilt through `Mirror.ProductOf`.
+    *
+    * Shared with [[MethodMacros]], which mirrors methods with the same encodings.
     */
-  private class AnnotHelper(using val q: Quotes):
+  private[macros] class AnnotHelper(using val q: Quotes):
     import q.reflect.*
 
-    private def tupleType(ts: List[TypeRepr]): TypeRepr =
+    def tupleType(ts: List[TypeRepr]): TypeRepr =
       ts.foldRight(TypeRepr.of[EmptyTuple])((h, acc) => TypeRepr.of[*:].appliedTo(List(h, acc)))
 
     private def constArg(t: Term): Option[TypeRepr] = t match
@@ -83,7 +85,7 @@ object AnnotationMacros:
           }
         case _ => None
 
-    private def slot(s: Symbol): TypeRepr = tupleType(s.annotations.reverse.flatMap(annType))
+    def slot(s: Symbol): TypeRepr = tupleType(s.annotations.reverse.flatMap(annType))
 
     private def slotOf(annotTerms: List[Term]): TypeRepr = tupleType(annotTerms.flatMap(annType))
 
