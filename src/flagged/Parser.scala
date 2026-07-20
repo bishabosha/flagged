@@ -245,23 +245,9 @@ object Parser extends ParserLowPriority:
       * straight to the collection's builder — elements are materialised exactly once.
       */
     private[flagged] def collector(): Collector = new Collector:
-      private var buf = new Array[Any](4)
-
-      protected def append(v: Any) =
-        if size == buf.length then
-          val g = new Array[Any](buf.length * 2)
-          System.arraycopy(buf, 0, g, 0, buf.length)
-          buf = g
-        buf(size) = v
-
-      def finishInto(out: Array[Any], i: Int) =
-        val exact =
-          if size == buf.length then buf
-          else
-            val e = new Array[Any](size)
-            System.arraycopy(buf, 0, e, 0, size)
-            e
-        buildInto(ArraySeq.unsafeWrapArray(exact), out, i)
+      private val b                           = ArraySeq.untagged.newBuilder[Any]
+      protected def append(v: Any)            = b += v
+      def finishInto(out: Array[Any], i: Int) = buildInto(b.result(), out, i)
 
   /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with `Nil`
     * when no `--` is given — return `Err` to require one).
