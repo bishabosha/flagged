@@ -48,11 +48,21 @@ private[flagged] object Engine:
       def helpNow(all: Boolean = false): Nothing =
         eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path, all)))
 
-      val n        = cmd.arity
-      val values   = new Array[Any](n)
-      val counts   = new Array[Int](n)
-      val lastRaw  = new Array[String](n) // null while only bare mentions have been seen
-      val lastDisp = new Array[String](n)
+      val n      = cmd.arity
+      val values = new Array[Any](n)
+      val counts = new Array[Int](n)
+
+      // staging for named-option values (parsed once at finishing, so the last mention wins);
+      // decided from the command's shape up front: a command without named options never stages,
+      // since positionals parse eagerly (vals, not captured vars — those would box as ObjectRefs)
+      val lastRaw: Array[String] = // per slot: null while only bare mentions have been seen
+        if cmd.opts.isEmpty then null else new Array[String](n)
+      val lastDisp: Array[String] = if cmd.opts.isEmpty then null else new Array[String](n)
+      def stage(index: Int, raw: String, display: String): Unit =
+        if lastRaw != null then
+          lastRaw(index) = raw
+          lastDisp(index) = display
+      def staged(index: Int): String = if lastRaw == null then null else lastRaw(index)
 
       // element collectors for repeated specs, allocated only when one occurs
       var reps: Array[flagged.Parser.Collector] = null
@@ -124,18 +134,17 @@ private[flagged] object Engine:
           case Mode.Repeated(p) =>
             addElem(index, p, raw, display)
           case Mode.Flag(p, _) if !p.takesValue =>
-            // a pure flag rejects an explicit value wherever it appears; lastRaw doubles as the
-            // report-once latch (these specs never parse it)
-            if lastRaw(index) == null then
+            // a pure flag rejects an explicit value wherever it appears; the staged raw doubles
+            // as the report-once latch (these specs never parse it)
+            if staged(index) == null then
               report(s"flag '$display' does not take a value")
-              lastRaw(index) = raw
+              stage(index, raw, display)
           case _ =>
-            lastRaw(index) = raw
-            lastDisp(index) = display
+            stage(index, raw, display)
 
       def offerBare(index: Int): Unit =
         counts(index) += 1
-        lastRaw(index) = null // a later bare mention overrides an earlier value
+        if lastRaw != null then lastRaw(index) = null // a later bare mention overrides a value
 
       def findCase(g: SubGroup, tok: String): SubCase =
         var i = 0
@@ -168,10 +177,19 @@ private[flagged] object Engine:
             if posIdx >= cmd.positionals.length then report(s"unexpected argument '$tok'")
             else
               val p = cmd.positionals(posIdx)
-              offerValue(p.index, p.mode, tok, p.display)
               p.mode match
-                case Mode.Repeated(_) => () // keep filling the last positional
-                case _                => posIdx += 1
+                case Mode.Repeated(_) =>
+                  offerValue(p.index, p.mode, tok, p.display) // keep filling the last positional
+                case Mode.Single(parser, _) =>
+                  // a single positional is never overridden: parse it now, nothing staged
+                  counts(p.index) += 1
+                  parser.readInto(tok, values, p.index) match
+                    case Err(msg) => report(s"invalid value for '${p.display}': $msg")
+                    case _        => ()
+                  posIdx += 1
+                case Mode.Flag(_, _) => // positionals never resolve to Flag mode
+                  offerValue(p.index, p.mode, tok, p.display)
+                  posIdx += 1
 
       // ---- phase 1: routing ---------------------------------------------------
 
@@ -266,12 +284,12 @@ private[flagged] object Engine:
                 case None             => reportInvalid(parser.countInto(0, values, index), display)
             else
               parser match
-                case vf: flagged.Parser.ValuedFlag[?] if lastRaw(index) != null =>
+                case vf: flagged.Parser.ValuedFlag[?] if staged(index) != null =>
                   reportInvalid(vf.readInto(lastRaw(index), values, index), lastDisp(index))
                 case _ =>
-                  // bare mentions only — or a pure flag whose value mention (its lastRaw latch)
+                  // bare mentions only — or a pure flag whose value mention (its staged latch)
                   // was already reported during routing
-                  if lastRaw(index) == null then fromCount(parser, index, display)
+                  if staged(index) == null then fromCount(parser, index, display)
               if optional then values(index) = Some(values(index))
             true
           case Mode.Single(parser, optional) =>
@@ -281,7 +299,10 @@ private[flagged] object Engine:
                 case None if optional => values(index) = None
                 case None             => return false // missing required
             else
-              reportInvalid(parser.readInto(lastRaw(index), values, index), lastDisp(index))
+              // null staged raw: an eagerly parsed positional, already in its slot
+              val raw = staged(index)
+              if raw != null then
+                reportInvalid(parser.readInto(raw, values, index), lastDisp(index))
               if optional then values(index) = Some(values(index))
             true
           case Mode.Repeated(parser) =>

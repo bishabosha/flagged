@@ -30,7 +30,7 @@ object Derive:
           fieldsOf[m.MirroredElemTypes, am.MirroredAnnotations],
           Defaults.derived[A],
           onType,
-          arr => steps.result.Result.Ok(m.fromProduct(Tuple.fromArray(arr))),
+          arr => steps.result.Result.Ok(m.fromProduct(ArrayProduct(arr))),
           versionOf[A, am.MirroredSelfAnnotations]
         )
         Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], onType))

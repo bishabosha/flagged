@@ -5,6 +5,14 @@ import steps.result.Result
 /** Internal runtime model of a derived command. Public because macro-generated code at user call
   * sites must reference these types; not intended for direct use.
   */
+
+/** Exposes the engine's value array as the `Product` a `Mirror#fromProduct` consumes — the
+  * generated constructor call reads `productElement(n)` only, so no tuple is built or copied.
+  */
+final class ArrayProduct(arr: Array[Any]) extends Product:
+  def canEqual(that: Any): Boolean = false
+  def productArity: Int            = arr.length
+  def productElement(n: Int): Any  = arr(n)
 enum Mode:
   /** Flag: takes no token; built from the occurrence count (a [[flagged.Parser.ValuedFlag]]
     * additionally handles the explicit `--flag=value` form). If `optional` the field is an
