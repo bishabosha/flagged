@@ -337,6 +337,6 @@ object Assemble:
     kinds.zipWithIndex.foreach { case ((nm, kind), idx) =>
       if kind == PosKind.Repeated && idx != kinds.length - 1 then
         invalid(s"positional '$nm': a repeated positional must be the last positional field")
-      if kind == PosKind.Required && kinds.take(idx).exists(_._2 != PosKind.Required) then
+      if kind == PosKind.Required && kinds.take(idx).exists(_(1) != PosKind.Required) then
         invalid(s"positional '$nm': required positionals must come before optional ones")
     }

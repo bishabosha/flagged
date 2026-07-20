@@ -4,6 +4,8 @@ import java.io.File
 import java.util.UUID
 import scala.deriving.Mirror
 import flagged.internal.{Assemble, Engine, HelpFmt}
+import scala.annotation.nowarn
+import Result.eval, eval.check
 
 /** A counting flag: `-vvv` parses as `Count(3)`, absent as `Count(0)`. */
 final case class Count(value: Int)
@@ -83,10 +85,7 @@ sealed trait Parser[A]:
   final def parse(args: Seq[String]): ParseResult[A] = parse(args, typeName)
 
   final def parse(args: Seq[String], prog: String): ParseResult[A] =
-    val indexed = args match
-      case ix: IndexedSeq[String] => ix // varargs arrive as ArraySeq: zero-copy
-      case other                  => other.toIndexedSeq
-    Engine.run(command, prog, Nil, indexed, 0).asInstanceOf[ParseResult[A]]
+    Engine.run(command, prog, Nil, args.toIndexedSeq, 0).asInstanceOf[ParseResult[A]]
 
   /** Parse `args`; on `--help` print the help screen and exit 0, on error print a message to stderr
     * and exit 2. Intended for `@main` methods and scripts.
@@ -242,8 +241,8 @@ object Parser:
 
   private[flagged] def enumeratedOf[A](name: String, pairs: Vector[(String, A)]): Enumerated[A] =
     new Enumerated[A]:
-      private val names  = pairs.map(_._1).toArray
-      private val values = pairs.map(_._2).toArray[Any]
+      private val names  = pairs.map(_(0)).toArray
+      private val values = pairs.map(_(1)).toArray[Any]
 
       /** Index of the case-insensitive match, or -1. */
       private def indexOf(s: String): Int =
@@ -331,10 +330,15 @@ object Parser:
             key   <- k.parse(s.take(i))
             value <- v.parse(s.drop(i + 1))
           yield (key, value)
-    override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) =
-      parse(s) match // entries are per-token, but the tuple is the value: only drop the Ok
-        case Ok(pair)  => out(i) = pair; Result.done
-        case e: Err[?] => e.asInstanceOf[Err[String]]
+    override private[flagged] def parseInto(s: String, out: Array[Any], i: Int) = Result.task {
+      s.indexOf('=') match
+        case -1 => eval.raise(s"'$s' is not in $typeName form")
+        case i0 =>
+          val slots = new Array[Any](2)
+          k.parseInto(s.take(i0), slots, 0).check
+          v.parseInto(s.drop(i0 + 1), slots, 1).check
+          out(i) = (slots(0).asInstanceOf[K], slots(1).asInstanceOf[V])
+    }
 
   /** Each occurrence is one `key=value` entry, split at the first `=`; later entries win. */
   given [K, V] => (k: Value[K], v: Value[V]) => Repeated[Map[K, V]]:
@@ -367,6 +371,7 @@ object Parser:
   /** Numeric instances share one shape; `f` is inlined, so each instance's parse bodies are direct
     * code — no function values, no `Ok` per token on the slot path.
     */
+  @nowarn("msg=New anonymous class definition will be duplicated at each inline site")
   private inline def numValue[A](name: String)(inline f: String => A): Value[A] = new Value[A]:
     def typeName                                                                = name
     def parse(s: String)                                                        = num(s, name)(f)
@@ -424,20 +429,3 @@ object Parser:
   // platform-dependent value instances (java.nio.file.Path is unavailable on Scala.js,
   // java.time outside the JVM); exported so they stay in this companion's implicit scope
   export flagged.internal.PlatformValues.given
-
-/** Convenience entry points:
-  *
-  * {{{
-  * @main def app(args: String*): Unit =
-  *   val cfg = Flagged.parseOrExit[Config](args)
-  * }}}
-  */
-object Flagged:
-  def parse[A](args: Seq[String])(using p: Parser[A]): ParseResult[A]               = p.parse(args)
-  def parse[A](args: Seq[String], prog: String)(using p: Parser[A]): ParseResult[A] =
-    p.parse(args, prog)
-  def parseOrExit[A](args: Seq[String])(using p: Parser[A]): A               = p.parseOrExit(args)
-  def parseOrExit[A](args: Seq[String], prog: String)(using p: Parser[A]): A =
-    p.parseOrExit(args, prog)
-  def help[A](using p: Parser[A]): String               = p.help
-  def help[A](prog: String)(using p: Parser[A]): String = p.help(prog)

@@ -36,7 +36,7 @@ object DefaultMacros:
       Match(idx.asTerm, cases :+ fallback).asExprOf[Any]
 
     def hasBody(idx: Expr[Int]): Expr[Boolean] =
-      getters.map(_._1) match
+      getters.map(_(0)) match
         case Nil     => '{ false }
         case indices =>
           val pattern = indices.map(i => Literal(IntConstant(i))) match

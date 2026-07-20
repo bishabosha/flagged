@@ -165,7 +165,7 @@ object AblationProbe:
   def main(args: Array[String]): Unit =
     val n = args.headOption.map(_.toInt).getOrElse(128)
     // warm
-    (1 to 4).foreach(_ => ScalingProbe.compileOnce(src(n, variants.last._2)))
+    (1 to 4).foreach(_ => ScalingProbe.compileOnce(src(n, variants.last(1))))
     (variants ++ moreVariants).foreach { (name, use) =>
       val t = (1 to 5).map(_ => ScalingProbe.compileOnce(src(n, use))).min
       println(f"$name%16s $t%8.1f ms")

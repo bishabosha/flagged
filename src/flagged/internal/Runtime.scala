@@ -48,5 +48,5 @@ object Runtime:
     candidates
       .map(c => c -> levenshtein(input.toLowerCase, c.toLowerCase))
       .filter((c, d) => d <= 2 && d < c.length)
-      .minByOption(_._2)
-      .map(_._1)
+      .minByOption(_(1))
+      .map(_(0))

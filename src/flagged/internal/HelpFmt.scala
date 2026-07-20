@@ -145,7 +145,7 @@ private[flagged] object HelpFmt:
     else s"$help ${extras.mkString("(", ", ", ")")}"
 
   private def table(rows: Seq[(String, String)]): String =
-    val width = rows.map(_._1.length).maxOption.getOrElse(0)
+    val width = rows.map(_(0).length).maxOption.getOrElse(0)
     rows
       .map { (left, right) =>
         if right.isEmpty then s"  $left"

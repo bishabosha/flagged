@@ -68,7 +68,7 @@ object AnnotationMacros:
       }
       if resolved.forall(_.isDefined) then
         val pairs = resolved.flatten
-        Some((pairs.map(_._1), pairs.map(p => ConstantType(BooleanConstant(p._2)))))
+        Some((pairs.map(_(0)), pairs.map(p => ConstantType(BooleanConstant(p(1))))))
       else None
 
     /** `Ann[a, args, defaulted]` for one annotation occurrence, if it is mirrorable. */
