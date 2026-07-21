@@ -103,7 +103,7 @@ sealed trait Parser[A]:
 
   final def helpAll(prog: String): String = HelpFmt.render(command, prog, Nil, showHidden = true)
 
-object Parser extends ParserLowPriority:
+object Parser extends ParserLowPriority, internal.PlatformValues:
   def apply[A](using p: Parser[A]): Parser[A] = p
 
   /** Engine protocol: per-parse accumulator for one repeated slot. The engine [[offer]]s each raw
@@ -482,10 +482,6 @@ object Parser extends ParserLowPriority:
       Result.task:
         try out(i) = UUID.fromString(s.trim)
         catch case _: IllegalArgumentException => eval.raise(s"'$s' is not a valid UUID")
-
-  // platform-dependent value instances (java.nio.file.Path is unavailable on Scala.js,
-  // java.time outside the JVM); exported so they stay in this companion's implicit scope
-  export flagged.internal.PlatformValues.given
 
 /** Lower-priority instances, overridden by the dedicated ones in [[Parser]]. */
 sealed trait ParserLowPriority:

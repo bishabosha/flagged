@@ -7,7 +7,7 @@ import dotty.tools.dotc.reporting.StoreReporter
 /** Not a JMH benchmark: a quick scaling curve for derivation compile time by field count. Compiles
   * a generated N-field options class per library, warm in-process, best of `reps`.
   *
-  * scala-cli --power run bench --main-class bench.ScalingProbe
+  * ./mill bench.runMain bench.ScalingProbe
   */
 object ScalingProbe:
 
@@ -76,8 +76,8 @@ object ScalingProbe:
 
 /** Compiles the 64-field annotated class in a loop, for profiling the compiler under JFR:
   *
-  * scala-cli --power run bench --main-class bench.ProfileProbe \ --java-opt
-  * -XX:StartFlightRecording=filename=derive.jfr jfr view hot-methods derive.jfr
+  * ./mill bench.runMain bench.ProfileProbe (add `-XX:StartFlightRecording=filename=derive.jfr` to
+  * `bench.forkArgs` in build.mill) jfr view hot-methods derive.jfr
   */
 object ProfileProbe:
   def main(args: Array[String]): Unit =

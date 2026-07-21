@@ -6,19 +6,6 @@ on:
   pull_request:
 
 jobs:
-  format:
-    name: Check formatting
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: coursier/cache-action@v6
-      - uses: VirtusLab/scala-cli-setup@v1
-        with:
-          jvm: temurin:21
-          power: true
-      - name: scalafmt
-        run: scala-cli fmt --check .
-
   test:
     name: Test (${{ matrix.platform }})
     runs-on: ubuntu-latest
@@ -27,21 +14,30 @@ jobs:
       matrix:
         include:
           - platform: jvm
-            flags: ""
+            mill-targets: mill.scalalib.scalafmt/checkFormatAll + flagged.jvm.test + examples.compile + bench.compile
+            node-version: ''
+            install-native-deps: false
           - platform: js
-            flags: "--js"
+            mill-targets: flagged.js.test + flagged.jsWasm.compile + bench-portable.js.compile
+            node-version: '22'
+            install-native-deps: false
           - platform: native
-            flags: "--native"
+            mill-targets: flagged.native.test + bench-portable.native.compile
+            node-version: ''
+            install-native-deps: true
     steps:
       - uses: actions/checkout@v4
       - uses: coursier/cache-action@v6
-      - uses: VirtusLab/scala-cli-setup@v1
+      - uses: actions/setup-java@v4
         with:
-          jvm: temurin:21
-          power: true
+          distribution: temurin
+          java-version: 21
       - uses: actions/setup-node@v4
-        if: matrix.platform == 'js'
+        if: ${{ matrix.node-version != '' }}
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
+      - name: Install Scala Native toolchain
+        if: ${{ matrix.install-native-deps }}
+        run: sudo apt-get update && sudo apt-get install -y clang libgc-dev libunwind-dev
       - name: Run tests
-        run: scala-cli test . ${{ matrix.flags }}
+        run: ./mill --no-server ${{ matrix.mill-targets }}

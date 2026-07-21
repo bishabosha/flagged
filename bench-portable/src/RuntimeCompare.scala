@@ -7,9 +7,9 @@ import bench.defs.{FlaggedDefs, MainargsDefs, CaseappDefs}
   * Native). Same scenarios and parser instances as `bench.RuntimeBench`; each benchmark is
   * auto-calibrated to ~250 ms rounds, 3 warmup + 5 measured, best round reported.
   *
-  * scala-cli --power run bench-portable # JVM (sanity reference) scala-cli --power run
-  * bench-portable --js # Node scala-cli --power run bench-portable --js --js-emit-wasm # Node,
-  * WebAssembly backend scala-cli --power run bench-portable --native --native-mode release-fast
+  * ./mill bench-portable.jvm.run # JVM (sanity reference) ./mill bench-portable.js.run # Node
+  * ./mill bench-portable.jsWasm.run # Node, WebAssembly backend ./mill bench-portable.native.run #
+  * Native, release-fast
   */
 object RuntimeCompare:
 

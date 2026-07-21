@@ -1,4 +1,3 @@
-//> using target.platform jvm
 package flagged
 
 import java.time.{Instant, LocalDate}
