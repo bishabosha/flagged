@@ -1,4 +1,5 @@
 //| mvnDeps: ["com.lihaoyi::mill-contrib-jmh:1.1.7"]
+//| bspScriptIgnore: ["**/.scala-build/"]
 package build
 
 import mill.*
