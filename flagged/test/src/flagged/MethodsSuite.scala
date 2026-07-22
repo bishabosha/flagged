@@ -25,11 +25,16 @@ object toolbox:
 
   def helper(x: Int): Int = x // not @run: not a command
 
-// a user-defined marker: any annotation deriving from meta.Reflectable opts members in
+// a user-defined marker: annotations deriving from meta.Reflectable are mirrored, but only
+// @run itself makes a member a flagged command
 final case class cmd() extends meta.Reflectable derives meta.Defaults
 
 object customMarker:
   @cmd def double(x: Int): Int = x * 2
+
+object mixed:
+  @run def go(x: Int): Int    = x + 1
+  @cmd def other(y: Int): Int = y
 
 class MethodsSuite extends munit.FunSuite:
 
@@ -111,8 +116,19 @@ class MethodsSuite extends munit.FunSuite:
     assert(e.contains("exactly one @run method"), e)
   }
 
-  test("any annotation deriving from meta.Reflectable marks a command") {
-    assertEquals(ok(Flagged.parse[customMarker.type](Seq("--x", "4"))), 8)
+  test("meta.Reflectable annotations are mirrored, but only @run makes a command") {
+    val mm = summon[meta.MethodsMirror[customMarker.type]]
+    assertEquals(mm.entries.productArity, 1)
+    val m = mm.entries.productElement(0).asInstanceOf[meta.MethodMirror[customMarker.type]]
+    assertEquals(m.invoke(customMarker, Array(4)), 8)
+    val e = compileErrors("Flagged.parse[customMarker.type](Nil)")
+    assert(e.nonEmpty, "expected a compile error for an object with no @run members")
+  }
+
+  test("non-@run mirrored members are invisible to the parser") {
+    // one @run method + one @cmd method: the run-view is a lone method, parsed flat
+    assertEquals(ok(Flagged.parse[mixed.type](Seq("--x", "1"))), 2)
+    assertEquals(ok(Parser.method(mixed).parse(Seq("--x", "3"))), 4)
   }
 
   test("Flagged.parse falls back to @run methods when no Parser exists") {
