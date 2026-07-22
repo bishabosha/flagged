@@ -260,14 +260,17 @@ object todo:
   def list(all: Boolean = false): List[String] = ...
 
 @main def run(args: String*): Unit =
-  val result: Int | List[String] = Flagged.parseMethodsOrExit(todo, args)
+  val result: Int | List[String] = Flagged.parseOrExit[todo.type](args)
 ```
 
-`Flagged.parseMethods` (and `parseMethodsOrExit`) adapt to the object: a lone `@run` method
-parses directly — its parameters are the top-level options — while several methods, or
-nested `@run` objects, become subcommands. The call site stays the same as commands are
-added. To hold the parser itself, `Parser.method` derives from a single `@run` method and
-`Parser.methods` derives the subcommand form.
+`Flagged.parse` and `parseOrExit` resolve the grammar by implicit search: the `Parser` for
+the type when one exists, otherwise its `@run` methods (`Flagged.parseOrExit[this.type](args)`
+works for methods at the top level of the enclosing file). The methods form adapts to the
+object: a lone `@run` method parses directly — its parameters are the top-level options —
+while several methods, or nested `@run` objects, become subcommands. The call site stays
+the same as commands are added. `Flagged.parseMethods` / `parseMethodsOrExit` take the
+object as a value instead of a type argument; to hold the parser itself, `Parser.method`
+derives from a single `@run` method and `Parser.methods` derives the subcommand form.
 
 ## Handling results yourself
 

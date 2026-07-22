@@ -14,4 +14,4 @@ def greet(
   (1 to repeat).foreach(_ => println(s"Hello, $name$suffix"))
 
 @main def main(args: String*): Unit =
-  Parser.method(this).parseOrExit(args, prog = "greet")
+  Flagged.parseOrExit[this.type](args)

@@ -105,6 +105,22 @@ class MethodsSuite extends munit.FunSuite:
     assert(e.contains("exactly one @run method"), e)
   }
 
+  test("Flagged.parse falls back to @run methods when no Parser exists") {
+    assertEquals(ok(Flagged.parse[calc.type](Seq("-n", "3"))), 6)
+    assertEquals(ok(Flagged.parse[toolbox.type](Seq("add", "--a", "2", "--b", "3"))), 5)
+  }
+
+  test("a Parser given takes precedence over @run derivation") {
+    given Parser.Value[calc.type] = Parser.of("calc")(_ => Ok(calc))
+    assertEquals(ok(Flagged.parse[calc.type](Seq("anything"))), calc)
+  }
+
+  test("Flagged.help renders for an @run object") {
+    val t = Flagged.help[toolbox.type]
+    assert(t.contains("Usage: toolbox"), t)
+    assert(t.contains("add") && t.contains("rm") && t.contains("remote"), t)
+  }
+
   test("Flagged.parseMethods handles a lone method and a group with the same call") {
     assertEquals(ok(Flagged.parseMethods(calc, Seq("-n", "3", "--factor", "3"))), 9)
     assertEquals(ok(Flagged.parseMethods(toolbox, Seq("add", "--a", "2", "--b", "3"))), 5)

@@ -142,10 +142,10 @@ class SubcommandSuite extends munit.FunSuite:
       case class Add(@positional x: Int, @positional y: Int) extends Op
       case object Noop                                       extends Op
     assertEquals(
-      Flagged.parse[Op](Seq("add", "1", "2"))(using summon[Parser[Op]]),
+      Flagged.parse[Op](Seq("add", "1", "2")),
       Ok(Op.Add(1, 2))
     )
-    assertEquals(Flagged.parse[Op](Seq("noop"))(using summon[Parser[Op]]), Ok(Op.Noop))
+    assertEquals(Flagged.parse[Op](Seq("noop")), Ok(Op.Noop))
   }
 
   test("derivation reuses a Parser given in scope for a subcommand field") {
