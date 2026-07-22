@@ -20,6 +20,11 @@ trait BaseModule extends ScalaModule:
   def scalaVersion  = Versions.scala
   def scalacOptions = Seq("-deprecation", "-feature", "-unchecked")
 
+  // scala-cli runs of the example scripts leave generated sources under a .scala-build dir
+  override def allSourceFiles = Task {
+    super.allSourceFiles().filter(!_.path.segments.contains(".scala-build"))
+  }
+
 trait BaseJsModule extends BaseModule, ScalaJSModule:
   def scalaJSVersion = Versions.scalaJs
 

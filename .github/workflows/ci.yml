@@ -41,3 +41,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang libgc-dev libunwind-dev
       - name: Run tests
         run: ./mill --no-server ${{ matrix.mill-targets }}
+      - uses: VirtusLab/scala-cli-setup@v1
+        if: ${{ matrix.platform == 'jvm' }}
+        with:
+          power: true
+      - name: Compile the backup.sc script demo
+        if: ${{ matrix.platform == 'jvm' }}
+        run: scala-cli compile examples/src/backup.sc
