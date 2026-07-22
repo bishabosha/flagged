@@ -42,3 +42,9 @@ final case class group(value: String) extends StaticAnnotation derives Defaults
   * given, with the remaining arguments forwarded to it.
   */
 final case class default() extends StaticAnnotation derives Defaults
+
+/** Mark a method as a command for `Parser.method` / `Parser.methods`: its parameters become the
+  * options and positionals, and parsing invokes it. On a nested object, marks it as a group of
+  * subcommands.
+  */
+final case class run() extends meta.Reflectable derives Defaults

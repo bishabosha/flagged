@@ -3,16 +3,17 @@
 Feature comparison against the two most-used Scala CLI parsing libraries, based on their current
 documentation and test suites (mainargs 0.7.7–0.7.8 readme and `mainargs/test`; case-app 2.x docs at
 alexarchambault.github.io/case-app and `tests/`). Behaviors that overlap are pinned down in
-`test/flagged/ParitySuite.test.scala`; each test names the library whose documented behavior it was
-checked against. JMH benchmarks comparing derivation compile time and parse latency/allocation
-across the three libraries live in `bench/` (see `bench/README.md`).
+`flagged/test/src/flagged/ParitySuite.scala`; each test names the library whose documented behavior
+it was checked against. JMH benchmarks comparing derivation compile time and parse
+latency/allocation across the three libraries — including the method-based path against mainargs'
+`ParserForMethods` — live in `bench/` (see `bench/README.md`).
 
 ## Feature matrix
 
 | Feature | flagged | mainargs | case-app |
 | --- | --- | --- | --- |
-| Definition style | case class / enum `derives` | `@main` methods or case class | case class |
-| Derivation mechanism | `Mirror` + inline (one macro pair for annotations/defaults) | macros | shapeless (Scala 2) / macros (Scala 3) |
+| Definition style | case class / enum `derives`; `@run` command methods (one `Flagged.parse` entry resolves both) | `@main` methods or case class | case class |
+| Derivation mechanism | `Mirror` + inline (three minimal macros: defaults, annotations, method mirrors) | macros | shapeless (Scala 2) / macros (Scala 3) |
 | `--name value` / `--name=value` | yes / yes | yes / yes | yes / yes |
 | Short options `-s value`, `-svalue`, `-s=value` | yes | yes | no attached form |
 | Short-flag bundling `-abc`, `-ovalue` at end | yes | yes | no |
@@ -27,7 +28,7 @@ across the three libraries live in `bench/` (see `bench/README.md`).
 | Positional arguments | `@positional`, ordering checked | `positional = true` or `allowPositional` | positionals are the remaining args |
 | Variadic positionals | repeated `@positional` field | `Leftover[T]` / `T*` | `RemainingArgs` (untyped) |
 | Typed leftover elements | yes | yes | no (strings) |
-| Subcommands | enums, arbitrarily nested | one level (multiple `@main`s) | `CommandsEntryPoint`, nested via multi-word names |
+| Subcommands | enums or `@run` objects, arbitrarily nested | one level (multiple `@main`s) | `CommandsEntryPoint`, nested via multi-word names |
 | Option groups (splicing/`@Recurse`) | yes, nested | yes (`TokensReader.Class`), nested | yes (`@Recurse`), nested |
 | Optional group (`Option[Group]`) | yes | no | yes |
 | Prefixed group names | yes (`@name` on the group field) | no | yes (`@Recurse("prefix")`) |
@@ -71,7 +72,10 @@ across the three libraries live in `bench/` (see `bench/README.md`).
 For context: hierarchical subcommands derived from nested enums, per-level help with
 suggestions, compile-time duplicate/shape/ordering checks, typed `Trailing`, shape-preserving
 `map`/`emap` on every parser (including whole commands, giving cross-field validation before the
-run function), pluggable flag/repeated shapes.
+run function), pluggable flag/repeated shapes. On the method side (shared with mainargs, not
+case-app): command methods nest through `@run` objects, the parse result is the invoked method's
+result — typed as the union across a group — and the same `Flagged.parse[A]` entry serves both
+definition styles, falling back from a `Parser[A]` given to `@run` derivation.
 
 ## Gaps in flagged, ranked
 

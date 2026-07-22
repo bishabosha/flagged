@@ -87,11 +87,11 @@ sealed trait Parser[A]:
       case Ok(a)                      => a
       case Err(ParseError.Help(text)) =>
         println(text)
-        sys.exit(0)
+        internal.PlatformExit.exit(0)
       case Err(ParseError.Failure(message, hint)) =>
         System.err.println(s"$prog: $message")
         if hint.nonEmpty then System.err.println(hint)
-        sys.exit(2)
+        internal.PlatformExit.exit(2)
 
   /** The rendered top-level help screen. */
   final def help: String = help(typeName)
@@ -357,6 +357,26 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
   /** Opt `A` into trailing shape: it is built from the raw arguments after `--`. */
   def trailing[A](combine: List[String] => Result[A, String]): Trailing[A] = new Trailing[A]:
     def build(l: List[String]) = combine(l)
+
+  /** Derive a command from the single `@run` method of object `o`: its parameters become the
+    * options and positionals (same annotations and rules as case-class fields), and a successful
+    * parse invokes it.
+    */
+  inline def method[T](o: T)(using r: internal.MethodResults[T]): Command[r.Out] =
+    val (cmd, prog) = internal.DeriveMethods.single[T, r.type](o, r)
+    make[r.Out](cmd, prog)
+
+  /** Derive subcommands from the `@run` methods and nested `@run` objects of `o`; parsing selects
+    * and invokes one, producing its result.
+    */
+  inline def methods[T](o: T)(using r: internal.MethodResults[T]): CommandGroup[r.Out] =
+    makeGroup[r.Out](
+      internal.DeriveMethods.group[T, r.type](o, r),
+      internal.Assemble.progName(
+        scala.compiletime.constValue[r.mirror.MirroredLabel],
+        internal.Annots.targetAnnotsOf[r.mirror.MirroredSelfAnnotations]
+      )
+    )
 
   /** Called by derivation. Not intended for direct use. */
   def make[A](cmd: flagged.internal.Command, name: String): Command[A] = new Command[A]:

@@ -244,6 +244,32 @@ val cfg = Flagged.parseOrExit[Backup](args.toSeq, prog = "backup")
 On `--help` it prints the help screen and exits 0; on a bad command line it prints an
 error with a hint to stderr and exits 2.
 
+## Method commands
+
+Commands can also be methods, in the style of mainargs: annotate them with `@run` and the
+parameters become the options and positionals — same annotations, defaults, and compile-time
+rules as case-class fields — with a successful parse invoking the method. The parsed value
+is the invoked method's result (a union type across a group).
+
+```scala
+@run @help("Add an entry")
+def add(@positional text: String, urgent: Boolean = false): Int = ...
+
+@run @name("ls")
+def list(all: Boolean = false): List[String] = ...
+
+@main def run(args: String*): Unit =
+  val result: Int | List[String] = Flagged.parseOrExit[this.type](args, prog = "todo")
+```
+
+`Flagged.parse` and `parseOrExit` resolve the grammar by implicit search: the `Parser` for
+the type when one exists, otherwise its `@run` methods (`Flagged.parseOrExit[this.type](args)`
+works for methods at the top level of the enclosing file). The methods form adapts to the
+object: a lone `@run` method parses directly — its parameters are the top-level options —
+while several methods, or nested `@run` objects, become subcommands. The call site stays
+the same as commands are added. To hold the parser itself, `Parser.method` derives from a
+single `@run` method and `Parser.methods` derives the subcommand form.
+
 ## Handling results yourself
 
 If you'd rather not exit — in tests, or when embedding a CLI in a bigger program —

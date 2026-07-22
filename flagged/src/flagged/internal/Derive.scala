@@ -14,8 +14,10 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
   * across type boundaries — each enum or options group in a command tree provides its own instance.
   *
   * The only macro-backed pieces are [[Defaults]] (term-level: default values are arbitrary
-  * expressions) and [[flagged.meta.AnnotMirror]] (type-level: annotations reduced to singleton
-  * types, extracted here via [[flagged.meta.AnnotMirror.find]] into typed [[Annots]]).
+  * expressions), [[flagged.meta.AnnotMirror]] (type-level: annotations reduced to singleton types,
+  * extracted here via [[flagged.meta.AnnotMirror.find]] into typed [[Annots]]), and
+  * [[flagged.meta.MethodsMirror]] (the method-command analogue of `Mirror`, consumed by
+  * [[DeriveMethods]]).
   */
 object Derive:
 
