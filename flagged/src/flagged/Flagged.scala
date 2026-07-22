@@ -67,10 +67,11 @@ object Flagged:
       * [[internal.MethodResults]] tower; the mirror pins down the module instance, so `ValueOf`
       * recovers it.
       */
-    inline given [T] => (r: internal.MethodResults[T]) => (Entry[T] { type Out = r.Out }) =
+    inline given [T] => (v: ValueOf[T]) => (r: internal.MethodResults[T])
+      => (Entry[T] { type Out = r.Out }) =
       MethodsEntry[T, r.Out](() =>
         internal.DeriveMethods.parser[T, r.type, r.Out](
-          compiletime.summonInline[ValueOf[T]].value,
+          v.value,
           r
         )
       )
