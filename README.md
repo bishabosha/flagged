@@ -1,8 +1,32 @@
-# flagged
+# Flagged
 
-Command-line argument parsing for Scala 3. You describe your CLI as plain data — a
-case class for options, an enum for subcommands — and flagged derives the parser, the
-`--help` screens, and the error messages at compile time.
+Command-line argument parsing and validation for Scala 3. Enables you to define the interface of
+a CLI app as either pure data or methods, and the library derives a parser, schema validation, and help text automatically.
+
+## Goals
+
+Flagged was created to be a candidate library for the [Scala Toolkit](https://github.com/scala/toolkit), combining the strengths of two commonly-used Scala libraries for CLI argument parsing:
+- [com-lihaoyi/mainargs](https://github.com/com-lihaoyi/mainargs)
+- [alexarchambault/case-app](https://github.com/alexarchambault/case-app)
+
+## Why a new library?
+
+The initial motivation was a lack of momentum on issue [scala/toolkit#65](https://github.com/scala/toolkit/issues/65), on which discussion paused (since July 2025) after a request to compare mainargs and case-app.
+
+So my personal goals with introducing Flagged was to combine the feature set of both libraries but with a Scala-3-first design:
+- 100% declarative setup, with a single entry point to "run or exit".
+- support arbitrary nested subcommands (with `--help` scoped to the current subcommand)
+- use standard language features as much as possible
+- validate the construction of the schema at compiletime
+- Command schemas should be composable (e.g. embedding commands from another classpath)
+- introduce candidate standard APIs, compatible with `inline` derivation,
+  for reflecting on default parameters and annotations.
+- limit use of low level macros (ideally zero if the annot/default reflection
+  API becomes compiler builtins).
+- support unique schema derivation features of both mainargs and case-app.
+- follow standards for option parsing conventions
+
+## Example
 
 ```scala
 import flagged.*
@@ -16,15 +40,38 @@ case class Greet(
 
 @main def greet(args: String*): Unit =
   val cfg = Flagged.parseOrExit[Greet](args)
-  (1 to cfg.repeat).foreach(_ => println(s"Hello, ${cfg.name}${if cfg.excited then "!" else "."}"))
+  for _ <- 1 to cfg.repeat do
+    println(s"Hello, ${cfg.name}${if cfg.excited then "!" else "."}")
 ```
 
-Running the program:
+equivalent, using methods:
 
+```scala
+import flagged.*
+
+@run
+@help("Greet someone from the command line")
+def greet(
+    @short('n') @help("Who to greet") name: String = "world",
+    @short('e') @help("Add excitement") excited: Boolean = false,
+    @short('r') @help("How many times to greet") repeat: Int = 1
+): Unit = {
+  for _ <- 1 to repeat do
+    println(s"Hello, ${name}${if excited then "!" else "."}")
+}
+
+@main def app(args: String*): Unit =
+  Flagged.parseOrExit[this.type](args)
+```
+Usage:
 ```console
 $ greet -en Jamie -r 2
 Hello, Jamie!
 Hello, Jamie!
+
+$ greet --repaet 2
+greet: unknown option '--repaet' (did you mean '--repeat'?)
+Try 'greet --help' for more information.
 
 $ greet --help
 Greet someone from the command line
@@ -36,132 +83,61 @@ Options:
   -e, --excited        Add excitement
   -r, --repeat <int>   How many times to greet (default: 1)
   -h, --help           Show this message and exit
-
-$ greet --repaet 2
-greet: unknown option '--repaet' (did you mean '--repeat'?)
-Try 'greet --help' for more information.
 ```
 
+## Feature set
+
+### Parse semantics
+
 Supported option syntax: `--name value` and `--name=value`; short aliases with
-separate (`-n Jamie`), attached (`-nJamie`), or `=` values; flag bundling (`-er`,
-`-rn 3`); `--` to end option parsing — or, when a field of type `Trailing` is
-declared, to hand everything after it to that field verbatim (`run img -- cmd args`);
-`-` and negative numbers are treated as values.
+separate (`-n Jamie`), attached (`-nJamie`), or `=` values; short-flag bundling
+(`-er`, `-rn 3`); `-` and negative numbers treated as values; options may appear
+after positionals (permutation, as in GNU getopt). Repeated scalar options are
+last-wins — `--verbose=false --verbose` is true — which keeps shell aliases
+composable; accumulation is opt-in through collection types and `Count`.
 
-### The meaning of `--`
+`--` ends option parsing, following [POSIX Utility Syntax Guidelines, guideline 10]:
+the first `--` is dropped and everything after it is positional, even when it begins
+with `-`. Because Flagged permutes, the `--` is honored wherever it appears, matching
+the default behavior of GNU [getopt(3)], Python's argparse, and Rust's clap (strict
+POSIX, without permutation, would stop scanning at the first operand). When a command
+declares a `Trailing` field, `--` instead hands everything after it to that field
+verbatim — the delegation idiom of `ssh host -- cmd` or `docker run img -- cmd`.
 
-flagged follows the GNU convention: the first `--` is a delimiter that is itself
-dropped, and every argument after it is treated as a positional value, even when it
-begins with `-` ([POSIX Utility Syntax Guidelines, guideline 10]; [getopt(3p)]
-consumes the `--` token). Because flagged *permutes* — options may appear after
-positionals — the `--` is honored wherever it appears on the line, so
-`prog a -- b c` yields the positionals `a b c`. Strict POSIX differs here: without
-permutation, option scanning ends at the first operand and a later `--` is a literal
-argument. C programs toggle between the two with `POSIXLY_CORRECT` (see [glibc's
-Program Argument Syntax Conventions] and [getopt(3)]); flagged's behavior matches the
-default of GNU getopt, Python's argparse, and Rust's clap.
-
-When a command declares a `Trailing` field, `--` instead hands everything after it
-to that field verbatim — the delegation idiom of `ssh host -- cmd` or
-`docker run img -- cmd`, which POSIX does not specify but which layers on the same
-delimiter rule.
-
+[POSIX Utility Syntax Guidelines]: https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap12.html
 [POSIX Utility Syntax Guidelines, guideline 10]: https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap12.html
-[getopt(3p)]: https://pubs.opengroup.org/onlinepubs/9699919799/functions/getopt.html
-[glibc's Program Argument Syntax Conventions]: https://www.gnu.org/software/libc/manual/html_node/Argument-Syntax.html
 [getopt(3)]: https://man7.org/linux/man-pages/man3/getopt.3.html
 
-## Getting flagged
-
-flagged is not yet published to a Maven repository. To try it out, clone this repository
-and run `./mill flagged.jvm.test`, or any of the demos in `examples/`
-(`./mill examples.runMain examples.greetMain --help`); to use it in a project, vendor
-`flagged/src` plus the source folders for your platform. flagged cross-builds for the
-JVM, Scala.js, and Scala Native (`./mill flagged.js.test` / `./mill flagged.native.test`);
-platform-specific sources live in `flagged/src-jvm`, `flagged/src-js`,
-`flagged/src-native`, and `flagged/src-jvm-native`.
-
-## Declaring options
+### Declaring options
 
 Each case class field becomes a named option, `--kebab-cased` after the field name.
-Semantics are instance-driven: a field whose type has a `Parser` given becomes nested
-subcommands or a spliced options group; value shapes parse as option values, with
-the parser's *schema* deciding whether the option is a flag, takes one value, or
-repeats:
+The field's `Parser` instance decides its shape:
 
 | Field shape | Meaning |
 |---|---|
-| `x: Boolean` | flag `--x` (also `--x=false`); always optional, repeatable — the last mention wins |
-| `x: Count` (or any `Parser.Flag[A]`) | counting flag: `-vvv` → `Count(3)` |
-| `x: A` (`Parser.Value[A]`) | required option `--x <a>` |
+| `x: Boolean` | flag `--x` (also `--x=false`) |
+| `x: Count` | counting flag: `-vvv` → `Count(3)` |
+| `x: A` | required option `--x <a>` |
 | `x: A = default` | optional, default shown in help |
 | `x: Option[A]` | optional, `None` when absent |
-| `x: Option[Boolean]` | optional flag: absent → `None`, `--x` → `Some(true)`, `--x=false` → `Some(false)` |
-| `x: A` (`Parser.Repeated[A]`, e.g. `List`/`Seq`/`Vector`/`Set`) | repeatable |
+| `x: List[A]` (any collection with a `Factory`) | repeatable |
 | `x: Map[K, V]` | repeatable `--x key=value` entries |
-| `x: E` (enum `E derives Parser.CommandGroup`) | nested subcommands |
-| `x: P` (case class `P derives Parser.Command`) | options group spliced into this command |
-| `x: Option[P]` | optional group: `None` unless one of its options occurs |
-| `x: Trailing` (or any `Parser.Trailing[A]`) | the raw arguments after `--`, verbatim |
+| `x: E` (enum deriving `Parser.CommandGroup`) | nested subcommands |
+| `x: E` (enum deriving `Parser.Enumerated`) | value matched by case name (`--color red`) |
+| `x: P` (case class deriving `Parser.Command`) | options group spliced into this command |
+| `x: Trailing` | the raw arguments after `--`, verbatim |
 | `@positional x: A` | positional argument (same rules) |
 
-A `Trailing` field collects the raw arguments after `--`, verbatim — nothing after
-the delimiter is parsed as an option. This is the delegation idiom of
-`docker run img -- cmd args...`:
+Annotations fine-tune the rest: `@name` (long-name override and aliases), `@short`,
+`@help`, `@positional`, `@hidden` (omitted from help, shown by `--help-all`),
+`@group` (titled help sections), `@version` (adds `--version` via a `Versioned`
+instance), and `@default` (the command run when no command token is given).
 
-```scala
-case class Run(@short('i') image: String = "alpine", cmd: Trailing = Trailing(Nil)) derives Parser.Command
-// run -i ubuntu -- echo --not-an-option   →   Run("ubuntu", Trailing(List("echo", "--not-an-option")))
-```
+### Subcommands
 
-`Trailing(Nil)` when no `--` is given; an `Option[Trailing]` field distinguishes an
-absent `--` (`None`) from a present-but-empty one (`Some(Trailing(Nil))`). Any type
-can opt into the shape via `Parser.trailing`, whose combining function may fail —
-e.g. to require a command after `--`. One trailing field per command; in help it
-appears as `[-- <args>]` in the usage line. See also
-[the meaning of `--`](#the-meaning-of---) above.
+Model groups of commands as an enum (or multiple `@run` methods in the same object);
 
-Fine-tune with annotations:
-
-| Annotation | Effect |
-|---|---|
-| `@name("out")` | override the long name (or command / program name on types); repeatable — later occurrences are aliases, on fields and on enum cases |
-| `@short('o')` | add a short alias |
-| `@help("...")` | help text for fields, cases, and top-level types |
-| `@positional` | positional argument instead of named option |
-| `@hidden` | omit from help (still parses); on an enum case, an unlisted command. `--help-all` shows them |
-| `@group("Network")` | put the option under a titled help section; on a spliced group field, titles the whole group |
-| `@version` | on the top-level type: help header line plus a `--version` flag; requires a `given Versioned[A]` supplying the version string (constant or computed) |
-| `@default` | on one command-group case: the default command, run when no command token is given (remaining arguments are forwarded to it) |
-
-On a spliced group field, `@name("net")` prefixes the group's option names
-(`--net-host`) and drops their short aliases, so the same group can be spliced more
-than once.
-
-Errors accumulate: unknown options, invalid values, missing option values, and
-missing required arguments are all collected and reported in one failure, one per
-line.
-
-The grammar is validated at compile time: a field type without a `Parser` given,
-conflicting or ineffective annotations (`@positional` with `@short`, `@short` on a
-subcommand field, ...), shape conflicts (`Option` of a repeated parser, a bare flag
-in `Option`, ...), cross-field rules (two subcommand or
-trailing fields, positionals mixed with subcommands, a positional after a repeated
-one), and duplicate constant names (`@short`/`@name`) are all compile errors. Every
-field's instance must carry its shape in its type: the shape *is* the subtype
-(`Parser.Value[X]`, `Parser.Flag[X]`, `Parser.Repeated[X]`, ...), which all built-in
-instances, the `Parser.of`/`flag`/`repeated`/`trailing` constructors, and the
-derivation clauses produce; a given ascribed to plain `Parser[X]` is rejected.
-What remains at parser construction is the inherently value-level residue:
-label-derived (kebab-cased) name collisions, splice-content rules, and
-required-before-optional positional ordering, reported as a descriptive
-`IllegalArgumentException` before any arguments are parsed.
-
-## Subcommands
-
-Model commands as an enum and derive the parser from it. Parameterless cases are plain
-commands; parameterized cases carry their own options; an enum-typed field nests
-another level:
+a case with a singular field of an enum type (or a `@run` annotated object) will be treated as a nested subcommand group.
 
 ```scala
 @name("gitto")
@@ -190,43 +166,180 @@ enum RemoteAction derives Parser.CommandGroup:
     case Gitto.Status(short)                       => ???
 ```
 
-You handle a plain enum value; flagged handles the routing — and every level answers
-`--help`:
+Derivation only handles a single class/enum, any field will need its own Parser derived separately.
 
-```console
-$ gitto remote --help
-Manage remotes
+### Command methods
 
-Usage: gitto remote [options] <command>
+Annotate methods with `@run` to make them reflectable as a command to a derived Parser. Arguments are otherwise handled identically to derivation for a class.
 
-Commands:
-  add     Add a remote named <name> for the repository at <url>
-  remove  Remove the remote named <name>
+```scala
+@run @help("Add an entry")
+def add(@positional text: String, urgent: Boolean = false): Int = ...
 
-Options:
-  -h, --help  Show this message and exit
+@run @name("ls")
+def list(all: Boolean = false): List[String] = ...
 
-Run 'gitto remote <command> --help' for more information on a command.
+@main def run(args: String*): Unit =
+  val result: Int | List[String] = Flagged.parseOrExit[this.type](args, prog = "todo")
 ```
 
-Things to know:
+A single `@run` method will become the name of the root program, otherwise a group of `@run` methods will take the name of the scope defining the methods, (overridden with the `prog` argument of `Flagged.parse*` methods.)
 
-- Derivation is compositional and stops at enum boundaries: each enum in the command
-  tree derives its own `Parser` (note `derives Parser.CommandGroup` on `RemoteAction` above), and
-  the parent embeds that instance. Forgetting one is a compile error that says which
-  enum needs it. This also means any level can be supplied or customized
-  independently — a hand-built `Parser` given for a nested enum is used as-is.
-- Put parent options before the subcommand name (`gitto -v clone ...`), as in git.
-- An `Option[E]`-typed command field makes the command optional; a field default
-  (`action: Action = Action.List`) works too.
-- An enum field is commands or a value depending on which instance its type provides:
-  `derives Parser.CommandGroup` → subcommands, `derives Parser.Enumerated`
-  (parameterless enums only) → a value matched by case name (`--color red`).
+### Values, groups, errors
 
-## Scripts and other entry points
+- **Built-in value types:** `String`, `Char`, `Boolean`, the numeric types,
+  `BigInt`/`BigDecimal`, `Path`, `File`, `UUID`, the common `java.time` types, and
+  `FiniteDuration` (`"30s"`, `"5.minutes"`), following platform availability.
+  A custom parser is a one-liner (`Parser.of`), and every parser supports
+  `map`/`emap` — including whole commands, which gives cross-field validation before
+  your code runs. Flag and repeated shapes are pluggable too (`Parser.flag`,
+  `Parser.repeated`), so occurrence bounds and non-empty constraints are expressible.
+- **Option groups:** a case-class-typed field splices that group's options into the
+  surrounding command and reconstructs the group as a value. Groups nest, work inside
+  subcommand cases, can be optional (`Option[Group]`), and can be prefixed (`@name`
+  on the field) to be spliced more than once.
+- **Errors accumulate:** unknown options, invalid values, missing option values, and
+  missing required arguments are collected and reported in one failure, one per line,
+  with did-you-mean hints.
+- **Help output** shows defaults, required and repeatable markers, titled sections,
+  and a `--version` line when declared.
 
-`parseOrExit` takes any `Seq[String]`, so it works wherever your arguments come from —
-a `@main` varargs parameter, a scala-cli script's `args`, or a classic `main`:
+### Entry points and results
+
+`Flagged.parseOrExit` takes any `Seq[String]` and executes the matching entrypoint and returning its result. On `--help` it prints the help screen
+and exits 0; on erroneous arguments it prints the error to stderr and exits 2. To
+handle aborts yourself, `Flagged.parse` returns a `Result[T, ParseError]` (from
+[lampepfl/steps](https://github.com/lampepfl/steps)) instead of exiting, and
+`Flagged.help[A]` renders the help text without parsing anything.
+
+### Platforms
+
+Scala 3 only — the design depends on Scala 3 inline derivation. Cross-builds for the
+JVM, Scala.js, and Scala Native; `Parser` instances follow platform availability
+(`java.time` types are JVM-only, `Path` is JVM and Scala Native).
+
+## How-to
+
+Short recipes for common goals.
+
+### Parse a custom value type
+
+Define a `Parser.Value` given with `Parser.of`; the type name you pass becomes the
+`<metavar>` in help output. Instances are picked up by derivation for fields of that
+type:
+
+```scala
+given Parser.Value[Port] = Parser.of[Port]("port")(s =>
+  s.toIntOption.filter(p => p > 0 && p < 65536) match
+    case Some(p) => Ok(Port(p))
+    case None    => Err(s"'$s' is not a valid port"))
+```
+
+For simple cases, `map`/`emap` on an existing parser also works, and preserves the
+parser's shape.
+
+### Accept a value from a fixed set of names
+
+An enum with parameterless cases can derive a by-name value parser:
+
+```scala
+enum LogLevel derives Parser.Enumerated:
+  case Debug, Info, Warn, Error
+```
+
+gives you `--level warn` (kebab-cased, matched exactly) and the metavar
+`<debug|info|warn|error>`.
+
+### Share options between commands
+
+A field whose type is a case class with its own `Parser` splices that group's
+options into the surrounding command — they parse as if declared inline, and the
+group is reconstructed as a value:
+
+```scala
+case class LogOpts(@short('q') quiet: Boolean = false, logLevel: String = "info") derives Parser.Command
+
+case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser.Command
+// serve --port 9000 -q --log-level debug
+```
+
+Groups nest and work inside subcommand cases. An `Option[LogOpts]` field parses to
+`None` unless one of the group's options occurs; `@name("log")` on the field
+prefixes the group's option names (`--log-quiet`), so the same group can be spliced
+more than once. Spliced groups cannot contain positional fields.
+
+### Forward arguments to another program
+
+Declare a `Trailing` field: everything after `--` lands in it verbatim, unparsed —
+the delegation idiom of `docker run img -- cmd args...`:
+
+```scala
+case class Run(@short('i') image: String = "alpine", cmd: Trailing = Trailing(Nil)) derives Parser.Command
+// run -i ubuntu -- echo --not-an-option   →   Run("ubuntu", Trailing(List("echo", "--not-an-option")))
+```
+
+An `Option[Trailing]` field distinguishes an absent `--` (`None`) from a
+present-but-empty one (`Some(Trailing(Nil))`). One trailing field per command; in
+help it appears as `[-- <args>]` in the usage line.
+
+### Constrain repetition or flag occurrences
+
+`Parser.repeated` collects each occurrence with an element `Parser.Value` and
+combines them with a function of your choice — which may fail, so constraints are
+expressible (it is also invoked empty when the argument is absent):
+
+```scala
+given Parser.Repeated[NonEmpty] = Parser.repeated[Int, NonEmpty](l =>
+  if l.isEmpty then Err("expected at least one occurrence") else Ok(NonEmpty(l.toList)))
+```
+
+`Parser.flag` does the same for flags, building the value from the occurrence count
+(this is how `Boolean` and `Count` are defined):
+
+```scala
+given Parser.Flag[Verbosity] = Parser.flag(n =>
+  if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)"))
+```
+
+### Validate across fields
+
+`emap` on a command parser runs after the fields parse and before your code sees the
+value, so cross-field rules report through the normal error channel:
+
+```scala
+case class Fetch(url: String, tls: Boolean = false, certFile: Option[Path] = None)
+
+given Parser.Command[Fetch] = Parser.Command.derived[Fetch].emap(cfg =>
+  if cfg.tls && cfg.certFile.isEmpty then Err("--tls requires --cert-file") else Ok(cfg))
+```
+
+### Make a subcommand optional or default
+
+An `Option[E]`-typed command field makes the command optional, and a field default
+(`action: Action = Action.List`) works too. At the top level, `@default` on one enum
+case marks the command run when no command token is given, with the remaining
+arguments forwarded to it.
+
+### Handle results without exiting
+
+In tests, or when embedding a CLI in a bigger program, `Flagged.parse` returns a
+value instead of exiting:
+
+```scala
+Flagged.parse[Greet](Seq("--name", "Jamie")) match
+  case Ok(cfg)                            => run(cfg)
+  case Err(ParseError.Help(text))         => println(text)
+  case Err(ParseError.Failure(msg, hint)) => logger.error(msg)
+```
+
+`import flagged.*` brings `Result`, `Ok`, and `Err` into scope, and the full steps
+toolkit (`map`, `getOrElse`, `toEither`, direct-style `Result:` blocks) is available
+on parse results.
+
+### Use Flagged from a script
+
+`parseOrExit` takes any `Seq[String]`, so it works wherever your arguments come
+from; pass `prog` to set the program name when there is no `@name` annotation:
 
 ```scala
 // backup.sc — run with scala-cli
@@ -241,129 +354,41 @@ case class Backup(
 val cfg = Flagged.parseOrExit[Backup](args.toSeq, prog = "backup")
 ```
 
-On `--help` it prints the help screen and exits 0; on a bad command line it prints an
-error with a hint to stderr and exits 2.
+## Performance
 
-## Method commands
+Full methodology and tables are in [`bench/`](bench/results.md); the comparison
+below is against mainargs 0.7.8 and case-app 2.1.0 on the same inputs (Apple M3 Max,
+Temurin JDK 25, Scala 3.8.3).
 
-Commands can also be methods, in the style of mainargs: annotate them with `@run` and the
-parameters become the options and positionals — same annotations, defaults, and compile-time
-rules as case-class fields — with a successful parse invoking the method. The parsed value
-is the invoked method's result (a union type across a group).
+**Compile time** is probably what people care most about for a derivation-heavy library. Derivation adds ~63–97 ms per file over a plain-data baseline across the
+benchmark scenarios, against ~185–222 ms for mainargs and ~420–465 ms for case-app.
+Cost grows linearly with field count, at roughly 2 ms per field.
 
-```scala
-@run @help("Add an entry")
-def add(@positional text: String, urgent: Boolean = false): Int = ...
+**Parse latency:** on non-trivial argument lists Flagged parses in 0.07–0.24 µs,
+2–31× faster than mainargs and case-app on the same scenarios, allocating 3.8–36×
+less; the hot path aims to allocate only what is necessary to build the target data (further improvements could be made to avoid boxing). The same holds on non-JVM platforms: Flagged
+is the fastest of the three on every scenario on Scala.js, WebAssembly, and Scala
+Native.
 
-@run @name("ls")
-def list(all: Boolean = false): List[String] = ...
+**Comparison to hand-written:**
+- A hand-written parser at feature-parity with Flagged is still 1.7–5.7× faster than the
+derived one
+- The typical quick hand-rolled parser (case class of defaults, pattern match for known tokens on a `List[String]`, copying per parsed option) is faster on small grammars but 2.7× slower at 25 options,
+since its cost grows with options × tokens where the engine's grows with tokens.
+- `@main` def (scala builtin parsing) is the fastest by far (but only handles positional arguments)
 
-@main def run(args: String*): Unit =
-  val result: Int | List[String] = Flagged.parseOrExit[this.type](args, prog = "todo")
-```
+## Comparison with mainargs and case-app
 
-`Flagged.parse` and `parseOrExit` resolve the grammar by implicit search: the `Parser` for
-the type when one exists, otherwise its `@run` methods (`Flagged.parseOrExit[this.type](args)`
-works for methods at the top level of the enclosing file). The methods form adapts to the
-object: a lone `@run` method parses directly — its parameters are the top-level options —
-while several methods, or nested `@run` objects, become subcommands. The call site stays
-the same as commands are added. To hold the parser itself, `Parser.method` derives from a
-single `@run` method and `Parser.methods` derives the subcommand form.
+[`docs/comparison.md`](docs/comparison.md) has a feature matrix, the deliberate
+behavioral differences (each pinned down in `ParitySuite` against the other
+library's documented behavior), and Flagged's known gaps — shell completions and
+unrecognized-argument passthrough being the two that matter.
 
-## Handling results yourself
+## Getting Flagged
 
-If you'd rather not exit — in tests, or when embedding a CLI in a bigger program —
-`Flagged.parse` returns a value instead. Results use `Result[T, E]` from
-[lampepfl/steps](https://github.com/lampepfl/steps): you get `Ok(config)` on success,
-and `Err` carrying a `ParseError` that is either the rendered help screen or a failure
-message with its hint:
-
-```scala
-Flagged.parse[Greet](Seq("--name", "Jamie")) match
-  case Ok(cfg)                            => run(cfg)
-  case Err(ParseError.Help(text))         => println(text)
-  case Err(ParseError.Failure(msg, hint)) => logger.error(msg)
-```
-
-`import flagged.*` brings `Result`, `Ok`, and `Err` into scope, and the full steps toolkit
-(`map`, `getOrElse`, `toEither`, direct-style `Result:` blocks) is available on parse
-results. `Flagged.help[Greet]` gives you the help text without parsing anything.
-
-## Parsing your own value types
-
-Option and positional values use the same `Parser[A]` typeclass as commands, in its
-value shapes. Instances for
-`String`, `Char`, `Boolean`, the numeric types, `BigInt`/`BigDecimal`,
-`java.nio.file.Path`, `java.io.File`, `UUID`, the common `java.time` types, and
-`FiniteDuration` (`"30s"`, `"5.minutes"`) are built in. Instances follow platform
-availability: `java.time` types are JVM-only, `Path` is JVM and Scala Native.
-
-A custom value parser is a one-liner, and its type name becomes the `<metavar>` in help
-output:
-
-```scala
-given Parser.Value[Port] = Parser.of[Port]("port")(s =>
-  s.toIntOption.filter(p => p > 0 && p < 65536) match
-    case Some(p) => Ok(Port(p))
-    case None    => Err(s"'$s' is not a valid port"))
-```
-
-A parser's *shape* is its subtype — `Parser.Value`, `Parser.Flag`,
-`Parser.Repeated`, `Parser.Trailing`, `Parser.Command`/`CommandGroup`. `Parser.of`
-builds single-value parsers; `Parser.repeated` builds parsers whose argument may
-appear any number of times, each occurrence parsed by a `Parser.Value` element (so
-repeats cannot nest, by construction) and the collected elements combined by a
-function of your choice, from an `IndexedSeq` view of the collected elements. Any
-collection with a `scala.collection.Factory` works out of the box (`List`, `Set`,
-`ArraySeq`, sorted collections, ..., and `Map[K, V]` from `key=value` entries) —
-occurrences append straight to the collection's builder — and any other type can
-opt in through `Parser.repeated`, including with constraints, since the combining
-function may fail (it is also invoked empty when the argument is absent):
-
-```scala
-given Parser.Repeated[Set[String]] = Parser.repeated[String, Set[String]](l => Ok(l.toSet))
-
-given Parser.Repeated[NonEmpty] = Parser.repeated[Int, NonEmpty](l =>
-  if l.isEmpty then Err("expected at least one occurrence") else Ok(NonEmpty(l.toList)))
-```
-
-Flag shape is pluggable the same way: `Parser.flag` builds the value from the number
-of occurrences (with an optional parser for the explicit `--flag=value` form).
-`Boolean`'s parser is defined exactly like this, the bundled `Count` type gives
-counting flags (`-vvv` → `Count(3)`), and `fromCount` may fail, so occurrence bounds
-are expressible:
-
-```scala
-given Parser.Flag[Verbosity] = Parser.flag(n =>
-  if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)"))
-```
-
-## Sharing option groups
-
-A field whose type is a *case class* with a `Parser` splices that group's options
-directly into the surrounding command — the flattened options parse as if declared
-inline, and the group is reconstructed as a value:
-
-```scala
-case class LogOpts(@short('q') quiet: Boolean = false, logLevel: String = "info") derives Parser.Command
-
-case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser.Command
-// serve --port 9000 -q --log-level debug
-```
-
-Groups nest, and work inside subcommand cases, so common options can be shared across
-a whole command tree. A name collision between a command and a spliced group (or two
-groups) is reported at parser construction; use `@name`/`@short` on either side to
-disambiguate. Spliced groups cannot contain positional fields. An `Option`-typed group
-field parses to `None`, and a field default is used as-is, unless one of the group's
-options occurs on the command line.
-
-Enums with parameterless cases can derive a by-name value parser:
-
-```scala
-enum LogLevel derives Parser.Enumerated:
-  case Debug, Info, Warn, Error
-```
-
-gives you `--level warn` (kebab-cased, matched exactly) and the metavar
-`<debug|info|warn|error>`.
+Flagged is not yet published to a Maven repository. To try it out, clone this
+repository and run `./mill flagged.jvm.test`, or any of the demos in `examples/`
+(`./mill examples.runMain examples.greetMain --help`); to use it in a project,
+vendor `flagged/src` plus the source folders for your platform
+(`flagged/src-jvm`, `flagged/src-js`, `flagged/src-native`,
+`flagged/src-jvm-native`).
