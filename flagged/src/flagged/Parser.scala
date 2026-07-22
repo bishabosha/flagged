@@ -365,7 +365,7 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
   inline def method[T](
       o: T
   )(using mm: meta.MethodsMirror[T], r: internal.MethodResults[T]): Command[r.Out] =
-    val (cmd, prog) = internal.DeriveMethods.single[T, mm.type](o, mm)
+    val (cmd, prog) = internal.DeriveMethods.single[T, mm.type, r.Entries](o, mm)
     make[r.Out](cmd, prog)
 
   /** Derive subcommands from the `@run` methods and nested `@run` objects of `o`; parsing selects
@@ -375,7 +375,7 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
       o: T
   )(using mm: meta.MethodsMirror[T], r: internal.MethodResults[T]): CommandGroup[r.Out] =
     makeGroup[r.Out](
-      internal.DeriveMethods.group[T, mm.type](o, mm),
+      internal.DeriveMethods.group[T, mm.type, r.Entries](o, mm, r.entries),
       internal.Assemble.progName(
         scala.compiletime.constValue[mm.MirroredLabel],
         internal.Annots.targetAnnotsOf[mm.MirroredSelfAnnotations]

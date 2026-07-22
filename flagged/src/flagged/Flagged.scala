@@ -72,9 +72,10 @@ object Flagged:
         r: internal.MethodResults[T]
     ) => (Entry[T] { type Out = r.Out }) =
       MethodsEntry[T, r.Out](() =>
-        internal.DeriveMethods.parser[T, mm.type, r.Out](
+        internal.DeriveMethods.parser[T, mm.type, r.Entries, r.Out](
           compiletime.summonInline[ValueOf[T]].value,
-          mm
+          mm,
+          r.entries
         )
       )
 

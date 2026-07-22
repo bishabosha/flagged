@@ -3,26 +3,26 @@ package flagged.internal
 import scala.compiletime.*
 import flagged.Parser
 import flagged.meta.{Ann, MethodMirror, MethodsMirror}
-import flagged.meta.MethodsMirror.Entry
+import flagged.internal.MethodResults.EntriesResults
 import steps.result.Result
 
 /** Inline layer over [[flagged.meta.MethodsMirror]]: a method is a product whose construction is
   * invocation, a nested `@run` object is a sum — everything else is the class-derivation pipeline
   * unchanged ([[Derive.fieldsOf]] with its compile-time checks, [[Annots]], [[Assemble]]).
   *
-  * The mirror is one level deep and reflects every member marked by a [[flagged.meta.Reflectable]]
-  * annotation. This layer selects only those marked `@run` exactly, and descends into an
-  * [[Entry.Scope]] by summoning a fresh mirror for the scope's type — recursion lives here, not in
-  * the mirror.
+  * The walks run over the [[MethodResults.EntriesResults]] tower, which bundles every nested
+  * scope's already-summoned mirror — descending into a scope reuses that instance rather than
+  * repeating the implicit search. Only members marked `@run` exactly become commands; other
+  * [[flagged.meta.Reflectable]] markers are visible to the mirror but skipped here.
   */
 object DeriveMethods:
 
   /** The group of `T`'s `@run` members as a subcommand sum. */
-  inline def group[T, G <: MethodsMirror[T]](o: T, g: G): Command =
-    inline if runMethodCount[g.MirroredEntries] + runObjectCount[g.MirroredEntries] == 0 then
+  inline def group[T, G <: MethodsMirror[T], ER <: EntriesResults[?]](o: T, g: G, er: ER): Command =
+    inline if runMethodCount[ER] + runObjectCount[ER] == 0 then
       error("no @run methods or nested @run objects found in " + constValue[g.MirroredLabel])
     else
-      val es = entriesOf[T, g.MirroredEntries](o, g, 0)
+      val es = entriesOf[T, ER](o, g, er, 0)
       Assemble.sum(
         es.map(_(0)),
         Annots.makeSum[Any](Annots.targetAnnotsOf[g.MirroredSelfAnnotations], es.map(_(1))),
@@ -34,15 +34,23 @@ object DeriveMethods:
     * top-level options — anything else is a subcommand group. Backs [[flagged.Flagged.Entry]],
     * whose call sites stay unchanged when a second command is added.
     */
-  inline def parser[T, G <: MethodsMirror[T], R](o: T, g: G): Parser[R] =
-    inline if runMethodCount[g.MirroredEntries] == 1 && runObjectCount[g.MirroredEntries] == 0 then
-      val (cmd, prog) = pickSingle[T, g.MirroredEntries](o, g, 0)
+  inline def parser[T, G <: MethodsMirror[T], ER <: EntriesResults[?], R](
+      o: T,
+      g: G,
+      er: ER
+  ): Parser[R] =
+    inline if runMethodCount[ER] == 1 && runObjectCount[ER] == 0 then
+      val (cmd, prog) = pickSingle[T, ER](o, g, 0)
       Parser.make[R](cmd, prog)
-    else groupParser[T, G, R](o, g)
+    else groupParser[T, G, ER, R](o, g, er)
 
-  private inline def groupParser[T, G <: MethodsMirror[T], R](o: T, g: G): Parser[R] =
+  private inline def groupParser[T, G <: MethodsMirror[T], ER <: EntriesResults[?], R](
+      o: T,
+      g: G,
+      er: ER
+  ): Parser[R] =
     Parser.makeGroup[R](
-      group[T, G](o, g),
+      group[T, G, ER](o, g, er),
       Assemble.progName(
         constValue[g.MirroredLabel],
         Annots.targetAnnotsOf[g.MirroredSelfAnnotations]
@@ -50,14 +58,14 @@ object DeriveMethods:
     )
 
   /** The single `@run` method of `T` as a whole command: `(command, prog name)`. */
-  inline def single[T, G <: MethodsMirror[T]](o: T, g: G): (Command, String) =
-    inline if runMethodCount[g.MirroredEntries] == 1 && runObjectCount[g.MirroredEntries] == 0 then
-      pickSingle[T, g.MirroredEntries](o, g, 0)
-    else inline if runMethodCount[g.MirroredEntries] == 0 &&
-      runObjectCount[g.MirroredEntries] == 1
-    then
+  inline def single[T, G <: MethodsMirror[T], ER <: EntriesResults[?]](
+      o: T,
+      g: G
+  ): (Command, String) =
+    inline if runMethodCount[ER] == 1 && runObjectCount[ER] == 0 then pickSingle[T, ER](o, g, 0)
+    else inline if runMethodCount[ER] == 0 && runObjectCount[ER] == 1 then
       error("Parser.method requires a single @run method, not a nested object; use Parser.methods")
-    else inline if runMethodCount[g.MirroredEntries] + runObjectCount[g.MirroredEntries] == 0 then
+    else inline if runMethodCount[ER] + runObjectCount[ER] == 0 then
       error("no @run methods or nested @run objects found in " + constValue[g.MirroredLabel])
     else error("Parser.method requires exactly one @run method; use Parser.methods for several")
 
@@ -70,85 +78,93 @@ object DeriveMethods:
       case _: (Ann[flagged.run, ?, ?] *: _) => true
       case _: (_ *: t)                      => isRun[t]
 
-  /** Is the method behind an [[Entry.Method]] tag marked `@run`? */
+  /** Is the method behind an [[EntriesResults.MethodNode]] marked `@run`? */
   private transparent inline def methodIsRun[M]: Boolean =
     inline erasedValue[M] match
       case m: MethodMirror[?] => isRun[m.MirroredSelfAnnotations]
 
-  /** Is the object behind an [[Entry.Scope]] tag marked `@run`? Its own mirror knows. */
-  private transparent inline def scopeIsRun[S]: Boolean =
-    summonFrom:
-      case sm: MethodsMirror[S] => isRun[sm.MirroredSelfAnnotations]
+  /** Is the mirror stored in an [[EntriesResults.ScopeNode]] for an `@run` object? */
+  private transparent inline def mirrorIsRun[SM]: Boolean =
+    inline erasedValue[SM] match
+      case sm: MethodsMirror[?] => isRun[sm.MirroredSelfAnnotations]
 
-  private transparent inline def runMethodCount[Es <: Tuple]: Int =
-    inline erasedValue[Es] match
-      case _: EmptyTuple             => 0
-      case _: (Entry.Method[m] *: t) =>
-        (inline if methodIsRun[m] then 1 else 0) + runMethodCount[t]
-      case _: (_ *: t) => runMethodCount[t]
+  private transparent inline def runMethodCount[ER]: Int =
+    inline erasedValue[ER] match
+      case _: EntriesResults.Empty                => 0
+      case _: EntriesResults.MethodNode[m, ?, re] =>
+        (inline if methodIsRun[m] then 1 else 0) + runMethodCount[re]
+      case _: EntriesResults.ScopeNode[?, ?, ?, ?, re, ?] => runMethodCount[re]
 
-  private transparent inline def runObjectCount[Es <: Tuple]: Int =
-    inline erasedValue[Es] match
-      case _: EmptyTuple            => 0
-      case _: (Entry.Scope[s] *: t) =>
-        (inline if scopeIsRun[s] then 1 else 0) + runObjectCount[t]
-      case _: (_ *: t) => runObjectCount[t]
+  private transparent inline def runObjectCount[ER]: Int =
+    inline erasedValue[ER] match
+      case _: EntriesResults.Empty                         => 0
+      case _: EntriesResults.MethodNode[?, ?, re]          => runObjectCount[re]
+      case _: EntriesResults.ScopeNode[?, ?, sm, ?, re, ?] =>
+        (inline if mirrorIsRun[sm] then 1 else 0) + runObjectCount[re]
 
   /** The lone `@run` method entry; callers guarantee exactly one exists. */
-  private inline def pickSingle[T, Es <: Tuple](
-      o: T,
-      g: MethodsMirror[T],
-      i: Int
-  ): (Command, String) =
-    inline erasedValue[Es] match
-      case _: EmptyTuple =>
+  private inline def pickSingle[T, ER](o: T, g: MethodsMirror[T], i: Int): (Command, String) =
+    inline erasedValue[ER] match
+      case _: EntriesResults.Empty =>
         error("pickSingle: no @run method (guarded by runMethodCount)")
-      case _: (Entry.Method[m] *: t) =>
+      case _: EntriesResults.MethodNode[m, ?, re] =>
         inline if methodIsRun[m] then
           singleOf[T, m & MethodMirror[T]](o, g.method(i).asInstanceOf[m & MethodMirror[T]])
-        else pickSingle[T, t](o, g, i + 1)
-      case _: (_ *: t) => pickSingle[T, t](o, g, i + 1)
+        else pickSingle[T, re](o, g, i + 1)
+      case _: EntriesResults.ScopeNode[?, ?, ?, ?, re, ?] => pickSingle[T, re](o, g, i + 1)
 
   private inline def singleOf[T, M <: MethodMirror[T]](o: T, m: M): (Command, String) =
     val anns = Annots.targetAnnotsOf[m.MirroredSelfAnnotations]
     (methodCmd[T, M](o, m, anns), anns.name.getOrElse(Assemble.kebab(constValue[m.MirroredLabel])))
 
-  private inline def entriesOf[T, Es <: Tuple](
+  private inline def entriesOf[T, ER](
       o: T,
       g: MethodsMirror[T],
+      er: ER,
       i: Int
   ): List[(String, TargetAnnots, SubEntry)] =
-    inline erasedValue[Es] match
-      case _: EmptyTuple             => Nil
-      case _: (Entry.Method[m] *: t) =>
+    inline erasedValue[ER] match
+      case _: EntriesResults.Empty                => Nil
+      case _: EntriesResults.MethodNode[m, t, re] =>
+        val node =
+          er.asInstanceOf[EntriesResults.MethodNode[m, t & Tuple, EntriesResults[t & Tuple]]]
         val head =
           inline if methodIsRun[m] then
             List(
               methodEntry[T, m & MethodMirror[T]](o, g.method(i).asInstanceOf[m & MethodMirror[T]])
             )
           else Nil
-        head ::: entriesOf[T, t](o, g, i + 1)
-      case _: (Entry.Scope[s] *: t) =>
-        scopeEntry[s] ::: entriesOf[T, t](o, g, i + 1)
+        head ::: entriesOf[T, re](o, g, node.rest.asInstanceOf[re], i + 1)
+      case _: EntriesResults.ScopeNode[s, t, sm, sr, re, oo] =>
+        val node = er.asInstanceOf[
+          EntriesResults.ScopeNode[
+            s,
+            t & Tuple,
+            sm & MethodsMirror[s],
+            sr & MethodResults[s],
+            EntriesResults[t & Tuple],
+            oo
+          ]
+        ]
+        scopeEntry[s, sm & MethodsMirror[s], sr & MethodResults[s]](node.mirror, node.results) :::
+          entriesOf[T, re](o, g, node.rest.asInstanceOf[re], i + 1)
 
-  /** Descend into a nested command object: the tag carries only the object type, so summon its own
-    * mirror (and its instance via `ValueOf`) and recurse at this level.
+  /** Descend into a nested command object: its mirror and tower were summoned once, during
+    * [[MethodResults]] derivation, and ride in the node — only the object instance itself is
+    * recovered here, via `ValueOf`.
     */
-  private inline def scopeEntry[S]: List[(String, TargetAnnots, SubEntry)] =
-    summonFrom:
-      case sm: MethodsMirror[S] =>
-        inline if isRun[sm.MirroredSelfAnnotations] then
-          val anns = Annots.targetAnnotsOf[sm.MirroredSelfAnnotations]
-          val cmd  = group[S, sm.type](summonInline[ValueOf[S]].value, sm)
-          val name = anns.name.getOrElse(Assemble.kebab(constValue[sm.MirroredLabel]))
-          List(
-            (
-              constValue[sm.MirroredLabel],
-              anns,
-              SubEntry.Node(() => Parser.makeGroup[Any](cmd, name))
-            )
-          )
-        else Nil
+  private inline def scopeEntry[S, SM <: MethodsMirror[S], SR <: MethodResults[S]](
+      sm: SM,
+      sr: SR
+  ): List[(String, TargetAnnots, SubEntry)] =
+    inline if isRun[sm.MirroredSelfAnnotations] then
+      val anns = Annots.targetAnnotsOf[sm.MirroredSelfAnnotations]
+      val cmd  = group[S, SM, sr.Entries](summonInline[ValueOf[S]].value, sm, sr.entries)
+      val name = anns.name.getOrElse(Assemble.kebab(constValue[sm.MirroredLabel]))
+      List(
+        (constValue[sm.MirroredLabel], anns, SubEntry.Node(() => Parser.makeGroup[Any](cmd, name)))
+      )
+    else Nil
 
   private inline def methodEntry[T, M <: MethodMirror[T]](
       o: T,

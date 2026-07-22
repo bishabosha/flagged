@@ -110,7 +110,7 @@ object MethodMacros:
           slot(m).asType,
           tupleType(paramAnns).asType,
           resType.asType
-        ) match
+        ).runtimeChecked match
           case (
                 '[type ml <: String; ml],
                 '[type ell <: Tuple; ell],
@@ -186,7 +186,7 @@ object MethodMacros:
           ConstantType(StringConstant(label)).asType,
           slot(mod).asType,
           tupleType(entries.map(_(0))).asType
-        ) match
+        ).runtimeChecked match
           case ('[type ml <: String; ml], '[type msa <: Tuple; msa], '[type es <: Tuple; es]) =>
             TypeRepr.of[
               MethodsMirror.Of[T] {

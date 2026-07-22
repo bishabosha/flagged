@@ -3,27 +3,37 @@ package flagged.internal
 import flagged.meta.{Ann, MethodMirror, MethodsMirror}
 import flagged.meta.MethodsMirror.Entry
 
-/** The union of the result types of `T`'s `@run` command tower, carried as the `Out` member.
+/** The union of the result types of `T`'s `@run` command tower, carried as the `Out` member, plus
+  * the tower itself: [[entries]] bundles every nested scope's summoned [[MethodsMirror]] (and its
+  * own `MethodResults`), so group derivation reuses the instances instead of repeating the implicit
+  * searches.
   *
   * Assembled by ordinary implicit derivation — no macros, no inline:
-  * [[MethodResults.EntriesResults]] folds one mirror's entry tags, where a method's contribution is
-  * computed by match types ([[MethodResults.MethodContrib]], via the alias-pattern extractors on
-  * [[MethodMirror]]) and a nested [[Entry.Scope]] recursively summons the nested object's own
-  * tower. Non-`@run` members contribute `Nothing` — the parser never invokes them.
+  * [[MethodResults.EntriesResults]] folds one mirror's entry tags by given induction. A method's
+  * contribution to `Out` is computed by match types ([[MethodResults.MethodContrib]], via the
+  * alias-pattern extractors on [[MethodMirror]]); an [[Entry.Scope]] summons the nested object's
+  * mirror and tower once and stores them in the node, typed by their singleton types so no
+  * refinement is lost. Non-`@run` members contribute `Nothing` — the parser never invokes them.
   */
 sealed trait MethodResults[T]:
   type Out
 
+  /** The precise node type of [[entries]]: consumers keep every refinement without re-summoning. */
+  type Entries <: MethodResults.EntriesResults[?]
+
+  /** The derivation tower behind `Out`. */
+  def entries: Entries
+
 object MethodResults:
-  /** Carrier: the structure is purely type-level, one class serves every instance. */
-  final class Impl[T, O] extends MethodResults[T]:
-    type Out = O
+  final class Impl[T, O, E <: EntriesResults[?]](val entries: E) extends MethodResults[T]:
+    type Out     = O
+    type Entries = E
 
   given of: [T] => (mm: MethodsMirror[T]) => (er: EntriesResults[mm.MirroredEntries])
     => (
-      MethodResults[T] { type Out = er.Out }
+      Impl[T, er.Out, er.type]
     ) =
-    Impl[T, er.Out]()
+    Impl[T, er.Out, er.type](er)
 
   /** Is `flagged.run` itself among the [[Ann]]-encoded annotations? Other
     * [[flagged.meta.Reflectable]] markers do not count.
@@ -42,22 +52,42 @@ object MethodResults:
   type MethodContrib[M] = M match
     case MethodMirror.WithAnnots[anns] => IfRun[anns, MethodMirror.ResultOf[M]]
 
-  /** The fold over one mirror's entry tags. */
+  /** The fold over one mirror's entry tags: one node per entry, in order. */
   sealed trait EntriesResults[Es <: Tuple]:
     type Out
 
   object EntriesResults:
-    final class Impl[Es <: Tuple, O] extends EntriesResults[Es]:
+    final class Empty extends EntriesResults[EmptyTuple]:
+      type Out = Nothing
+
+    final class MethodNode[m, t <: Tuple, RE <: EntriesResults[t]](val rest: RE)
+        extends EntriesResults[Entry.Method[m] *: t]:
+      type Out = MethodContrib[m] | rest.Out
+
+    /** Stores the scope's summoned mirror and tower; `SM`/`SR` are their singleton types, so the
+      * walk in [[DeriveMethods]] recovers the full refinements from the node type alone.
+      */
+    final class ScopeNode[
+        s,
+        t <: Tuple,
+        SM <: MethodsMirror[s],
+        SR <: MethodResults[s],
+        RE <: EntriesResults[t],
+        O
+    ](
+        val mirror: SM,
+        val results: SR,
+        val rest: RE
+    ) extends EntriesResults[Entry.Scope[s] *: t]:
       type Out = O
 
-    given empty: (EntriesResults[EmptyTuple] { type Out = Nothing }) =
-      Impl[EmptyTuple, Nothing]()
+    given empty: Empty = Empty()
 
     given method: [m, t <: Tuple] => (rest: EntriesResults[t])
       => (
-        EntriesResults[Entry.Method[m] *: t] { type Out = MethodContrib[m] | rest.Out }
+        MethodNode[m, t, rest.type]
       ) =
-      Impl[Entry.Method[m] *: t, MethodContrib[m] | rest.Out]()
+      MethodNode(rest)
 
     given scope: [s, t <: Tuple] => (
         sm: MethodsMirror[s],
@@ -65,8 +95,13 @@ object MethodResults:
         rest: EntriesResults[t]
     )
       => (
-        EntriesResults[Entry.Scope[s] *: t] {
-          type Out = IfRun[sm.MirroredSelfAnnotations, sr.Out] | rest.Out
-        }
+        ScopeNode[
+          s,
+          t,
+          sm.type,
+          sr.type,
+          rest.type,
+          IfRun[sm.MirroredSelfAnnotations, sr.Out] | rest.Out
+        ]
       ) =
-      Impl[Entry.Scope[s] *: t, IfRun[sm.MirroredSelfAnnotations, sr.Out] | rest.Out]()
+      ScopeNode(sm, sr, rest)

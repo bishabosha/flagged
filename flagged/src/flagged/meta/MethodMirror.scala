@@ -72,6 +72,9 @@ sealed trait MethodsMirror[T]:
 object MethodsMirror:
   trait Of[T] extends MethodsMirror[T]
 
+  /** Alias pattern for the `MirroredSelfAnnotations` member, like [[MethodMirror.WithResult]]. */
+  type WithAnnots[A] = MethodsMirror[?] { type MirroredSelfAnnotations = A }
+
   /** Tagged union describing one element of [[MethodsMirror.MirroredEntries]]. Purely a type-level
     * tag: no values of it are ever constructed.
     */
