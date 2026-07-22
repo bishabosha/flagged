@@ -87,11 +87,11 @@ sealed trait Parser[A]:
       case Ok(a)                      => a
       case Err(ParseError.Help(text)) =>
         println(text)
-        sys.exit(0)
+        internal.PlatformExit.exit(0)
       case Err(ParseError.Failure(message, hint)) =>
         System.err.println(s"$prog: $message")
         if hint.nonEmpty then System.err.println(hint)
-        sys.exit(2)
+        internal.PlatformExit.exit(2)
 
   /** The rendered top-level help screen. */
   final def help: String = help(typeName)

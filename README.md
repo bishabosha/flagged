@@ -248,10 +248,8 @@ error with a hint to stderr and exits 2.
 
 Commands can also be methods, in the style of mainargs: annotate them with `@run` and the
 parameters become the options and positionals — same annotations, defaults, and compile-time
-rules as case-class fields — with a successful parse invoking the method. `Parser.method`
-derives from an object's single `@run` method; `Parser.methods` turns several into
-subcommands, nesting through `@run` objects. The parsed value is the invoked method's
-result (a union type across a group).
+rules as case-class fields — with a successful parse invoking the method. The parsed value
+is the invoked method's result (a union type across a group).
 
 ```scala
 object todo:
@@ -262,8 +260,14 @@ object todo:
   def list(all: Boolean = false): List[String] = ...
 
 @main def run(args: String*): Unit =
-  val result: Int | List[String] = Parser.methods(todo).parseOrExit(args)
+  val result: Int | List[String] = Flagged.parseMethodsOrExit(todo, args)
 ```
+
+`Flagged.parseMethods` (and `parseMethodsOrExit`) adapt to the object: a lone `@run` method
+parses directly — its parameters are the top-level options — while several methods, or
+nested `@run` objects, become subcommands. The call site stays the same as commands are
+added. To hold the parser itself, `Parser.method` derives from a single `@run` method and
+`Parser.methods` derives the subcommand form.
 
 ## Handling results yourself
 

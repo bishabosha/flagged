@@ -21,6 +21,31 @@ object DeriveMethods:
       Derive.versionOf[T, g.MirroredSelfAnnotations]
     )
 
+  /** `T`'s `@run` members as one parser: a lone method is a whole command — its parameters are the
+    * top-level options — anything else is a subcommand group. Backs
+    * [[flagged.Flagged.parseMethods]], whose call sites stay unchanged when a second command is
+    * added.
+    */
+  inline def parser[T, G <: MethodsMirror[T], R](o: T, g: G): Parser[R] =
+    inline erasedValue[g.MirroredEntries] match
+      case _: (m *: EmptyTuple) =>
+        inline erasedValue[m] match
+          case _: MethodMirror[?] =>
+            val (cmd, prog) =
+              singleOf[T, m & MethodMirror[T]](o, g.entries.productElement(0).asInstanceOf)
+            Parser.make[R](cmd, prog)
+          case _ => groupParser[T, G, R](o, g)
+      case _ => groupParser[T, G, R](o, g)
+
+  private inline def groupParser[T, G <: MethodsMirror[T], R](o: T, g: G): Parser[R] =
+    Parser.makeGroup[R](
+      group[T, G](o, g),
+      Assemble.progName(
+        constValue[g.MirroredLabel],
+        Annots.targetAnnotsOf[g.MirroredSelfAnnotations]
+      )
+    )
+
   /** The single `@run` method of `T` as a whole command: `(command, prog name)`. */
   inline def single[T, G <: MethodsMirror[T]](o: T, g: G): (Command, String) =
     inline erasedValue[g.MirroredEntries] match
