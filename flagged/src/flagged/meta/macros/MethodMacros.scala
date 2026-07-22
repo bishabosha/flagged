@@ -3,10 +3,11 @@ package flagged.meta.macros
 import scala.quoted.*
 import flagged.meta.{MethodMirror, MethodsMirror}
 
-/** The macro backing [[MethodsMirror]]: enumerate the `@run` methods (and nested `@run` objects) of
-  * an object and mirror each one — structure as refined type members in the same encodings
-  * `Mirror`/`AnnotMirror` use, plus the minimal term residue: an invoker and the default argument
-  * getters. Everything downstream is the ordinary inline derivation pipeline.
+/** The macro backing [[MethodsMirror]]: enumerate an object's methods (and nested objects) marked
+  * by a [[flagged.meta.Reflectable]] annotation — `@run` in flagged — and mirror each one:
+  * structure as refined type members in the same encodings `Mirror`/`AnnotMirror` use, plus the
+  * minimal term residue: an invoker and the default argument getters. Everything downstream is the
+  * ordinary inline derivation pipeline.
   */
 object MethodMacros:
 
@@ -16,23 +17,23 @@ object MethodMacros:
   private class MethodHelper(using Quotes) extends AnnotationMacros.AnnotHelper:
     import q.reflect.*
 
-    private val runSym = TypeRepr.of[flagged.run].typeSymbol
+    private val reflectableSym = TypeRepr.of[flagged.meta.Reflectable].typeSymbol
 
     private def alias(t: TypeRepr): TypeBounds = TypeBounds(t, t)
 
-    private def isCommand(s: Symbol): Boolean =
-      s.annotations.exists(_.tpe.typeSymbol == runSym)
+    private def isReflectable(s: Symbol): Boolean =
+      s.annotations.exists(_.tpe.derivesFrom(reflectableSym))
 
     private def cast(e: Expr[Any], tpe: TypeRepr): Term =
       tpe.asType match
         case '[pt] => '{ $e.asInstanceOf[pt] }.asTerm
 
-    /** The `@run` members of `owner`'s module class, in declaration order: method symbols and
-      * nested module (value) symbols.
+    /** The reflectable members of `owner`'s module class, in declaration order: method symbols and
+      * nested module (value) symbols carrying a [[flagged.meta.Reflectable]] annotation.
       */
-    private def runMembers(ownerClass: Symbol): List[Symbol] =
+    private def reflectableMembers(ownerClass: Symbol): List[Symbol] =
       ownerClass.declarations.filter { d =>
-        isCommand(d) &&
+        isReflectable(d) &&
         ((d.isDefDef && !d.isClassConstructor) || (d.isTerm && d.flags.is(Flags.Module)))
       }
 
@@ -43,11 +44,11 @@ object MethodMacros:
           mt.resType match
             case _: MethodType =>
               report.errorAndAbort(
-                s"@run method ${m.name}: multiple parameter lists are not supported"
+                s"command method ${m.name}: multiple parameter lists are not supported"
               )
             case _ => Some(mt)
         case _: PolyType =>
-          report.errorAndAbort(s"@run method ${m.name}: type parameters are not supported")
+          report.errorAndAbort(s"command method ${m.name}: type parameters are not supported")
         case _ => None // parameterless `def m`
       val params                    = m.paramSymss.flatten.filter(_.isTerm)
       val paramTypes                = mt.map(_.paramTypes).getOrElse(Nil)
@@ -122,10 +123,11 @@ object MethodMacros:
 
     /** Mirror the module value symbol `mod` as a group: (refined type, result union, instance). */
     private def groupMirror[T: Type](mod: Symbol, label: String): (TypeRepr, TypeRepr, Expr[Any]) =
-      val members = runMembers(mod.moduleClass)
+      val members = reflectableMembers(mod.moduleClass)
       if members.isEmpty then
         report.errorAndAbort(
-          s"no @run methods or nested @run objects found in ${mod.name}"
+          s"no methods or nested objects with a meta.Reflectable annotation (such as @run) " +
+            s"found in ${mod.name}"
         )
       val mirrored = members.map { d =>
         if d.isDefDef then methodMirror[T](mod, d)

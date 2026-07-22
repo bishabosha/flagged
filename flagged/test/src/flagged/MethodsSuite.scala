@@ -25,6 +25,12 @@ object toolbox:
 
   def helper(x: Int): Int = x // not @run: not a command
 
+// a user-defined marker: any annotation deriving from meta.Reflectable opts members in
+final case class cmd() extends meta.Reflectable derives meta.Defaults
+
+object customMarker:
+  @cmd def double(x: Int): Int = x * 2
+
 class MethodsSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
@@ -103,6 +109,10 @@ class MethodsSuite extends munit.FunSuite:
   test("Parser.method on an object with several @run methods is a compile error") {
     val e = compileErrors("Parser.method(toolbox)")
     assert(e.contains("exactly one @run method"), e)
+  }
+
+  test("any annotation deriving from meta.Reflectable marks a command") {
+    assertEquals(ok(Flagged.parse[customMarker.type](Seq("--x", "4"))), 8)
   }
 
   test("Flagged.parse falls back to @run methods when no Parser exists") {

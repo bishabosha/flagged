@@ -47,4 +47,4 @@ final case class default() extends StaticAnnotation derives Defaults
   * options and positionals, and parsing invokes it. On a nested object, marks it as a group of
   * subcommands.
   */
-final case class run() extends StaticAnnotation derives Defaults
+final case class run() extends meta.Reflectable derives Defaults

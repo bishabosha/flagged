@@ -1,10 +1,10 @@
 package flagged.meta
 
-/** `Mirror`-style witness for one `@run` method of `T`: parameter structure and annotations as type
-  * members — the same encodings `Mirror` and [[AnnotMirror]] use, so flagged's inline derivation
-  * consumes them unchanged — with the two things types cannot carry as the term-level residue:
-  * [[invoke]] (calling the method with the parsed values) and the method's default arguments (via
-  * the inherited [[Defaults]]).
+/** `Mirror`-style witness for one command method of `T`: parameter structure and annotations as
+  * type members — the same encodings `Mirror` and [[AnnotMirror]] use, so flagged's inline
+  * derivation consumes them unchanged — with the two things types cannot carry as the term-level
+  * residue: [[invoke]] (calling the method with the parsed values) and the method's default
+  * arguments (via the inherited [[Defaults]]).
   */
 trait MethodMirror[T] extends Defaults[Any]:
   /** The method name. */
@@ -28,8 +28,8 @@ trait MethodMirror[T] extends Defaults[Any]:
   /** Call the method with one parsed value per parameter. */
   def invoke(receiver: T, args: Array[Any]): Any
 
-/** `Mirror`-style witness for the `@run` members of `T` (an object): its methods and, nested, its
-  * `@run`-annotated member objects, in declaration order.
+/** `Mirror`-style witness for the command members of `T` (an object): its methods and, nested, its
+  * member objects marked by a [[Reflectable]] annotation (`@run` in flagged), in declaration order.
   */
 sealed trait MethodsMirror[T]:
   /** The object's name. */
@@ -51,8 +51,8 @@ sealed trait MethodsMirror[T]:
 object MethodsMirror:
   trait Of[T] extends MethodsMirror[T]
 
-  /** Synthesize the mirror for `T`'s `@run` members (macro-backed). Given as `transparent inline`
-    * so the refined type members reach the summoning site.
+  /** Synthesize the mirror for `T`'s [[Reflectable]]-annotated members (macro-backed). Given as
+    * `transparent inline` so the refined type members reach the summoning site.
     */
   transparent inline given of[T]: MethodsMirror.Of[T] =
     ${ macros.MethodMacros.methodsMirror[T] }
