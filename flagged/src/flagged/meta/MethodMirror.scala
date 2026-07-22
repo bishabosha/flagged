@@ -30,6 +30,10 @@ trait MethodMirror[T] extends Defaults[Any]:
 
 /** `Mirror`-style witness for the command members of `T` (an object): its methods and, nested, its
   * member objects marked by a [[Reflectable]] annotation (`@run` in flagged), in declaration order.
+  *
+  * The mirror is one level deep: nested objects appear only as [[MethodsMirror.Entry.Scope]] tags
+  * in [[MirroredEntries]], and callers descend by summoning a `MethodsMirror` for the scope's own
+  * type.
   */
 sealed trait MethodsMirror[T]:
   /** The object's name. */
@@ -38,18 +42,36 @@ sealed trait MethodsMirror[T]:
   /** [[Ann]]-encoded annotations on the object itself. */
   type MirroredSelfAnnotations <: Tuple
 
-  /** The refined types of [[entries]]' elements: [[MethodMirror]] for a method, [[MethodsMirror]]
-    * for a nested object.
+  /** One [[MethodsMirror.Entry]] tag per member, in declaration order:
+    * [[MethodsMirror.Entry.Method]] of the refined [[MethodMirror]] type for a method,
+    * [[MethodsMirror.Entry.Scope]] of the object's type for a nested object.
     */
   type MirroredEntries <: Tuple
 
   /** The union of every (transitively) reachable method's result type. */
   type MirroredResult
 
-  def entries: MirroredEntries
+  /** The mirror for the method at `index` in [[MirroredEntries]].
+    *
+    * @throws NoSuchElementException
+    *   if the entry at `index` is a [[MethodsMirror.Entry.Scope]] (summon a `MethodsMirror` for the
+    *   scope's type instead) or out of range.
+    */
+  def method(index: Int): MethodMirror[T]
 
 object MethodsMirror:
   trait Of[T] extends MethodsMirror[T]
+
+  /** Tagged union describing one element of [[MethodsMirror.MirroredEntries]]. Purely a type-level
+    * tag: no values of it are ever constructed.
+    */
+  enum Entry[E]:
+    /** A command method; `M` is the refined [[MethodMirror]] type, retrievable via [[method]]. */
+    case Method[M]() extends Entry[M]
+
+    /** A nested command object; `S` is the object's type — summon a `MethodsMirror[S]` to descend.
+      */
+    case Scope[S]() extends Entry[S]
 
   /** Synthesize the mirror for `T`'s [[Reflectable]]-annotated members (macro-backed). Given as
     * `transparent inline` so the refined type members reach the summoning site.

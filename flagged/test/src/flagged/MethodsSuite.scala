@@ -118,11 +118,18 @@ class MethodsSuite extends munit.FunSuite:
 
   test("meta.Reflectable annotations are mirrored, but only @run makes a command") {
     val mm = summon[meta.MethodsMirror[customMarker.type]]
-    assertEquals(mm.entries.productArity, 1)
-    val m = mm.entries.productElement(0).asInstanceOf[meta.MethodMirror[customMarker.type]]
-    assertEquals(m.invoke(customMarker, Array(4)), 8)
+    assertEquals(mm.method(0).invoke(customMarker, Array(4)), 8)
     val e = compileErrors("Flagged.parse[customMarker.type](Nil)")
     assert(e.nonEmpty, "expected a compile error for an object with no @run members")
+  }
+
+  test("the mirror is one level deep: method(i) throws on a Scope entry") {
+    val mm = summon[meta.MethodsMirror[toolbox.type]]
+    assertEquals(mm.method(0).invoke(toolbox, Array(1, 2)), 3)
+    // entry 2 is the nested `remote` object: its mirror must be summoned separately
+    intercept[NoSuchElementException](mm.method(2))
+    val rm = summon[meta.MethodsMirror[toolbox.remote.type]]
+    assertEquals(rm.method(1).invoke(toolbox.remote, Array.empty[Any]), "pruned")
   }
 
   test("non-@run mirrored members are invisible to the parser") {
