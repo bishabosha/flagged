@@ -82,8 +82,8 @@ object DeriveMethods:
 
   private transparent inline def runMethodCount[Es <: Tuple]: Int =
     inline erasedValue[Es] match
-      case _: EmptyTuple                => 0
-      case _: (Entry.Method[m, ?] *: t) =>
+      case _: EmptyTuple             => 0
+      case _: (Entry.Method[m] *: t) =>
         (inline if methodIsRun[m] then 1 else 0) + runMethodCount[t]
       case _: (_ *: t) => runMethodCount[t]
 
@@ -103,7 +103,7 @@ object DeriveMethods:
     inline erasedValue[Es] match
       case _: EmptyTuple =>
         error("pickSingle: no @run method (guarded by runMethodCount)")
-      case _: (Entry.Method[m, ?] *: t) =>
+      case _: (Entry.Method[m] *: t) =>
         inline if methodIsRun[m] then
           singleOf[T, m & MethodMirror[T]](o, g.method(i).asInstanceOf[m & MethodMirror[T]])
         else pickSingle[T, t](o, g, i + 1)
@@ -119,8 +119,8 @@ object DeriveMethods:
       i: Int
   ): List[(String, TargetAnnots, SubEntry)] =
     inline erasedValue[Es] match
-      case _: EmptyTuple                => Nil
-      case _: (Entry.Method[m, ?] *: t) =>
+      case _: EmptyTuple             => Nil
+      case _: (Entry.Method[m] *: t) =>
         val head =
           inline if methodIsRun[m] then
             List(

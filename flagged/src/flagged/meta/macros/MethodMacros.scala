@@ -19,8 +19,6 @@ object MethodMacros:
 
     private val reflectableSym = TypeRepr.of[flagged.meta.Reflectable].typeSymbol
 
-    private def alias(t: TypeRepr): TypeBounds = TypeBounds(t, t)
-
     private def isReflectable(s: Symbol): Boolean =
       s.annotations.exists(_.tpe.derivesFrom(reflectableSym))
 
@@ -101,17 +99,36 @@ object MethodMacros:
               )
             ).asExprOf[Boolean]
 
+      // built as a quoted type: the members must be true aliases — match-type capture through an
+      // alias pattern (MethodMirror.ResultOf) does not reduce over `>: t <: t` bounds, and the
+      // Refinement API can only express bounds (a bare TypeRepr makes a val member instead)
       val refined =
-        List(
-          "MirroredLabel"           -> ConstantType(StringConstant(m.name)),
-          "MirroredElemLabels"      -> tupleType(labels),
-          "MirroredElemTypes"       -> tupleType(paramTypes),
-          "MirroredSelfAnnotations" -> slot(m),
-          "MirroredAnnotations"     -> tupleType(paramAnns),
-          "MirroredResult"          -> resType
-        ).foldLeft(TypeRepr.of[MethodMirror[T]]) { case (acc, (name, tpe)) =>
-          Refinement(acc, name, alias(tpe))
-        }
+        (
+          ConstantType(StringConstant(m.name)).asType,
+          tupleType(labels).asType,
+          tupleType(paramTypes).asType,
+          slot(m).asType,
+          tupleType(paramAnns).asType,
+          resType.asType
+        ) match
+          case (
+                '[type ml <: String; ml],
+                '[type ell <: Tuple; ell],
+                '[type elt <: Tuple; elt],
+                '[type msa <: Tuple; msa],
+                '[type man <: Tuple; man],
+                '[r]
+              ) =>
+            TypeRepr.of[
+              MethodMirror[T] {
+                type MirroredLabel           = ml
+                type MirroredElemLabels      = ell
+                type MirroredElemTypes       = elt
+                type MirroredSelfAnnotations = msa
+                type MirroredAnnotations     = man
+                type MirroredResult          = r
+              }
+            ]
 
       val instance = '{
         new MethodMirror[T]:
@@ -138,14 +155,14 @@ object MethodMacros:
             s"found in ${mod.name}"
         )
 
-      val methodTag = TypeRepr.of[MethodsMirror.Entry.Method[Unit, Unit]]
+      val methodTag = TypeRepr.of[MethodsMirror.Entry.Method[Unit]]
       val scopeTag  = TypeRepr.of[MethodsMirror.Entry.Scope[Unit]]
 
       // per member: the Entry tag type and, for methods, the mirror instance at that index
       val entries: List[(TypeRepr, Option[Expr[Any]])] = members.map { d =>
         if d.isDefDef then
-          val (refined, res, instance) = methodMirror[T](mod, d)
-          (tagged(methodTag, refined, res), Some(instance))
+          val (refined, _, instance) = methodMirror[T](mod, d)
+          (tagged(methodTag, refined), Some(instance))
         else (tagged(scopeTag, Ref(d).tpe), None)
       }
 
@@ -165,13 +182,19 @@ object MethodMacros:
         Match(idx.asTerm, cases :+ fallback).asExprOf[MethodMirror[T]]
 
       val refined =
-        List(
-          "MirroredLabel"           -> ConstantType(StringConstant(label)),
-          "MirroredSelfAnnotations" -> slot(mod),
-          "MirroredEntries"         -> tupleType(entries.map(_(0)))
-        ).foldLeft(TypeRepr.of[MethodsMirror.Of[T]]) { case (acc, (name, tpe)) =>
-          Refinement(acc, name, alias(tpe))
-        }
+        (
+          ConstantType(StringConstant(label)).asType,
+          slot(mod).asType,
+          tupleType(entries.map(_(0))).asType
+        ) match
+          case ('[type ml <: String; ml], '[type msa <: Tuple; msa], '[type es <: Tuple; es]) =>
+            TypeRepr.of[
+              MethodsMirror.Of[T] {
+                type MirroredLabel           = ml
+                type MirroredSelfAnnotations = msa
+                type MirroredEntries         = es
+              }
+            ]
       val instance = '{
         new MethodsMirror.Of[T]:
           def method(index: Int): MethodMirror[T] = ${ methodBody('index) }

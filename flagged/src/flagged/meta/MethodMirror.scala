@@ -28,6 +28,16 @@ trait MethodMirror[T] extends Defaults[Any]:
   /** Call the method with one parsed value per parameter. */
   def invoke(receiver: T, args: Array[Any]): Any
 
+object MethodMirror:
+  /** Alias pattern: lets a match type capture through the `MirroredResult` member, which a
+    * refinement written inline in a match-type case cannot do.
+    */
+  type WithResult[R] = MethodMirror[?] { type MirroredResult = R }
+
+  /** The result type of a refined [[MethodMirror]] type. */
+  type ResultOf[M] = M match
+    case WithResult[r] => r
+
 /** `Mirror`-style witness for the command members of `T` (an object): its methods and, nested, its
   * member objects marked by a [[Reflectable]] annotation (`@run` in flagged), in declaration order.
   *
@@ -63,11 +73,10 @@ object MethodsMirror:
     * tag: no values of it are ever constructed.
     */
   enum Entry[E]:
-    /** A command method; `M` is the refined [[MethodMirror]] type, retrievable via [[method]], and
-      * `R` its result type — repeated here because a type member cannot be extracted from `M` in
-      * the type language (match types do not destructure refinements).
+    /** A command method; `M` is the refined [[MethodMirror]] type, retrievable via [[method]]. Its
+      * result type is `MethodMirror.ResultOf[M]`.
       */
-    case Method[M, R]() extends Entry[M]
+    case Method[M]() extends Entry[M]
 
     /** A nested command object; `S` is the object's type — summon a `MethodsMirror[S]` to descend.
       */

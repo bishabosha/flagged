@@ -22,15 +22,14 @@ object MethodResults:
   transparent inline given of[T](using mm: MethodsMirror[T]): MethodResults[T] =
     build[T, mm.MirroredEntries, Nothing]
 
-  /** Fold the entry tags into the union accumulator `Acc`. The result type rides on the tag
-    * (`Entry.Method[m, r]`): a match binder is a concrete type, where extracting the mirror's
-    * `MirroredResult` member through a term binder would leak that binder into `Out`.
+  /** Fold the entry tags into the union accumulator `Acc`. One level's method results come out of
+    * the tag via the [[MethodMirror.ResultOf]] match type.
     */
   private transparent inline def build[T, Es <: Tuple, Acc]: MethodResults[T] =
     inline erasedValue[Es] match
-      case _: EmptyTuple                => Impl[T, Acc]()
-      case _: (Entry.Method[m, r] *: t) =>
-        inline if DeriveMethods.methodIsRun[m] then build[T, t, Acc | r]
+      case _: EmptyTuple             => Impl[T, Acc]()
+      case _: (Entry.Method[m] *: t) =>
+        inline if DeriveMethods.methodIsRun[m] then build[T, t, Acc | MethodMirror.ResultOf[m]]
         else build[T, t, Acc]
       case _: (Entry.Scope[s] *: t) => scopeFold[T, s, t, Acc]
 
