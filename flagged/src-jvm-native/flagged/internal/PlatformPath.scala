@@ -1,4 +1,3 @@
-//> using target.platform jvm scala-native
 package flagged.internal
 
 import java.nio.file.{InvalidPathException, Path, Paths}

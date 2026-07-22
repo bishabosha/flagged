@@ -2,7 +2,7 @@ package bench
 
 /** Compile-time ablation at a fixed field count: which parts of derivation cost what.
   *
-  * scala-cli --power run bench --main-class bench.AblationProbe
+  * ./mill bench.runMain bench.AblationProbe
   */
 object AblationProbe:
 

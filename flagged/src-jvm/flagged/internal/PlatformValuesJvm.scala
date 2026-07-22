@@ -1,4 +1,3 @@
-//> using target.platform jvm
 package flagged.internal
 
 import java.nio.file.Path
@@ -8,10 +7,10 @@ import scala.concurrent.duration.FiniteDuration
 import flagged.{Parser, Result}
 import Result.eval
 
-/** Value instances for types that are not available on every platform, exported from the [[Parser]]
+/** Value instances for types that are not available on every platform, mixed into the [[Parser]]
   * companion. The JVM has all of them.
   */
-object PlatformValues:
+private[flagged] trait PlatformValues:
 
   given Parser.Value[FiniteDuration] = duration
 

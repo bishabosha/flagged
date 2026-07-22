@@ -1,0 +1,108 @@
+//| mvnDeps: ["com.lihaoyi::mill-contrib-jmh:1.1.7"]
+//| bspScriptIgnore: ["**/.scala-build/"]
+package build
+
+import mill.*
+import mill.javalib.publish.{Developer, License, PomSettings, VersionControl}
+import mill.scalalib.*
+import mill.scalajslib.*
+import mill.scalajslib.api.*
+import mill.scalanativelib.*
+import mill.scalanativelib.api.ReleaseMode
+import mill.contrib.jmh.JmhModule
+
+object Versions:
+  val scala       = "3.8.3"
+  val munit       = "1.1.1"
+  val scalaJs     = "1.21.0"
+  val scalaNative = "0.5.11"
+
+trait BaseModule extends ScalaModule:
+  def scalaVersion  = Versions.scala
+  def scalacOptions = Seq("-deprecation", "-feature", "-unchecked")
+
+  // scala-cli runs of the example scripts leave generated sources under a .scala-build dir
+  override def allSourceFiles = Task {
+    super.allSourceFiles().filter(!_.path.segments.contains(".scala-build"))
+  }
+
+trait BaseJsModule extends BaseModule, ScalaJSModule:
+  def scalaJSVersion = Versions.scalaJs
+
+trait BaseJsWasmModule extends BaseJsModule:
+  override def moduleKind: T[ModuleKind]             = Task { ModuleKind.ESModule }
+  override def moduleSplitStyle: T[ModuleSplitStyle] = Task { ModuleSplitStyle.FewestModules }
+  override def scalaJSExperimentalUseWebAssembly: T[Boolean] = Task { true }
+
+trait BaseNativeModule extends BaseModule, ScalaNativeModule:
+  def scalaNativeVersion = Versions.scalaNative
+
+trait PublishSettings extends PublishModule, mill.util.VcsVersionModule:
+  def pomSettings = PomSettings(
+    description = "command-line argument parsing for Scala 3, derived from plain data declarations",
+    organization = "io.github.bishabosha",
+    url = "https://github.com/bishabosha/flagged",
+    licenses = Seq(License.`Apache-2.0`),
+    versionControl = VersionControl.github("bishabosha", "flagged"),
+    developers = Seq(
+      Developer(
+        "bishabosha",
+        "Jamie Thompson",
+        "https://bishabosha.github.io",
+        email = "thompsonjamesrichard@gmail.com"
+      )
+    )
+  )
+
+/** Adds the `src-jvm-native` folder holding sources shared by the JVM and Native platforms. */
+trait JvmNativeSources extends JavaModule:
+  override def sourcesFolders = super.sourcesFolders ++ Seq(os.sub / "src-jvm-native")
+
+object flagged extends Module:
+  trait FlaggedModule extends BaseModule, PlatformScalaModule:
+    def mvnDeps = Seq(mvn"ch.epfl.lamp::steps::0.2.1")
+
+    // test modules inherit the outer module's source folder names (src, src-jvm, ...)
+    trait FlaggedTests extends ScalaTests, TestModule.Munit:
+      def munitVersion = Versions.munit
+
+  object jvm extends FlaggedModule, PublishSettings, JvmNativeSources:
+    object test extends FlaggedTests
+
+  object js extends FlaggedModule, BaseJsModule, PublishSettings:
+    object test extends FlaggedTests, ScalaJSTests
+
+  object jsWasm extends FlaggedModule, BaseJsWasmModule:
+    override def platformCrossSuffix = "js"
+
+  object native extends FlaggedModule, BaseNativeModule, PublishSettings, JvmNativeSources:
+    object test extends FlaggedTests, ScalaNativeTests
+
+object `bench-portable` extends Module:
+  trait BenchPortableModule extends BaseModule, PlatformScalaModule:
+    def mvnDeps = Seq(
+      mvn"com.lihaoyi::mainargs::0.7.8",
+      mvn"com.github.alexarchambault::case-app::2.1.0"
+    )
+
+  object jvm extends BenchPortableModule:
+    def moduleDeps = Seq(flagged.jvm)
+
+  object js extends BenchPortableModule, BaseJsModule:
+    def moduleDeps = Seq(flagged.js)
+
+  object jsWasm extends BenchPortableModule, BaseJsWasmModule:
+    override def platformCrossSuffix = "js"
+    def moduleDeps                   = Seq(flagged.jsWasm)
+
+  object native extends BenchPortableModule, BaseNativeModule:
+    def moduleDeps = Seq(flagged.native)
+    override def releaseMode: T[ReleaseMode] = Task { ReleaseMode.ReleaseFast }
+
+object bench extends BaseModule, JmhModule:
+  def jmhCoreVersion = "1.37"
+  def moduleDeps     = Seq(`bench-portable`.jvm)
+  def mvnDeps = super.mvnDeps() ++ Seq(mvn"org.scala-lang::scala3-compiler:${Versions.scala}")
+
+object examples extends BaseModule:
+  def moduleDeps = Seq(flagged.jvm)

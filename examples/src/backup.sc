@@ -1,5 +1,8 @@
-// scala-cli script usage: parse the script's `args` array directly.
-//   scala-cli run . --main-class examples.backup_sc -- --dest /tmp --dry-run src1 src2
+// scala-cli script usage: parse the script's `args` array directly. From the repo root:
+//   ./mill flagged.jvm.compile && scala-cli run examples/src/backup.sc -- --dest /tmp --dry-run src1 src2
+//> using scala 3.8.3
+//> using dep ch.epfl.lamp::steps::0.2.1
+//> using jars ../../out/flagged/jvm/compile.dest/classes
 import flagged.*
 
 case class Backup(

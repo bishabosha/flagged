@@ -74,11 +74,12 @@ delimiter rule.
 ## Getting flagged
 
 flagged is not yet published to a Maven repository. To try it out, clone this repository
-and run `scala-cli test .` or any of the demos in `examples/`; to use it in a project,
-vendor the `src/flagged` directory. flagged cross-builds for the JVM, Scala.js, and
-Scala Native (`scala-cli test . --js` / `--native`); the platform-specific sources use
-scala-cli's `target.platform` directives, which need power mode
-(`scala-cli config power true` once).
+and run `./mill flagged.jvm.test`, or any of the demos in `examples/`
+(`./mill examples.runMain examples.greetMain --help`); to use it in a project, vendor
+`flagged/src` plus the source folders for your platform. flagged cross-builds for the
+JVM, Scala.js, and Scala Native (`./mill flagged.js.test` / `./mill flagged.native.test`);
+platform-specific sources live in `flagged/src-jvm`, `flagged/src-js`,
+`flagged/src-native`, and `flagged/src-jvm-native`.
 
 ## Declaring options
 

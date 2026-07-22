@@ -4,30 +4,29 @@ Results from the last full run are in [`results.md`](results.md).
 
 JMH benchmarks comparing flagged with [mainargs](https://github.com/com-lihaoyi/mainargs) and
 [case-app](https://github.com/alexarchambault/case-app), on both derivation compile time and
-parse latency/allocation. This module is excluded from the main build (`//> using exclude` in the
-root `project.scala`) and is not run in CI.
+parse latency/allocation. These modules are compiled but not run in CI.
 
 ## Running
 
-Requires scala-cli power mode; JMH arguments go after `--`.
+JMH arguments go after the `bench.runJmh` task.
 
 JMH covers the JVM; `bench-portable/` runs the same runtime scenarios (shared definitions in
 `bench-portable/src/defs`) on Scala.js, Scala.js-on-Wasm, and Scala Native with a calibrated
 best-of-rounds timer:
 
 ```console
-$ scala-cli --power run bench-portable                                       # JVM reference
-$ scala-cli --power run bench-portable --js                                  # Node
-$ scala-cli --power run bench-portable --js --js-emit-wasm --js-module-kind es  # Wasm
-$ scala-cli --power run bench-portable --native --native-mode release-fast   # Native
+$ ./mill bench-portable.jvm.run      # JVM reference
+$ ./mill bench-portable.js.run       # Node
+$ ./mill bench-portable.jsWasm.run   # Wasm
+$ ./mill bench-portable.native.run   # Native (release-fast)
 ```
 
 ```console
-$ scala-cli --power run --jmh bench                          # everything (slow)
-$ scala-cli --power run --jmh bench -- 'RuntimeBench.*'      # parse latency only
-$ scala-cli --power run --jmh bench -- 'CompileBench.*'      # compile time only
-$ scala-cli --power run --jmh bench -- -prof gc 'RuntimeBench.*'   # + allocation per parse
-$ scala-cli --power run --jmh bench -- -p lib=flagged -p scenario=options25 'CompileBench.*'
+$ ./mill bench.runJmh                          # everything (slow)
+$ ./mill bench.runJmh 'RuntimeBench.*'         # parse latency only
+$ ./mill bench.runJmh 'CompileBench.*'         # compile time only
+$ ./mill bench.runJmh -prof gc 'RuntimeBench.*'   # + allocation per parse
+$ ./mill bench.runJmh -p lib=flagged -p scenario=options25 'CompileBench.*'
 ```
 
 For allocation, read the `gc.alloc.rate.norm` rows (bytes allocated per parse). For quick
@@ -69,7 +68,7 @@ each (e.g. `Flag` for mainargs booleans, `@ExtraName` for case-app short names).
 
 - Compile times measure a warm in-process compiler on this module's classpath; absolute values
   are not comparable to cold `scala-cli`/sbt runs, only across `lib` values within a scenario.
-- Library versions are pinned in `project.scala`; results are only meaningful for the versions
+- Library versions are pinned in `build.mill`; results are only meaningful for the versions
   they were run against.
 - flagged reports errors accumulated and case-app also continues after errors, while mainargs
   stops earlier; only successful parses are benchmarked, where the strategies do comparable work.
