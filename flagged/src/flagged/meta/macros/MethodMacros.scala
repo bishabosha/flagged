@@ -121,30 +121,10 @@ object MethodMacros:
       }
       (refined, resType, cast(instance, refined).asExpr)
 
-    private def tagged(tag: TypeRepr, arg: TypeRepr): TypeRepr =
+    private def tagged(tag: TypeRepr, args: TypeRepr*): TypeRepr =
       tag match
-        case AppliedType(tycon, _) => tycon.appliedTo(arg)
+        case AppliedType(tycon, _) => tycon.appliedTo(args.toList)
         case other                 => report.errorAndAbort(s"not a tag constructor: ${other.show}")
-
-    /** A method's result type alone, without mirroring it (for the transitive result union). */
-    private def resultType(mod: Symbol, m: Symbol): TypeRepr =
-      Ref(mod).tpe.memberType(m) match
-        case mt: MethodType => mt.resType
-        case other          => other
-
-    /** The union of every (transitively) reachable method's result type: recursion happens only at
-      * the type level, nested scopes are never mirrored here.
-      */
-    private def resultUnion(mod: Symbol): TypeRepr =
-      val members = reflectableMembers(mod.moduleClass)
-      if members.isEmpty then
-        report.errorAndAbort(
-          s"no methods or nested objects with a meta.Reflectable annotation (such as @run) " +
-            s"found in ${mod.name}"
-        )
-      members
-        .map(d => if d.isDefDef then resultType(mod, d) else resultUnion(d))
-        .reduceLeft(OrType(_, _))
 
     /** Mirror the module value symbol `mod`, one level deep: methods are mirrored in place and a
       * nested object contributes only an `Entry.Scope` tag of its type — callers summon a fresh
@@ -152,16 +132,20 @@ object MethodMacros:
       */
     private def groupMirror[T: Type](mod: Symbol, label: String): (TypeRepr, Expr[Any]) =
       val members = reflectableMembers(mod.moduleClass)
-      val result  = resultUnion(mod)
+      if members.isEmpty then
+        report.errorAndAbort(
+          s"no methods or nested objects with a meta.Reflectable annotation (such as @run) " +
+            s"found in ${mod.name}"
+        )
 
-      val methodTag = TypeRepr.of[MethodsMirror.Entry.Method[Unit]]
+      val methodTag = TypeRepr.of[MethodsMirror.Entry.Method[Unit, Unit]]
       val scopeTag  = TypeRepr.of[MethodsMirror.Entry.Scope[Unit]]
 
       // per member: the Entry tag type and, for methods, the mirror instance at that index
       val entries: List[(TypeRepr, Option[Expr[Any]])] = members.map { d =>
         if d.isDefDef then
-          val (refined, _, instance) = methodMirror[T](mod, d)
-          (tagged(methodTag, refined), Some(instance))
+          val (refined, res, instance) = methodMirror[T](mod, d)
+          (tagged(methodTag, refined, res), Some(instance))
         else (tagged(scopeTag, Ref(d).tpe), None)
       }
 
@@ -184,8 +168,7 @@ object MethodMacros:
         List(
           "MirroredLabel"           -> ConstantType(StringConstant(label)),
           "MirroredSelfAnnotations" -> slot(mod),
-          "MirroredEntries"         -> tupleType(entries.map(_(0))),
-          "MirroredResult"          -> result
+          "MirroredEntries"         -> tupleType(entries.map(_(0)))
         ).foldLeft(TypeRepr.of[MethodsMirror.Of[T]]) { case (acc, (name, tpe)) =>
           Refinement(acc, name, alias(tpe))
         }

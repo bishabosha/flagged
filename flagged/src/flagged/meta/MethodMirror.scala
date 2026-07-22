@@ -48,9 +48,6 @@ sealed trait MethodsMirror[T]:
     */
   type MirroredEntries <: Tuple
 
-  /** The union of every (transitively) reachable method's result type. */
-  type MirroredResult
-
   /** The mirror for the method at `index` in [[MirroredEntries]].
     *
     * @throws NoSuchElementException
@@ -66,8 +63,11 @@ object MethodsMirror:
     * tag: no values of it are ever constructed.
     */
   enum Entry[E]:
-    /** A command method; `M` is the refined [[MethodMirror]] type, retrievable via [[method]]. */
-    case Method[M]() extends Entry[M]
+    /** A command method; `M` is the refined [[MethodMirror]] type, retrievable via [[method]], and
+      * `R` its result type — repeated here because a type member cannot be extracted from `M` in
+      * the type language (match types do not destructure refinements).
+      */
+    case Method[M, R]() extends Entry[M]
 
     /** A nested command object; `S` is the object's type — summon a `MethodsMirror[S]` to descend.
       */

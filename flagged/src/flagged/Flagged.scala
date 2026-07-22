@@ -63,10 +63,16 @@ object Flagged:
       type Out = O
       def parser: Parser[O] = p()
 
-    /** `@run` methods: the mirror pins down the module instance, so `ValueOf` recovers it. */
-    inline given [T] => (mm: meta.MethodsMirror[T]) => (Entry[T] { type Out = mm.MirroredResult }) =
-      MethodsEntry[T, mm.MirroredResult](() =>
-        internal.DeriveMethods.parser[T, mm.type, mm.MirroredResult](
+    /** `@run` methods: the result union comes from the recursively summoned
+      * [[internal.MethodResults]] tower; the mirror pins down the module instance, so `ValueOf`
+      * recovers it.
+      */
+    inline given [T] => (
+        mm: meta.MethodsMirror[T],
+        r: internal.MethodResults[T]
+    ) => (Entry[T] { type Out = r.Out }) =
+      MethodsEntry[T, r.Out](() =>
+        internal.DeriveMethods.parser[T, mm.type, r.Out](
           compiletime.summonInline[ValueOf[T]].value,
           mm
         )
