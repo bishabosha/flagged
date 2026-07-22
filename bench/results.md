@@ -8,7 +8,9 @@ five forks — single-fork scores on the smallest scenarios vary 10–30% with t
 inlining plan (both before and after the engine changes), so one fork over- or understates
 them — mainargs/case-app columns at `0e8ccc4` over one fork; the cross-platform table's
 flagged rows are at `3869d4f`, its mainargs/case-app rows at `23029bc` — the engine changes
-since `3869d4f` are off those scenarios' hot paths.
+since `3869d4f` are off those scenarios' hot paths. The method-based tables (the `methods`
+compile row and the method commands runtime table) were measured at `a6ab6ef`: latency over
+five forks, compile time and allocation over one.
 
 - Date: 2026-07-20, flagged commit `ee87c5f`
 - Hardware: Apple M3 Max, 64 GB, macOS 26.5.1
@@ -26,9 +28,15 @@ shape. Only comparisons within a row are meaningful.
 | `options10` (10 mixed fields) | 50.1 ± 2.4 | 113.3 ± 7.6 | 235.7 ± 25.5 | 472.9 ± 52.2 |
 | `options25` (25 defaulted fields) | 45.7 ± 2.0 | 132.5 ± 6.7 | 238.9 ± 14.9 | 511.0 ± 25.7 |
 | `commands` (3 subcommands) | 47.1 ± 4.8 | 119.3 ± 8.3 | 250.4 ± 19.5 | 473.8 ± 42.6 |
+| `methods` (3 command methods) | 29.9 ± 3.5 | 127.3 ± 11.5 | 252.0 ± 28.0 | 457.7 ± 50.6 |
 
-Derivation cost over the baseline: flagged adds ~63–87 ms, mainargs ~185–203 ms, case-app
-~420–465 ms; flagged is the cheapest of the three in every scenario.
+Derivation cost over the baseline: flagged adds ~63–97 ms, mainargs ~185–222 ms, case-app
+~420–465 ms; flagged is the cheapest of the three in every scenario. The `methods` row is the
+`commands` interface as command *methods* — flagged `@run` with `Parser.methods`, against
+mainargs' `ParserForMethods` (its `commands` entry is already that encoding, so its two rows
+measure the same source; case-app has no method-based API, so its entry reuses the
+command-objects encoding). flagged's method derivation costs about the same as its enum
+derivation and stays at roughly half of mainargs'.
 
 ### Scaling with field count
 
@@ -98,6 +106,28 @@ bytes are the parse's actual output (the config object, `Some` wrappers for decl
 fields, value substrings of `=`-forms and `k=v` entries) plus one set of per-parse state
 arrays. The closest contests are mainargs' `Leftover` and `Map` (both ~2×), whose per-token
 work is already minimal.
+
+### Method-based commands (flagged × mainargs)
+
+`bench.MethodBench` measures the method-parser path — the two libraries where commands are
+annotated methods and a successful parse *invokes* one. `method` is a lone command method with
+the `simple` grammar (`--foo hello --bar 42 --baz`); `commands` dispatches on the first token of
+`add core --url https://x.git` across three methods. Setup asserts both libraries return the
+same invoked result.
+
+| Scenario | flagged | mainargs |
+|---|---|---|
+| `method` — µs/op | 0.102 ± 0.002 | 0.980 ± 0.034 |
+| `method` — B/op | 432 | 5 728 |
+| `commands` — µs/op | 0.096 ± 0.001 | 0.470 ± 0.005 |
+| `commands` — B/op | 720 | 3 616 |
+
+flagged parses-and-invokes 4.9–9.6× faster than mainargs, allocating 5–13× less. Method
+commands cost flagged the same as its class derivation — `method` lands within ~6 ns of the
+class-based `simple` scenario (0.102 vs 0.096 µs), the invoker being a direct call with one
+cast per argument where class derivation constructs a case class. mainargs' `commands` run is
+*faster* than its lone-method run because the chosen `add` command parses two parameters
+instead of four.
 
 ### Against hand-written parsers and `@main`
 

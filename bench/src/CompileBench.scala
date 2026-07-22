@@ -12,7 +12,10 @@ import scala.compiletime.uninitialized
   * library involved, giving the compiler's floor for the file shape.
   *
   * Scenarios: `options10` (a mixed 10-field options class), `options25` (25 fields — wide
-  * derivation), `commands` (a three-command interface, each command with options).
+  * derivation), `commands` (a three-command interface, each command with options), `methods` (the
+  * same interface as `@run`/`@main` command methods; case-app has no method-based API, so its entry
+  * reuses the command-objects encoding, and mainargs' `commands` entry is already
+  * `ParserForMethods` — its two entries measure the same source).
   */
 @State(Scope.Benchmark)
 @BenchmarkMode(Array(Mode.AverageTime))
@@ -25,7 +28,7 @@ class CompileBench:
   @Param(Array("flagged", "mainargs", "caseapp", "baseline"))
   var lib: String = uninitialized
 
-  @Param(Array("options10", "options25", "commands"))
+  @Param(Array("options10", "options25", "commands", "methods"))
   var scenario: String = uninitialized
 
   private var compileArgs: Array[String] = uninitialized
@@ -82,6 +85,10 @@ object BenchSources:
     case ("mainargs", "commands")  => mainargsCommands
     case ("caseapp", "commands")   => caseappCommands
     case ("baseline", "commands")  => baselineCommands
+    case ("flagged", "methods")    => flaggedMethods
+    case ("mainargs", "methods")   => mainargsCommands // ParserForMethods is its methods form
+    case ("caseapp", "methods")    => caseappCommands  // no method-based API: closest encoding
+    case ("baseline", "methods")   => baselineMethods
     case other                     => throw new IllegalArgumentException(other.toString)
 
   private val fields10 =
@@ -190,6 +197,23 @@ object BenchSources:
       |  def progName = "cli"
       |  def commands = Seq(Add, Remove, Ls)
       |}
+      |""".stripMargin
+
+  private val flaggedMethods =
+    """import flagged.*
+      |object Cli:
+      |  @run def add(@positional name: String, url: String = ""): Unit = ()
+      |  @run def remove(@positional name: String, force: Boolean = false): Unit = ()
+      |  @run def ls(verbose: Boolean = false, limit: Int = 10): Unit = ()
+      |object Use { val parser = Parser.methods(Cli) }
+      |""".stripMargin
+
+  private val baselineMethods =
+    """object Cli:
+      |  def add(name: String, url: String = ""): Unit = ()
+      |  def remove(name: String, force: Boolean = false): Unit = ()
+      |  def ls(verbose: Boolean = false, limit: Int = 10): Unit = ()
+      |object Use { val value = Cli.ls() }
       |""".stripMargin
 
   private val baselineCommands =

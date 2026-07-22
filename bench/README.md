@@ -45,6 +45,7 @@ with no parsing library at all, giving the compiler's floor for the file shape.
 | `options10` | one options class with ten mixed fields (strings, numerics, flags, a list, an `Option`) |
 | `options25` | one options class with twenty-five defaulted fields (wide derivation) |
 | `commands` | a three-command interface, each command with its own options |
+| `methods` | the same interface as command *methods* (flagged `@run` + `Parser.methods`, mainargs `ParserForMethods`); mainargs' `commands` entry is already its method encoding, so its two rows measure the same source, and case-app has no method-based API, so its entry reuses the command-objects encoding |
 
 **`RuntimeBench`** — average time per parse of a fixed command line, against parser instances
 built once in setup (all three libraries pay derivation at compile time or construction once; the
@@ -63,6 +64,16 @@ cannot pose as a fast one.
 
 Definitions per library live in `src/defs/`; scenarios use the closest idiomatic encoding for
 each (e.g. `Flag` for mainargs booleans, `@ExtraName` for case-app short names).
+
+**`MethodBench`** — the method-based counterpart to `RuntimeBench`: parse-and-invoke latency for
+command methods, flagged's `@run` derivation against mainargs' `ParserForMethods` (the two
+libraries with a method parser). Both sides select a method, parse its parameters, and invoke
+it; setup asserts both succeed and agree on the invoked result.
+
+| scenario | command line |
+|---|---|
+| `method` | `--foo hello --bar 42 --baz` against a lone command method (the `simple` grammar) |
+| `commands` | `add core --url https://x.git` against a three-command interface, dispatching on the first token |
 
 ## Caveats
 
