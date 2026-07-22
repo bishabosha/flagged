@@ -64,19 +64,19 @@ object DeriveMethods:
   /** Is `flagged.run` itself among the [[Ann]]-encoded annotations? Other [[Reflectable]] markers
     * do not count.
     */
-  private[internal] transparent inline def isRun[Anns]: Boolean =
+  private transparent inline def isRun[Anns]: Boolean =
     inline erasedValue[Anns] match
       case _: EmptyTuple                    => false
       case _: (Ann[flagged.run, ?, ?] *: _) => true
       case _: (_ *: t)                      => isRun[t]
 
   /** Is the method behind an [[Entry.Method]] tag marked `@run`? */
-  private[internal] transparent inline def methodIsRun[M]: Boolean =
+  private transparent inline def methodIsRun[M]: Boolean =
     inline erasedValue[M] match
       case m: MethodMirror[?] => isRun[m.MirroredSelfAnnotations]
 
   /** Is the object behind an [[Entry.Scope]] tag marked `@run`? Its own mirror knows. */
-  private[internal] transparent inline def scopeIsRun[S]: Boolean =
+  private transparent inline def scopeIsRun[S]: Boolean =
     summonFrom:
       case sm: MethodsMirror[S] => isRun[sm.MirroredSelfAnnotations]
 

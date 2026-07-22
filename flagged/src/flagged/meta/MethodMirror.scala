@@ -38,6 +38,9 @@ object MethodMirror:
   type ResultOf[M] = M match
     case WithResult[r] => r
 
+  /** Alias pattern for the `MirroredSelfAnnotations` member, like [[WithResult]]. */
+  type WithAnnots[A] = MethodMirror[?] { type MirroredSelfAnnotations = A }
+
 /** `Mirror`-style witness for the command members of `T` (an object): its methods and, nested, its
   * member objects marked by a [[Reflectable]] annotation (`@run` in flagged), in declaration order.
   *
