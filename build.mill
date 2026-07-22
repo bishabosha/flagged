@@ -1,7 +1,8 @@
-//| mvnDeps: ["com.lihaoyi::mill-contrib-jmh:1.1.2"]
+//| mvnDeps: ["com.lihaoyi::mill-contrib-jmh:1.1.7"]
 package build
 
 import mill.*
+import mill.javalib.publish.{Developer, License, PomSettings, VersionControl}
 import mill.scalalib.*
 import mill.scalajslib.*
 import mill.scalajslib.api.*
@@ -30,6 +31,23 @@ trait BaseJsWasmModule extends BaseJsModule:
 trait BaseNativeModule extends BaseModule, ScalaNativeModule:
   def scalaNativeVersion = Versions.scalaNative
 
+trait PublishSettings extends PublishModule, mill.util.VcsVersionModule:
+  def pomSettings = PomSettings(
+    description = "command-line argument parsing for Scala 3, derived from plain data declarations",
+    organization = "io.github.bishabosha",
+    url = "https://github.com/bishabosha/flagged",
+    licenses = Seq(License.`Apache-2.0`),
+    versionControl = VersionControl.github("bishabosha", "flagged"),
+    developers = Seq(
+      Developer(
+        "bishabosha",
+        "Jamie Thompson",
+        "https://bishabosha.github.io",
+        email = "thompsonjamesrichard@gmail.com"
+      )
+    )
+  )
+
 /** Adds the `src-jvm-native` folder holding sources shared by the JVM and Native platforms. */
 trait JvmNativeSources extends JavaModule:
   override def sourcesFolders = super.sourcesFolders ++ Seq(os.sub / "src-jvm-native")
@@ -42,16 +60,16 @@ object flagged extends Module:
     trait FlaggedTests extends ScalaTests, TestModule.Munit:
       def munitVersion = Versions.munit
 
-  object jvm extends FlaggedModule, JvmNativeSources:
+  object jvm extends FlaggedModule, PublishSettings, JvmNativeSources:
     object test extends FlaggedTests
 
-  object js extends FlaggedModule, BaseJsModule:
+  object js extends FlaggedModule, BaseJsModule, PublishSettings:
     object test extends FlaggedTests, ScalaJSTests
 
   object jsWasm extends FlaggedModule, BaseJsWasmModule:
     override def platformCrossSuffix = "js"
 
-  object native extends FlaggedModule, BaseNativeModule, JvmNativeSources:
+  object native extends FlaggedModule, BaseNativeModule, PublishSettings, JvmNativeSources:
     object test extends FlaggedTests, ScalaNativeTests
 
 object `bench-portable` extends Module:
