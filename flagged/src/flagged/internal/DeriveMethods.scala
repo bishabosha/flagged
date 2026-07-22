@@ -90,15 +90,15 @@ object DeriveMethods:
 
   private transparent inline def runMethodCount[ER]: Int =
     inline erasedValue[ER] match
-      case _: EntriesResults.Empty                => 0
-      case _: EntriesResults.MethodNode[m, ?, re] =>
+      case _: EntriesResults.Empty                   => 0
+      case _: EntriesResults.MethodNode[?, m, ?, re] =>
         (inline if methodIsRun[m] then 1 else 0) + runMethodCount[re]
       case _: EntriesResults.ScopeNode[?, ?, ?, ?, re, ?] => runMethodCount[re]
 
   private transparent inline def runObjectCount[ER]: Int =
     inline erasedValue[ER] match
       case _: EntriesResults.Empty                         => 0
-      case _: EntriesResults.MethodNode[?, ?, re]          => runObjectCount[re]
+      case _: EntriesResults.MethodNode[?, ?, ?, re]       => runObjectCount[re]
       case _: EntriesResults.ScopeNode[?, ?, sm, ?, re, ?] =>
         (inline if mirrorIsRun[sm] then 1 else 0) + runObjectCount[re]
 
@@ -107,7 +107,7 @@ object DeriveMethods:
     inline erasedValue[ER] match
       case _: EntriesResults.Empty =>
         error("pickSingle: no @run method (guarded by runMethodCount)")
-      case _: EntriesResults.MethodNode[m, ?, re] =>
+      case _: EntriesResults.MethodNode[?, m, ?, re] =>
         inline if methodIsRun[m] then
           singleOf[T, m & MethodMirror[T]](o, g.method(i).asInstanceOf[m & MethodMirror[T]])
         else pickSingle[T, re](o, g, i + 1)
@@ -124,10 +124,12 @@ object DeriveMethods:
       i: Int
   ): List[(String, TargetAnnots, SubEntry)] =
     inline erasedValue[ER] match
-      case _: EntriesResults.Empty                => Nil
-      case _: EntriesResults.MethodNode[m, t, re] =>
+      case _: EntriesResults.Empty                   => Nil
+      case _: EntriesResults.MethodNode[s, m, t, re] =>
         val node =
-          er.asInstanceOf[EntriesResults.MethodNode[m, t & Tuple, EntriesResults[t & Tuple]]]
+          er.asInstanceOf[
+            EntriesResults.MethodNode[s, m & MethodMirror[s], t & Tuple, EntriesResults[t & Tuple]]
+          ]
         val head =
           inline if methodIsRun[m] then
             List(

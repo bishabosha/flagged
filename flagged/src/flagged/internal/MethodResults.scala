@@ -60,44 +60,45 @@ object MethodResults:
     final class Empty extends EntriesResults[EmptyTuple]:
       type Out = Nothing
 
-    final class MethodNode[m, t <: Tuple, RE <: EntriesResults[t]](val rest: RE)
-        extends EntriesResults[Entry.Method[m] *: t]:
-      type Out = MethodContrib[m] | rest.Out
+    final class MethodNode[S, M <: MethodMirror[S], Ts <: Tuple, RE <: EntriesResults[Ts]](
+        val rest: RE
+    ) extends EntriesResults[Entry.Method[M] *: Ts]:
+      type Out = MethodContrib[M] | rest.Out
 
     /** Stores the scope's summoned mirror and tower; `SM`/`SR` are their singleton types, so the
       * walk in [[DeriveMethods]] recovers the full refinements from the node type alone.
       */
     final class ScopeNode[
-        s,
-        t <: Tuple,
-        SM <: MethodsMirror[s],
-        SR <: MethodResults[s],
-        RE <: EntriesResults[t],
+        S,
+        Ts <: Tuple,
+        SM <: MethodsMirror[S],
+        SR <: MethodResults[S],
+        RE <: EntriesResults[Ts],
         O
     ](
         val mirror: SM,
         val results: SR,
         val rest: RE
-    ) extends EntriesResults[Entry.Scope[s] *: t]:
+    ) extends EntriesResults[Entry.Scope[S] *: Ts]:
       type Out = O
 
     given empty: Empty = Empty()
 
-    given method: [m, t <: Tuple] => (rest: EntriesResults[t])
+    given method: [S, M <: MethodMirror[S], Ts <: Tuple] => (rest: EntriesResults[Ts])
       => (
-        MethodNode[m, t, rest.type]
+        MethodNode[S, M, Ts, rest.type]
       ) =
       MethodNode(rest)
 
-    given scope: [s, t <: Tuple] => (
-        sm: MethodsMirror[s],
-        sr: MethodResults[s],
-        rest: EntriesResults[t]
+    given scope: [S, Ts <: Tuple] => (
+        sm: MethodsMirror[S],
+        sr: MethodResults[S],
+        rest: EntriesResults[Ts]
     )
       => (
         ScopeNode[
-          s,
-          t,
+          S,
+          Ts,
           sm.type,
           sr.type,
           rest.type,
