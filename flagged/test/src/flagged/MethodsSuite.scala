@@ -121,18 +121,13 @@ class MethodsSuite extends munit.FunSuite:
     assert(t.contains("add") && t.contains("rm") && t.contains("remote"), t)
   }
 
-  test("Flagged.parseMethods handles a lone method and a group with the same call") {
-    assertEquals(ok(Flagged.parseMethods(calc, Seq("-n", "3", "--factor", "3"))), 9)
-    assertEquals(ok(Flagged.parseMethods(toolbox, Seq("add", "--a", "2", "--b", "3"))), 5)
-  }
-
-  test("Flagged.parseMethods accepts a prog override") {
-    Flagged.parseMethods(calc, Seq("--help"), "myscale") match
+  test("Flagged.parse accepts a prog override for an @run object") {
+    Flagged.parse[calc.type](Seq("--help"), "myscale") match
       case Err(ParseError.Help(t)) => assert(t.contains("Usage: myscale"), t)
       case other                   => fail(s"expected help, got $other")
   }
 
-  test("Flagged.parseMethodsOrExit returns the invoked method's result") {
-    assertEquals(Flagged.parseMethodsOrExit(calc, Seq("-n", "2")), 4)
-    assertEquals(Flagged.parseMethodsOrExit(toolbox, Seq("rm", "a.txt")), "rm a.txt")
+  test("Flagged.parseOrExit returns the invoked method's result") {
+    assertEquals(Flagged.parseOrExit[calc.type](Seq("-n", "2")), 4)
+    assertEquals(Flagged.parseOrExit[toolbox.type](Seq("rm", "a.txt")), "rm a.txt")
   }

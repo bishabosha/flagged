@@ -22,9 +22,8 @@ object DeriveMethods:
     )
 
   /** `T`'s `@run` members as one parser: a lone method is a whole command — its parameters are the
-    * top-level options — anything else is a subcommand group. Backs
-    * [[flagged.Flagged.parseMethods]], whose call sites stay unchanged when a second command is
-    * added.
+    * top-level options — anything else is a subcommand group. Backs [[flagged.Flagged.Entry]],
+    * whose call sites stay unchanged when a second command is added.
     */
   inline def parser[T, G <: MethodsMirror[T], R](o: T, g: G): Parser[R] =
     inline erasedValue[g.MirroredEntries] match

@@ -8,9 +8,11 @@ case class Greet(
     @short('n') @help("Who to greet") name: String = "world",
     @short('e') @help("Add excitement") excited: Boolean = false,
     @short('r') @help("How many times to greet") repeat: Int = 1
-) derives Parser.Command
+) derives Parser.Command {
+  def run(): Unit =
+    val suffix = if excited then "!" else "."
+    (1 to repeat).foreach(_ => println(s"Hello, $name$suffix"))
+}
 
 @main def greetMain(args: String*): Unit =
-  val cfg    = Flagged.parseOrExit[Greet](args)
-  val suffix = if cfg.excited then "!" else "."
-  (1 to cfg.repeat).foreach(_ => println(s"Hello, ${cfg.name}$suffix"))
+  Flagged.parseOrExit[Greet](args).run()

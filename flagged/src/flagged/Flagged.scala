@@ -34,49 +34,6 @@ object Flagged:
   def parseOrExit[A](args: Seq[String], prog: String)(using e: Entry[A]): e.Out =
     e.parser.parseOrExit(args, prog)
 
-  /** Parse `args` by invoking the `@run` methods of object `obj`. A lone method parses directly —
-    * its parameters are the options — while several methods (or nested `@run` objects) become
-    * subcommands, so the call site does not change as commands are added. Help and errors are
-    * reported as values on the `Err` channel.
-    */
-  inline def parseMethods[T](obj: T, args: Seq[String])(
-      using mm: meta.MethodsMirror[T]
-  ): ParseResult[mm.MirroredResult] =
-    methodsParser[T](obj).parse(args)
-
-  /** [[parseMethods]] with `prog` as the program name shown in usage, help, and error messages,
-    * instead of one derived from the method or object name.
-    */
-  inline def parseMethods[T](obj: T, args: Seq[String], prog: String)(
-      using mm: meta.MethodsMirror[T]
-  ): ParseResult[mm.MirroredResult] =
-    methodsParser[T](obj).parse(args, prog)
-
-  /** Parse `args` by invoking the `@run` methods of object `obj`, adapting to a lone method or a
-    * group like [[parseMethods]]; on `--help` print the help screen and exit 0, on error print a
-    * message to stderr and exit 2. Intended for `@main` methods and scripts.
-    */
-  inline def parseMethodsOrExit[T](obj: T, args: Seq[String])(
-      using mm: meta.MethodsMirror[T]
-  ): mm.MirroredResult =
-    methodsParser[T](obj).parseOrExit(args)
-
-  /** [[parseMethodsOrExit]] with `prog` as the program name shown in usage, help, and error
-    * messages, instead of one derived from the method or object name.
-    */
-  inline def parseMethodsOrExit[T](obj: T, args: Seq[String], prog: String)(
-      using mm: meta.MethodsMirror[T]
-  ): mm.MirroredResult =
-    methodsParser[T](obj).parseOrExit(args, prog)
-
-  /** The parser over `obj`'s `@run` members: a whole command for a lone method, a subcommand group
-    * otherwise (see [[internal.DeriveMethods.parser]]).
-    */
-  private inline def methodsParser[T](obj: T)(
-      using mm: meta.MethodsMirror[T]
-  ): Parser[mm.MirroredResult] =
-    internal.DeriveMethods.parser[T, mm.type, mm.MirroredResult](obj, mm)
-
   /** The rendered top-level help screen for `A`, without parsing anything. */
   def help[A](using e: Entry[A]): String = e.parser.help
 
