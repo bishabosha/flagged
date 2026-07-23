@@ -360,20 +360,20 @@ Full methodology and tables are in [`bench/`](bench/results.md); the comparison
 below is against mainargs 0.7.8 and case-app 2.1.0 on the same inputs (Apple M3 Max,
 Temurin JDK 25, Scala 3.8.3).
 
-**Compile time** is probably what people care most about for a derivation-heavy library. Derivation adds ~63–97 ms per file over a plain-data baseline across the
-benchmark scenarios, against ~185–222 ms for mainargs and ~420–465 ms for case-app.
-Cost grows linearly with field count, at roughly 2 ms per field.
+**Compile time** is probably what people care most about for a derivation-heavy library. Derivation adds ~56–95 ms per file over a plain-data baseline across the
+benchmark scenarios, against ~189–214 ms for mainargs and ~396–437 ms for case-app.
+Cost grows linearly with field count, at under 2 ms per field.
 
-**Parse latency:** on non-trivial argument lists Flagged parses in 0.07–0.24 µs,
-2–31× faster than mainargs and case-app on the same scenarios, allocating 3.8–36×
+**Parse latency:** on non-trivial argument lists Flagged parses in 0.08–0.29 µs,
+1.8–35× faster than mainargs and case-app on the same scenarios, allocating 3.7–39×
 less; the hot path aims to allocate only what is necessary to build the target data (further improvements could be made to avoid boxing). The same holds on non-JVM platforms: Flagged
 is the fastest of the three on every scenario on Scala.js, WebAssembly, and Scala
 Native.
 
 **Comparison to hand-written:**
-- A hand-written parser at feature-parity with Flagged is still 1.7–5.7× faster than the
+- A hand-written parser at feature-parity with Flagged is still 1.7–4.4× faster than the
 derived one
-- The typical quick hand-rolled parser (case class of defaults, pattern match for known tokens on a `List[String]`, copying per parsed option) is faster on small grammars but 2.7× slower at 25 options,
+- The typical quick hand-rolled parser (case class of defaults, pattern match for known tokens on a `List[String]`, copying per parsed option) is faster on small grammars but 2.6× slower at 25 options,
 since its cost grows with options × tokens where the engine's grows with tokens.
 - `@main` def (scala builtin parsing) is the fastest by far (but only handles positional arguments)
 
