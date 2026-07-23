@@ -40,8 +40,8 @@ a library not named does not have it.
 | Counting flags (`-vvv`) | `Count` | case-app `Int @@ Counter`; scallop `tally()`; picocli `boolean[]` length |
 | Repeated scalar options | last wins (values and flags) | error in all five (opt-outs: mainargs `allowRepeats`, case-app `Last[T]`, picocli `overwrittenOptionsAllowed`) |
 | Repeatable → collections | any collection with a `Factory`; any type via `Parser.repeated` | mainargs `Seq`/`Iterable`/`Map`; case-app `List`/`Vector`; scallop `opt[List[T]]`; picocli arrays/collections/`Map`; scopt: one comma-separated token |
-| Multi-value arity (`--point 1 2 3`) | no — one value per occurrence | scallop multi-value options; picocli `arity = "2..3"` |
-| Value splitting (`--env A,B,C` → elements) | via custom value parser only | scopt (its native collection format); picocli `split` regex |
+| Multi-value arity (`--point 1 2 3`) | fixed arity: tuple or `derives Parser.Product` fields; `1..*` via `@greedy` on repeated fields (compile error alongside positionals/subcommands — the ambiguity other libraries document away) | scallop multi-value options; picocli `arity = "2..3"` |
+| Value splitting (`--env A,B,C` → elements) | `@split` on repeated fields (separator char, default `,`) | scopt (its native collection format); picocli `split` regex |
 | `Map[K,V]` (`--x k=v`) | yes | mainargs; scopt (comma-separated pairs); scallop `props` (`-Dk=v`); picocli |
 | `Option[T]` | yes | mainargs, case-app; scallop `ScallopOption[T]`; picocli (incl. `Optional<T>`); scopt: config fields, options optional by default |
 | Defaults from field defaults | yes (lazy) | mainargs, case-app (lazy); scopt initial config instance; scallop `default =` parameter; picocli field initializers |
@@ -114,11 +114,7 @@ derivation libraries — are matched in the wider field by scallop and picocli.
    (picocli `ArgGroup`, scallop `conflicts`/`codependent`/`requireOne`). `emap` expresses the
    check but runs after parse — schema-level constraints could be reflected in usage output
    and completions.
-5. **Multi-value arity and value splitting.** One occurrence consuming several values
-   (`--point 1 2 3`; picocli `arity`, scallop multi-value options) and splitting one token into
-   elements (`--env A,B,C`; picocli `split`, scopt's collection format). flagged parses exactly
-   one value per occurrence; splitting is expressible only inside a custom value parser.
-6. **Low priority.** `--usage` (condensed help), alphabetical help sorting toggle, pluggable name
+5. **Low priority.** `--usage` (condensed help), alphabetical help sorting toggle, pluggable name
    mapper (snake_case), argument index tracking (`Indexed`), number-only options (scallop's
    `tail -5` style — flagged reserves `-<digits>` as values by design), abbreviated long-option
    matching (picocli, opt-in), environment-variable defaults surfaced in help (the lazy field

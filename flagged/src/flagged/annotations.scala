@@ -43,6 +43,22 @@ final case class group(value: String) extends StaticAnnotation derives Defaults
   */
 final case class default() extends StaticAnnotation derives Defaults
 
+/** Split each occurrence's value at `sep` and parse every segment with the element parser:
+  * `@split env: List[String]` parses `--env A,B,C` as three elements. Valid on fields with a
+  * repeated `Parser` (collections, `Map[K, V]`, `Parser.repeated` types); occurrences still
+  * accumulate, so `--env A,B --env C` also yields three. Segments are taken verbatim between
+  * separators (no escaping; empty segments are offered to the element parser as empty strings).
+  */
+final case class split(sep: Char = ',') extends StaticAnnotation derives Defaults
+
+/** Let each occurrence of a repeated option consume the following tokens up to the next option-like
+  * token or `--`: `@greedy nums: List[Int]` parses `--nums 10 20 99` as three elements (the
+  * `--nums=v` and attached short forms still supply exactly one). To keep the grammar unambiguous,
+  * a command containing a `@greedy` option may not declare positional or subcommand fields (a
+  * `Trailing` field is fine — `--` delimits it).
+  */
+final case class greedy() extends StaticAnnotation derives Defaults
+
 /** Mark a method as a command for `Parser.method` / `Parser.methods`: its parameters become the
   * options and positionals, and parsing invokes it. On a nested object, marks it as a group of
   * subcommands.

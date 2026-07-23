@@ -129,12 +129,65 @@ private[flagged] object Engine:
           case Err(msg) => report(s"invalid value for '$display': $msg")
           case _        => ()
 
+      /** `@split`: every separator delimits a segment, each offered as one element (empty segments
+        * included — the element parser decides).
+        */
+      def addSplitElems(
+          index: Int,
+          parser: flagged.Parser.Repeated[?],
+          raw: String,
+          display: String,
+          sep: Char
+      ): Unit =
+        var start = 0
+        while start <= raw.length do
+          val cut = raw.indexOf(sep, start)
+          val end = if cut == -1 then raw.length else cut
+          addElem(index, parser, raw.substring(start, end), display)
+          start = end + 1
+
+      /** A product occurrence: consume the parser's arity in consecutive tokens (all of them, so a
+        * bad element does not desync the stream) and build eagerly into the slot — a later
+        * occurrence overwrites, like single values.
+        */
+      def offerProduct(
+          index: Int,
+          p: flagged.Parser.Product[?],
+          display: String,
+          first: String
+      ): Unit =
+        counts(index) += 1
+        val ar      = p.arity
+        val scratch = new Array[Any](ar)
+        var failed  = false
+        var k       = 0
+        while k < ar do
+          val tok = if k == 0 && first != null then first else takeValue(display)
+          if tok == null then
+            failed = true
+            k = ar // missing value already reported; nothing left to consume
+          else
+            p.elements(k).readInto(tok, scratch, k) match
+              case Err(msg) =>
+                report(s"invalid value for '$display': $msg")
+                failed = true
+              case _ => ()
+            k += 1
+        if !failed then
+          p.buildInto(scratch, values, index) match
+            case Err(msg) => report(s"invalid value for '$display': $msg")
+            case _        => ()
+
       /** A value mention. */
       def offerValue(index: Int, mode: Mode, raw: String, display: String): Unit =
         counts(index) += 1
         mode match
-          case Mode.Repeated(p) =>
-            addElem(index, p, raw, display)
+          case Mode.Repeated(p, sep, _) =>
+            if sep != 0 then addSplitElems(index, p, raw, display, sep)
+            else addElem(index, p, raw, display)
+          case Mode.Product(p, _) =>
+            // `--point=v` and attached short forms cannot carry a multi-token value
+            report(s"option '$display' takes ${p.arity} values, each as its own argument")
           case Mode.Flag(p, _) if !p.takesValue =>
             // a pure flag rejects an explicit value wherever it appears; nothing is staged, so
             // finishing builds from the count alone (the parse has already failed)
@@ -176,8 +229,12 @@ private[flagged] object Engine:
         else
           val p = posSpecs(posIdx)
           p.mode match
-            case Mode.Repeated(_) =>
+            case Mode.Repeated(_, _, _) =>
               offerValue(p.index, p.mode, tok, p.display) // keep filling the last positional
+            case Mode.Product(pr, _) =>
+              // this token starts the product; the remaining arity-1 tokens follow it
+              offerProduct(p.index, pr, p.display, tok)
+              posIdx += 1
             case Mode.Single(parser, _) =>
               // a single positional is never overridden: parse it now, nothing staged
               counts(p.index) += 1
@@ -189,15 +246,30 @@ private[flagged] object Engine:
               offerValue(p.index, p.mode, tok, p.display)
               posIdx += 1
 
+      /** A token routed as a value rather than an option: `-`, non-dash, or a negative number with
+        * no matching short option (`--` is never free).
+        */
+      def isFreeToken(tok: String): Boolean =
+        tok == "-" || !tok.startsWith("-") ||
+          (isNegativeNumber(tok) && shortSpec(tok(1)) == null)
+
+      /** `@greedy`: keep consuming free tokens as further elements of the same option (assembly
+        * guarantees no positionals or subcommands compete for them).
+        */
+      def consumeGreedy(spec: OptSpec): Unit = spec.mode match
+        case Mode.Repeated(_, _, true) =>
+          while idx < args.length && isFreeToken(args(idx)) do
+            offerValue(spec.index, spec.mode, args(idx), spec.longDisplay)
+            idx += 1
+        case _ => ()
+
       // ---- phase 1: routing ---------------------------------------------------
 
       while idx < args.length do
         val tok = args(idx)
         idx += 1
         // `-2` is a positional value unless a short option `-2` is actually defined
-        val isFree =
-          noMoreOpts || tok == "-" || !tok.startsWith("-") ||
-            (isNegativeNumber(tok) && shortSpec(tok(1)) == null)
+        val isFree = noMoreOpts || isFreeToken(tok)
         if isFree then handleFree(tok)
         else if tok == "--" then
           cmd.trailing match
@@ -235,8 +307,13 @@ private[flagged] object Engine:
           else if inlineValue != null then offerValue(spec.index, spec.mode, inlineValue, key)
           else if isFlag(spec) then offerBare(spec.index)
           else
-            val v = takeValue(key)
-            if v != null then offerValue(spec.index, spec.mode, v, key)
+            spec.mode match
+              case Mode.Product(p, _) => offerProduct(spec.index, p, key, null)
+              case _                  =>
+                val v = takeValue(key)
+                if v != null then
+                  offerValue(spec.index, spec.mode, v, key)
+                  consumeGreedy(spec)
         else
           // short option cluster: -v, -abc, -o value, -ovalue, -o=value
           var i    = 1
@@ -253,11 +330,20 @@ private[flagged] object Engine:
               offerBare(spec.index)
               i += 1
             else
-              val raw =
-                if i + 1 < tok.length then
-                  if tok(i + 1) == '=' then tok.substring(i + 2) else tok.substring(i + 1)
-                else takeValue(spec.shortDisplay)
-              if raw != null then offerValue(spec.index, spec.mode, raw, spec.shortDisplay)
+              spec.mode match
+                case Mode.Product(p, _) if i + 1 >= tok.length =>
+                  offerProduct(spec.index, p, spec.shortDisplay, null)
+                case _ =>
+                  // an attached value (`-p1`, `-p=1`) pins exactly one token: no greedy
+                  // continuation, and a product spec rejects it in offerValue
+                  val attached = i + 1 < tok.length
+                  val raw      =
+                    if attached then
+                      if tok(i + 1) == '=' then tok.substring(i + 2) else tok.substring(i + 1)
+                    else takeValue(spec.shortDisplay)
+                  if raw != null then
+                    offerValue(spec.index, spec.mode, raw, spec.shortDisplay)
+                    if !attached then consumeGreedy(spec)
               stop = true
 
       // ---- phase 2: finishing ---------------------------------------------------
@@ -300,7 +386,16 @@ private[flagged] object Engine:
                 reportInvalid(parser.readInto(raw, values, index), lastDisp(index))
               if optional then values(index) = Some(values(index))
             true
-          case Mode.Repeated(parser) =>
+          case Mode.Product(_, optional) =>
+            // occurrences were parsed and built eagerly at routing; only absence remains
+            if counts(index) == 0 then
+              default match
+                case Some(d)          => values(index) = d()
+                case None if optional => values(index) = None
+                case None             => return false // missing required
+            else if optional then values(index) = Some(values(index))
+            true
+          case Mode.Repeated(parser, _, _) =>
             if counts(index) == 0 then
               default match
                 case Some(d) => values(index) = d()
@@ -309,7 +404,7 @@ private[flagged] object Engine:
                   reportInvalid(parser.collector().finishInto(values, index), display)
             else
               val c = reps(index)
-              if c.size == counts(index) then // no element failed (failures were reported)
+              if !c.failed then // failed elements were reported when offered
                 reportInvalid(c.finishInto(values, index), display)
             true
 

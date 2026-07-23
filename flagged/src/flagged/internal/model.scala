@@ -25,11 +25,19 @@ enum Mode:
     */
   case Single(parser: flagged.Parser[?], optional: Boolean)
 
+  /** Option spanning a fixed number of consecutive tokens, one per product element; parsed eagerly
+    * at the occurrence, so repetition is last-wins by overwrite. If `optional` the field is an
+    * `Option[_]` and the built value is wrapped in `Some`.
+    */
+  case Product(parser: flagged.Parser.Product[?], optional: Boolean)
+
   /** Option that may appear multiple times; elements are parsed with the parser's element and
     * combined with its build from an indexed view (also invoked empty when absent; may fail, e.g.
-    * to require at least one occurrence).
+    * to require at least one occurrence). `split` (0 = none) divides each occurrence's value into
+    * segments, each parsed as an element; `greedy` lets an occurrence consume the following free
+    * tokens as further elements.
     */
-  case Repeated(parser: flagged.Parser.Repeated[?])
+  case Repeated(parser: flagged.Parser.Repeated[?], split: Char = 0, greedy: Boolean = false)
 
 final case class OptSpec(
     long: String,

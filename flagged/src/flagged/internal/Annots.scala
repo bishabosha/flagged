@@ -1,8 +1,8 @@
 package flagged.internal
 
-import compiletime.{summonFrom, erasedValue, constValue}
+import compiletime.{summonFrom, summonInline, erasedValue, constValue}
 import compiletime.ops.int./
-import flagged.meta.{Ann, AnnotMirror}
+import flagged.meta.{Ann, AnnotMirror, Defaults}
 
 /** flagged's annotations on a type or an enum case, extracted at compile time from an
   * [[AnnotMirror]] — fully typed, no `Any` and no runtime type tests.
@@ -26,7 +26,9 @@ final case class FieldAnnots(
     positional: Boolean,
     hidden: Boolean = false,
     group: Option[String] = None,
-    aliases: List[String] = Nil
+    aliases: List[String] = Nil,
+    split: Option[Char] = None,
+    greedy: Boolean = false
 )
 
 object FieldAnnots:
@@ -126,6 +128,16 @@ object Annots:
         collectField[t](acc.copy(positional = true), revNames)
       case _: (Ann[flagged.hidden, ?, ?] *: t) =>
         collectField[t](acc.copy(hidden = true), revNames)
+      case _: (Ann[flagged.split, args, dflt] *: t) =>
+        // the separator may be defaulted (`@split`): resolve it through the Defaults mirror
+        inline erasedValue[dflt] match
+          case _: (false *: EmptyTuple) =>
+            collectField[t](acc.copy(split = Some(const1[args].asInstanceOf[Char])), revNames)
+          case _ =>
+            val sep = summonInline[Defaults[flagged.split]].defaultArgument(0).asInstanceOf[Char]
+            collectField[t](acc.copy(split = Some(sep)), revNames)
+      case _: (Ann[flagged.greedy, ?, ?] *: t) =>
+        collectField[t](acc.copy(greedy = true), revNames)
       case _: (_ *: t) =>
         collectField[t](acc, revNames)
 

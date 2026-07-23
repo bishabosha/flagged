@@ -76,7 +76,10 @@ private[flagged] object HelpFmt:
     parts += "[options]"
     cmd.positionals.foreach { p =>
       p.mode match
-        case Mode.Repeated(_)      => parts += s"[<${p.name}>...]"
+        case Mode.Repeated(_, _, _) => parts += s"[<${p.name}>...]"
+        // a positional product's metavar is pre-bracketed (`<x> <y>`)
+        case Mode.Product(_, _) =>
+          parts += (if isRequiredPos(p) then p.metavar else s"[${p.metavar}]")
         case _ if isRequiredPos(p) => parts += s"<${p.name}>"
         case _                     => parts += s"[<${p.name}>]"
     }
@@ -91,15 +94,17 @@ private[flagged] object HelpFmt:
 
   private def isRequiredPos(p: PosSpec): Boolean =
     p.default.isEmpty && (p.mode match
-      case Mode.Single(_, optional) => !optional
-      case _                        => false)
+      case Mode.Single(_, optional)  => !optional
+      case Mode.Product(_, optional) => !optional
+      case _                         => false)
 
   private def optLeft(o: OptSpec): String =
     val short = o.short.map(c => s"-$c, ").getOrElse("    ")
     val value = o.mode match
-      case Mode.Flag(_, _)   => ""
-      case Mode.Single(_, _) => s" <${o.metavar}>"
-      case Mode.Repeated(_)  => s" <${o.metavar}>"
+      case Mode.Flag(_, _)        => ""
+      case Mode.Single(_, _)      => s" <${o.metavar}>"
+      case Mode.Product(_, _)     => s" ${o.metavar}" // pre-bracketed: `<x> <y>`
+      case Mode.Repeated(_, _, _) => s" <${o.metavar}>"
     s"$short--${o.long}$value"
 
   private def optExtras(o: OptSpec, showHidden: Boolean): List[String] =
@@ -113,11 +118,12 @@ private[flagged] object HelpFmt:
       case Some(v) => fmtDefault(v).map(s => s"default: $s")
       case None    => None
     val required = o.mode match
-      case Mode.Single(_, optional) => o.default.isEmpty && !optional
-      case _                        => false
+      case Mode.Single(_, optional)  => o.default.isEmpty && !optional
+      case Mode.Product(_, optional) => o.default.isEmpty && !optional
+      case _                         => false
     val repeatable = o.mode match
-      case Mode.Repeated(_) => true
-      case _                => false
+      case Mode.Repeated(_, _, _) => true
+      case _                      => false
     val alias = Option.when(o.aliases.nonEmpty)(
       s"alias: ${o.aliases.map("--" + _).mkString(", ")}"
     )

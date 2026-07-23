@@ -46,7 +46,9 @@ private final case class Field(
     aliases: List[String],
     optional: Boolean,
     default: Option[() => Any],
-    parser: Parser[?]
+    parser: Parser[?],
+    split: Option[Char] = None,
+    greedy: Boolean = false
 )
 
 /** Builds the runtime `Command` model from what inline derivation collected — one
@@ -99,6 +101,7 @@ object Assemble:
     val mode = p match
       case _: Parser.Value[?]      => Mode.Single(p, false)
       case _: Parser.ValuedFlag[?] => Mode.Single(p, false)
+      case pr: Parser.Product[?]   => Mode.Product(pr, false)
       case _: Parser.Flag[?]       =>
         invalid("a flag parser without a value parser cannot be run standalone")
       case r: Parser.Repeated[?] =>
@@ -186,7 +189,9 @@ object Assemble:
           optional = opt,
           default =
             if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None,
-          parser = parser
+          parser = parser,
+          split = anns.split,
+          greedy = anns.greedy
         )
       )
     }
@@ -219,6 +224,12 @@ object Assemble:
     def positional(metavar: String, mode: Mode, kind: PosKind): Plan =
       Plan.Positional(PosSpec(f.long, f.help, metavar, f.index, mode, f.default), kind)
 
+    if (f.split.nonEmpty || f.greedy) && !f.parser.isInstanceOf[Parser.Repeated[?]] then
+      bad("@split/@greedy require a field with a repeated Parser (a collection)")
+    if f.greedy && f.positional then
+      bad("@greedy has no effect on a positional field (a repeated positional is already greedy)")
+    if f.greedy && f.split.nonEmpty then bad("@split cannot be combined with @greedy")
+
     f.parser match
       case cg: Parser.CommandGroup[?] =>
         Plan.Commands(f.index, f.optional, f.default, cg.impl)
@@ -242,8 +253,14 @@ object Assemble:
         val mode = Mode.Single(v, f.optional)
         if f.positional then positional(v.typeName, mode, posKind) else named(v.typeName, mode)
 
+      case pr: Parser.Product[?] =>
+        // the metavar arrives pre-bracketed (`<x> <y>`); help renders it verbatim
+        val mode = Mode.Product(pr, f.optional)
+        if f.positional then positional(pr.helpMetavar, mode, posKind)
+        else named(pr.helpMetavar, mode)
+
       case r: Parser.Repeated[?] =>
-        val mode = Mode.Repeated(r)
+        val mode = Mode.Repeated(r, f.split.getOrElse(0), f.greedy)
         if f.positional then positional(r.typeName, mode, PosKind.Repeated)
         else named(r.typeName, mode)
 
@@ -310,6 +327,16 @@ object Assemble:
     checkPositionalOrder(posKinds.result())
     if sub.nonEmpty && positionals.nonEmpty then
       invalid("mixing positional fields with a subcommand field is ambiguous and not supported")
+    // greedy consumption and other free-token consumers cannot coexist (spliced groups can
+    // smuggle a greedy option past the per-product compile-time check, so re-check here)
+    val optionSpecs = opts.result()
+    val hasGreedy   = optionSpecs.exists(_.mode match
+      case Mode.Repeated(_, _, g) => g
+      case _                      => false)
+    if hasGreedy then
+      if positionals.nonEmpty then
+        invalid("a command with a @greedy option cannot have positional fields")
+      if sub.nonEmpty then invalid("a command with a @greedy option cannot have a subcommand field")
 
     val allSplices = splices.result()
     // `build` expects exactly the parent's own field slots
@@ -317,7 +344,7 @@ object Assemble:
       if allSplices.isEmpty then build else arr => build(arr.take(n))
     Command(
       onType.help.getOrElse(""),
-      opts.result(),
+      optionSpecs,
       positionals,
       sub,
       trailing,

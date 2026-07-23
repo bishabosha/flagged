@@ -122,6 +122,7 @@ The field's `Parser` instance decides its shape:
 | `x: Option[A]` | optional, `None` when absent |
 | `x: List[A]` (any collection with a `Factory`) | repeatable |
 | `x: Map[K, V]` | repeatable `--x key=value` entries |
+| `x: (A, B)` (any tuple of `Value` types, or a case class deriving `Parser.Product`) | fixed multi-token value: `--x 1 2` |
 | `x: E` (enum deriving `Parser.CommandGroup`) | nested subcommands |
 | `x: E` (enum deriving `Parser.Enumerated`) | value matched by case name (`--color red`) |
 | `x: P` (case class deriving `Parser.Command`) | options group spliced into this command |
@@ -130,8 +131,12 @@ The field's `Parser` instance decides its shape:
 
 Annotations fine-tune the rest: `@name` (long-name override and aliases), `@short`,
 `@help`, `@positional`, `@hidden` (omitted from help, shown by `--help-all`),
-`@group` (titled help sections), `@version` (adds `--version` via a `Versioned`
-instance), and `@default` (the command run when no command token is given).
+`@group` (titled help sections), `@split` (divide a repeated option's value at a
+separator, `,` by default: `--env A,B,C`), `@greedy` (a repeated option consumes the
+following free tokens: `--nums 10 20 99`; compile error if the command also declares
+positional or subcommand fields, which would make the grammar ambiguous), `@version`
+(adds `--version` via a `Versioned` instance), and `@default` (the command run when
+no command token is given).
 
 ### Subcommands
 
@@ -281,6 +286,27 @@ case class Run(@short('i') image: String = "alpine", cmd: Trailing = Trailing(Ni
 An `Option[Trailing]` field distinguishes an absent `--` (`None`) from a
 present-but-empty one (`Some(Trailing(Nil))`). One trailing field per command; in
 help it appears as `[-- <args>]` in the usage line.
+
+### Take several values for one option
+
+Three shapes, each compile-checked. A tuple (or `derives Parser.Product` case class)
+field consumes a fixed number of consecutive tokens; `@split` divides one value into
+collection elements; `@greedy` lets a repeated option consume the following free
+tokens:
+
+```scala
+case class Render(
+    @short('p') point: (Int, Int) = (0, 0),      // --point 3 4
+    @split env: List[String] = Nil,              // --env A=1,B=2   (also -e X --env Y,Z)
+    @greedy nums: List[Int] = Nil                // --nums 10 20 99 7
+) derives Parser.Command
+```
+
+Products are fixed-arity by design — the arity is the tuple's size, shown in help as
+one metavar per element — and repetition is last-wins, like single values. `@greedy`
+consumption stops at the next option-like token or `--`, and the command may not
+declare positional or subcommand fields (a compile error: those would compete for
+the same free tokens); pair it with `Trailing` when arguments must be forwarded.
 
 ### Constrain repetition or flag occurrences
 

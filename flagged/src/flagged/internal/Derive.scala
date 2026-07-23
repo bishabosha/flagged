@@ -60,6 +60,32 @@ object Derive:
         Some(() => v.version)
       case _: (_ *: t) => versionOf[A, t]
 
+  /** Product parser for a tuple: each element type's `Value` parses one consecutive token. */
+  inline def tupleProduct[T <: NonEmptyTuple]: Parser.Product[T] =
+    val elems = valuesOfAll[T]
+    Parser.productOf[T](
+      elems,
+      elems.map(_.typeName),
+      arr => steps.result.Result.Ok(Tuple.fromArray(arr).asInstanceOf[T])
+    )
+
+  /** Product parser for a case class, for `derives Parser.Product`: the fields parse from
+    * consecutive tokens, and the kebab-cased field names become the help metavars.
+    */
+  inline def productValue[A](using m: Mirror.ProductOf[A]): Parser.Product[A] =
+    inline erasedValue[m.MirroredElemTypes] match
+      case _: EmptyTuple => error("Parser.Product requires at least one field")
+      case _             =>
+        Parser.productOf[A](
+          valuesOfAll[m.MirroredElemTypes],
+          IArray.from(labelsOf[m.MirroredElemLabels].map(Assemble.kebab)),
+          arr => steps.result.Result.Ok(m.fromProduct(ArrayProduct(arr)))
+        )
+
+  /** The `Value` parser of every element type. */
+  inline def valuesOfAll[T <: Tuple]: IArray[Parser.Value[?]] =
+    summonAll[Tuple.Map[T, Parser.Value]].toIArray.map(_.asInstanceOf[Parser.Value[?]])
+
   /** Value parser for an enum whose cases are all parameterless, for `Parser.Enumerated`. */
   inline def enumParser[A](using m: Mirror.SumOf[A]): Parser.Enumerated[A] =
     Assemble
@@ -116,11 +142,12 @@ object Derive:
     type Shorts <: Tuple // constant `@short` characters claimed by named options
     type Longs <: Tuple  // constant `@name` names (primary and aliases) claimed by named options
 
-  type NoMarks  = 0
-  type TrailBit = 1
-  type RepBit   = 2
-  type PosBit   = 4
-  type GroupBit = 8
+  type NoMarks   = 0
+  type TrailBit  = 1
+  type RepBit    = 2
+  type PosBit    = 4
+  type GroupBit  = 8
+  type GreedyBit = 16
 
   // shape codes for the field dispatch
   type ValueShape      = 1
@@ -130,6 +157,7 @@ object Derive:
   type TrailingShape   = 5
   type CommandShape    = 6 // a spliced options group
   type GroupShape      = 7 // a subcommand group
+  type ProductShape    = 8 // a fixed-arity multi-token value
 
   type ResOf[M <: Int] = FieldsRes { type Marks = M }
 
@@ -224,6 +252,20 @@ object Derive:
         error("a repeated positional must be the last positional field")
       else ()
     else ()
+    inline if hasBit[l.Marks, GreedyBit] then
+      inline if hasBit[r.Marks, PosBit] then
+        error("a command with a @greedy option cannot have positional fields")
+      else inline if hasBit[r.Marks, GroupBit] then
+        error("a command with a @greedy option cannot have a subcommand field")
+      else ()
+    else ()
+    inline if hasBit[r.Marks, GreedyBit] then
+      inline if hasBit[l.Marks, PosBit] then
+        error("a command with a @greedy option cannot have positional fields")
+      else inline if hasBit[l.Marks, GroupBit] then
+        error("a command with a @greedy option cannot have a subcommand field")
+      else ()
+    else ()
 
   /** `Option[_]` unwrapping at the type level, so one transparent expansion handles a field. */
   type Unwrap[F] = F match
@@ -240,7 +282,44 @@ object Derive:
     * `(code, annotations, optionality)`, so fields with the same combination share one cached
     * reduction.
     */
+  /** `@split` / `@greedy` validity: both require a repeated shape, cannot combine, and `@greedy` is
+    * meaningless on a positional (a repeated positional is already greedy). One walk over the
+    * annotation slot: the detailed rules only reduce when one of the two annotations is present, so
+    * the common all-other-annotations field costs a single pass.
+    */
+  type SplitGreedyErr[S <: Int, Anns] = SplitGreedyScan[S, Anns, Anns]
+
+  /** `Rest` is the scan cursor; the detailed rules consult `All`, the full slot, since the other
+    * annotation may sit before the found one.
+    */
+  type SplitGreedyScan[S <: Int, Rest, All] <: String = Rest match
+    case EmptyTuple                    => ""
+    case Ann[flagged.split, ?, ?] *: _ =>
+      HasAnnT[flagged.greedy, All] match
+        case true  => "@split cannot be combined with @greedy"
+        case false =>
+          S match
+            case RepeatedShape => ""
+            case _             => "@split requires a field with a repeated Parser (a collection)"
+    case Ann[flagged.greedy, ?, ?] *: _ =>
+      HasAnnT[flagged.split, All] match
+        case true  => "@split cannot be combined with @greedy"
+        case false =>
+          S match
+            case RepeatedShape =>
+              HasAnnT[flagged.positional, All] match
+                case true =>
+                  "@greedy has no effect on a positional field (a repeated positional is already greedy)"
+                case false => ""
+            case _ => "@greedy requires a field with a repeated Parser (a collection)"
+    case _ *: t => SplitGreedyScan[S, t, All]
+
   type FieldErr[S <: Int, Anns, Opt <: Boolean] <: String =
+    SplitGreedyErr[S, Anns] match
+      case "" => FieldErr0[S, Anns, Opt]
+      case _  => SplitGreedyErr[S, Anns]
+
+  type FieldErr0[S <: Int, Anns, Opt <: Boolean] <: String =
     HasAppliedT[Ann[flagged.short, 'h' *: EmptyTuple, ?], Anns] match
       case true  => "short option 'h' is reserved for help"
       case false =>
@@ -269,6 +348,7 @@ object Derive:
   type ShapeErr[S <: Int, Anns, Opt <: Boolean] <: String = S match
     case ValueShape      => ""
     case ValuedFlagShape => ""
+    case ProductShape    => ""
     case FlagShape       =>
       Opt match
         case true  => "a flag Parser without a value parser cannot be used inside Option"
@@ -340,12 +420,19 @@ object Derive:
     case GroupShape    => GroupBit
     case CommandShape  => NoMarks
     case _             =>
-      HasAnnT[flagged.positional, Anns] match
-        case true =>
-          S match
-            case RepeatedShape => BitwiseOr[RepBit, PosBit]
-            case _             => PosBit
-        case false => NoMarks
+      PosGreedyMark[Anns, S]
+
+  /** One walk finds `@positional` or `@greedy` (never both — a [[FieldErr]] rules the combination
+    * out before marks matter).
+    */
+  type PosGreedyMark[Anns, S <: Int] <: Int = Anns match
+    case EmptyTuple                         => NoMarks
+    case Ann[flagged.positional, ?, ?] *: _ =>
+      S match
+        case RepeatedShape => BitwiseOr[RepBit, PosBit]
+        case _             => PosBit
+    case Ann[flagged.greedy, ?, ?] *: _ => GreedyBit
+    case _ *: t                         => PosGreedyMark[t, S]
 
   /** A field either fails with its match-type-computed error or constructs exactly one summary. */
   private transparent inline def fin[S <: Int, F, Anns](p: Parser[?]): FieldsRes =
@@ -367,6 +454,7 @@ object Derive:
           case _: Parser.Value[?]        => fin[ValueShape, F, Anns](p)
           case _: Parser.ValuedFlag[?]   => fin[ValuedFlagShape, F, Anns](p)
           case _: Parser.Flag[?]         => fin[FlagShape, F, Anns](p)
+          case _: Parser.Product[?]      => fin[ProductShape, F, Anns](p)
           case _: Parser.Repeated[?]     => fin[RepeatedShape, F, Anns](p)
           case _: Parser.Trailing[?]     => fin[TrailingShape, F, Anns](p)
           case _: Parser.CommandGroup[?] => fin[GroupShape, F, Anns](p)

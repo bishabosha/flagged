@@ -30,6 +30,7 @@ object Trailing:
   *   - [[Parser.Value]] — one token per occurrence (numbers, paths, enum values, ...)
   *   - [[Parser.Flag]] — no token; built from the occurrence count ([[Parser.ValuedFlag]]
   *     additionally accepts the explicit `--flag=value` form)
+  *   - [[Parser.Product]] — a fixed number of consecutive tokens, one per element (`--point 3 4`)
   *   - [[Parser.Repeated]] — any number of occurrences of a `Value` element, combined
   *   - [[Parser.Trailing]] — the raw arguments after `--`, taken verbatim
   *   - [[Parser.Command]] — a single command's grammar; as a field, a spliced options group
@@ -114,14 +115,18 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     * pair slots).
     */
   private[flagged] abstract class Collector:
-    private var n = 0
+    private var n         = 0
+    private var hasFailed = false
 
     final def size: Int = n
+
+    /** Whether any offered element failed to parse (the failure was reported when offered). */
+    final def failed: Boolean = hasFailed
 
     final def offer(s: String, out: Array[Any], i: Int): Result[Unit, String] =
       val r = read(s, out, i)
       r match
-        case _: Err[?] => ()
+        case _: Err[?] => hasFailed = true
         case _         =>
           append(out(i))
           n += 1
@@ -255,6 +260,61 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
       type Elem = self.Elem
       def element                      = self.element
       private[flagged] def collector() = new Collector.WrapperCollector(self.collector(), f)
+
+  /** A value spanning a fixed number of consecutive tokens, one per element: `point: (Int, Int)`
+    * parses `--point 3 4`. The arity is the product's size, statically known; each token is parsed
+    * by the element's [[Value]] parser and the elements are combined into the product. Instances
+    * exist for any tuple of `Value`-parseable types, and a case class opts in with
+    * `derives Parser.Product`. Deliberately not a [[Value]]: it cannot appear where single tokens
+    * are consumed (repeated elements, `Map` keys/values), which keeps those grammars unambiguous.
+    * Repetition is last-wins, like single-value options; the `--opt=v` and attached short forms are
+    * rejected (each element is its own token).
+    */
+  sealed trait Product[A] extends Parser[A]:
+    self =>
+    private[flagged] def elements: IArray[Value[?]]
+    private[flagged] def metavars: IArray[String]
+    private[flagged] def buildFrom(elems: Array[Any]): Result[A, String]
+
+    final def arity: Int       = elements.length
+    final def typeName: String = metavars.mkString(" ")
+
+    /** The pre-bracketed help metavar: `<x> <y>`. */
+    private[flagged] final def helpMetavar: String = metavars.map(m => s"<$m>").mkString(" ")
+
+    private[flagged] final def buildInto(
+        elems: Array[Any],
+        out: Array[Any],
+        i: Int
+    ): Result[Unit, String] =
+      intoSlot(buildFrom(elems), out, i)
+
+    /** A product spans several tokens; a single-token read is an error. */
+    private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
+      Result.task:
+        eval.raise(s"'$s': expected $arity values")
+
+    def emap[B](f: A => Result[B, String]): Product[B] = new Product[B]:
+      private[flagged] def elements                     = self.elements
+      private[flagged] def metavars                     = self.metavars
+      private[flagged] def buildFrom(elems: Array[Any]) = self.buildFrom(elems).flatMap(f)
+
+  object Product:
+    /** Derivation: `case class Point(x: Int, y: Int) derives Parser.Product` — the fields parse
+      * from consecutive tokens and their (kebab-cased) names become the help metavars.
+      */
+    inline def derived[A](using m: Mirror.ProductOf[A]): Product[A] =
+      internal.Derive.productValue[A]
+
+  /** Called by derivation. Not intended for direct use. */
+  private[flagged] def productOf[A](
+      elems: IArray[Value[?]],
+      metas: IArray[String],
+      build: Array[Any] => Result[A, String]
+  ): Product[A] = new Product[A]:
+    private[flagged] def elements                     = elems
+    private[flagged] def metavars                     = metas
+    private[flagged] def buildFrom(elems: Array[Any]) = build(elems)
 
   /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with `Nil`
     * when no `--` is given — return `Err` to require one).
@@ -390,6 +450,13 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
       def prog                  = name
 
   // ---- instances --------------------------------------------------------------
+
+  /** Any tuple whose element types all have `Value` parsers spans that many consecutive tokens:
+    * `point: (Int, Int)` parses `--point 3 4`. The `H *: T` shape (rather than a
+    * `T <: NonEmptyTuple` bound) lets implicit search disqualify the candidate for non-tuple types
+    * on the type constructor alone — the bound check measurably taxes every field summon.
+    */
+  inline given [H, T <: Tuple] => Product[H *: T] = internal.Derive.tupleProduct[H *: T]
 
   given [A] => (elem: Value[A]) => Repeated[List[A]]:
     type Elem = A
