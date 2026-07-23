@@ -8,7 +8,7 @@ import mill.scalalib.*
 import mill.scalajslib.*
 import mill.scalajslib.api.*
 import mill.scalanativelib.*
-import mill.scalanativelib.api.ReleaseMode
+import mill.scalanativelib.api.{LTO, ReleaseMode}
 import mill.contrib.jmh.JmhModule
 
 object Versions:
@@ -78,6 +78,18 @@ object flagged extends Module:
   object native extends FlaggedModule, BaseNativeModule, PublishSettings, JvmNativeSources:
     object test extends FlaggedTests, ScalaNativeTests
 
+/** Puts flagged on the run classpath as its packaged jar instead of a directory of class files,
+  * so benchmarks see the library the way a project resolving it from a Maven repository would —
+  * mainargs and case-app are already jars from the coursier cache. CompileBench hands this
+  * classpath to the dotty driver, so it also governs where the compiler reads flagged's TASTy.
+  */
+trait FlaggedFromJar extends JavaModule:
+  override def runClasspath = Task {
+    val local =
+      (flagged.jvm.localRunClasspath() ++ flagged.jvm.compileResources()).map(_.path).toSet
+    super.runClasspath().filterNot(ref => local(ref.path)) :+ flagged.jvm.jar()
+  }
+
 object `bench-portable` extends Module:
   trait BenchPortableModule extends BaseModule, PlatformScalaModule:
     def mvnDeps = Seq(
@@ -85,7 +97,7 @@ object `bench-portable` extends Module:
       mvn"com.github.alexarchambault::case-app::2.1.0"
     )
 
-  object jvm extends BenchPortableModule:
+  object jvm extends BenchPortableModule, FlaggedFromJar:
     def moduleDeps = Seq(flagged.jvm)
 
   object js extends BenchPortableModule, BaseJsModule:
@@ -99,10 +111,27 @@ object `bench-portable` extends Module:
     def moduleDeps = Seq(flagged.native)
     override def releaseMode: T[ReleaseMode] = Task { ReleaseMode.ReleaseFast }
 
-object bench extends BaseModule, JmhModule:
+  /** The recommended Native release configuration measured as "Native (max)" in
+    * `bench/results.md`: release-full, thin LTO, no GC (sound for a parse-once-and-exit CLI).
+    */
+  object nativeMax extends BenchPortableModule, BaseNativeModule:
+    override def platformCrossSuffix         = "native"
+    def moduleDeps                           = Seq(flagged.native)
+    override def releaseMode: T[ReleaseMode] = Task { ReleaseMode.ReleaseFull }
+    override def nativeLTO: T[LTO]           = Task { LTO.Thin }
+    override def nativeGC: T[String]         = Task { "none" }
+
+object bench extends BaseModule, JmhModule, FlaggedFromJar:
   def jmhCoreVersion = "1.37"
   def moduleDeps     = Seq(`bench-portable`.jvm)
-  def mvnDeps = super.mvnDeps() ++ Seq(mvn"org.scala-lang::scala3-compiler:${Versions.scala}")
+  def mvnDeps = super.mvnDeps() ++ Seq(
+    mvn"org.scala-lang::scala3-compiler:${Versions.scala}",
+    // realistic-scenario runtime rows only: builder/reflection libraries with no
+    // derivation to measure at compile time (picocli is Java, JVM-only)
+    mvn"com.github.scopt::scopt:4.1.0",
+    mvn"org.rogach::scallop:5.1.0",
+    mvn"info.picocli:picocli:4.7.6"
+  )
 
 object examples extends BaseModule:
   def moduleDeps = Seq(flagged.jvm)
