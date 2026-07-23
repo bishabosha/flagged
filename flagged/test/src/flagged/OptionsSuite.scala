@@ -171,18 +171,7 @@ class OptionsSuite extends munit.FunSuite:
       ok(
         Flagged.parse[FactoryCollections](
           Seq(
-            "--tag",
-            "a",
-            "--tag",
-            "b",
-            "--tag",
-            "a",
-            "--level",
-            "3",
-            "--level",
-            "1",
-            "--raw",
-            "x"
+            "--tag", "a", "--tag", "b", "--tag", "a", "--level", "3", "--level", "1", "--raw", "x"
           )
         )
       ),

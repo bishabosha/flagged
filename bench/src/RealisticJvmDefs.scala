@@ -48,8 +48,8 @@ final case class ScoptConfig(
     psFormat: Option[String] = None
 )
 
-/** scallop couples definition and parse: a `ScallopConf` is built and verified per argument
-  * list, so parser construction is part of every parse — that is the library's usage model.
+/** scallop couples definition and parse: a `ScallopConf` is built and verified per argument list,
+  * so parser construction is part of every parse — that is the library's usage model.
   */
 final class ScallopDocker(args: Seq[String]) extends ScallopConf(args):
   object run extends Subcommand("run"):
@@ -92,7 +92,7 @@ final class ScallopDocker(args: Seq[String]) extends ScallopConf(args):
 
 object RealisticJvmDefs:
 
-  private val builder = OParser.builder[ScoptConfig]
+  private val builder     = OParser.builder[ScoptConfig]
   private val scoptParser =
     import builder.*
     OParser.sequence(
@@ -102,7 +102,9 @@ object RealisticJvmDefs:
         .children(
           opt[String]("name").action((v, c) => c.copy(name = Some(v))),
           opt[String]('e', "env").unbounded().action((v, c) => c.copy(env = c.env :+ v)),
-          opt[String]('p', "publish").unbounded().action((v, c) => c.copy(publish = c.publish :+ v)),
+          opt[String]('p', "publish")
+            .unbounded()
+            .action((v, c) => c.copy(publish = c.publish :+ v)),
           opt[String]('v', "volume").unbounded().action((v, c) => c.copy(volume = c.volume :+ v)),
           opt[String]('l', "label").unbounded().action((v, c) => c.copy(label = c.label :+ v)),
           opt[String]('w', "workdir").action((v, c) => c.copy(workdir = Some(v))),
@@ -134,7 +136,9 @@ object RealisticJvmDefs:
         .children(
           opt[Unit]('a', "all").action((_, c) => c.copy(psAll = true)),
           opt[Unit]('q', "quiet").action((_, c) => c.copy(psQuiet = true)),
-          opt[String]('f', "filter").unbounded().action((v, c) => c.copy(psFilter = c.psFilter :+ v)),
+          opt[String]('f', "filter")
+            .unbounded()
+            .action((v, c) => c.copy(psFilter = c.psFilter :+ v)),
           opt[Int]('n', "last").action((v, c) => c.copy(psLast = v)),
           opt[String]("format").action((v, c) => c.copy(psFormat = Some(v)))
         )
@@ -210,7 +214,7 @@ object RealisticJvmDefs:
     r.cmd() == e.cmd
 
   def picocliAgrees(args: Array[String]): Boolean =
-    val e = RealisticDefs.expectedF
+    val e               = RealisticDefs.expectedF
     def once(): Boolean =
       val pr = picocliParse(args)
       val r  = picocliDocker.getSubcommands.get("run").getCommand[PicocliDocker.Run]

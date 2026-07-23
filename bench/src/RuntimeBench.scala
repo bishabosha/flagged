@@ -37,11 +37,11 @@ class RuntimeBench:
   private val mapArgs      = Seq("--define", "a=1", "--define", "b=2", "--define", "c=3")
   // options before positionals: mainargs' Leftover consumes everything after the image token
   private val realisticArgs = Seq(
-    "run", "--name", "web", "-e", "PGHOST=db", "-e", "PGPORT=5432", "-p", "8080:80",
-    "-p", "8443:443", "-v", "/srv/site:/usr/share/nginx/html:ro", "--label", "app=web",
-    "--label", "env=prod", "--workdir", "/app", "--user", "1000:1000", "--memory", "512m",
-    "--cpus", "1.5", "--restart", "on-failure", "--network", "bridge", "--detach", "--rm",
-    "--read-only", "nginx:1.27", "nginx-debug"
+    "run", "--name", "web", "-e", "PGHOST=db", "-e", "PGPORT=5432", "-p", "8080:80", "-p",
+    "8443:443", "-v", "/srv/site:/usr/share/nginx/html:ro", "--label", "app=web", "--label",
+    "env=prod", "--workdir", "/app", "--user", "1000:1000", "--memory", "512m", "--cpus", "1.5",
+    "--restart", "on-failure", "--network", "bridge", "--detach", "--rm", "--read-only",
+    "nginx:1.27", "nginx-debug"
   )
   private val realisticArr = realisticArgs.toArray
 

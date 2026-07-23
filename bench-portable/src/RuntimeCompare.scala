@@ -22,31 +22,31 @@ object RuntimeCompare:
   private val leftoverArgs = Seq("-s", "2", "1", "2", "3", "4", "5")
   // options before positionals: mainargs' Leftover consumes everything after the image token
   private val realisticArgs = Seq(
-    "run", "--name", "web", "-e", "PGHOST=db", "-e", "PGPORT=5432", "-p", "8080:80",
-    "-p", "8443:443", "-v", "/srv/site:/usr/share/nginx/html:ro", "--label", "app=web",
-    "--label", "env=prod", "--workdir", "/app", "--user", "1000:1000", "--memory", "512m",
-    "--cpus", "1.5", "--restart", "on-failure", "--network", "bridge", "--detach", "--rm",
-    "--read-only", "nginx:1.27", "nginx-debug"
+    "run", "--name", "web", "-e", "PGHOST=db", "-e", "PGPORT=5432", "-p", "8080:80", "-p",
+    "8443:443", "-v", "/srv/site:/usr/share/nginx/html:ro", "--label", "app=web", "--label",
+    "env=prod", "--workdir", "/app", "--user", "1000:1000", "--memory", "512m", "--cpus", "1.5",
+    "--restart", "on-failure", "--network", "bridge", "--detach", "--rm", "--read-only",
+    "nginx:1.27", "nginx-debug"
   )
 
   private val benchmarks: List[(String, () => Any)] = List(
-    "empty_flagged"     -> (() => FlaggedDefs.simple.parse(emptyArgs)),
-    "empty_mainargs"    -> (() => MainargsDefs.simple.constructRaw(emptyArgs)),
-    "empty_caseapp"     -> (() => CaseappDefs.simple.detailedParse(emptyArgs)),
-    "simple_flagged"    -> (() => FlaggedDefs.simple.parse(simpleArgs)),
-    "simple_mainargs"   -> (() => MainargsDefs.simple.constructRaw(simpleArgs)),
-    "simple_caseapp"    -> (() => CaseappDefs.simple.detailedParse(simpleArgs)),
-    "repeated_flagged"  -> (() => FlaggedDefs.simple.parse(repeatedArgs)),
-    "repeated_mainargs" -> (() => MainargsDefs.simple.constructRaw(repeatedArgs)),
-    "repeated_caseapp"  -> (() => CaseappDefs.simple.detailedParse(repeatedArgs)),
-    "bundled_flagged"   -> (() => FlaggedDefs.simple.parse(bundledArgs)),
-    "bundled_mainargs"  -> (() => MainargsDefs.simple.constructRaw(bundledArgs)),
-    "counter_flagged"   -> (() => FlaggedDefs.verbosity.parse(counterArgs)),
-    "counter_caseapp"   -> (() => CaseappDefs.verbosity.detailedParse(counterArgs)),
-    "group_flagged"     -> (() => FlaggedDefs.withGroup.parse(groupArgs)),
-    "group_caseapp"     -> (() => CaseappDefs.withGroup.detailedParse(groupArgs)),
-    "leftover_flagged"  -> (() => FlaggedDefs.nums.parse(leftoverArgs)),
-    "leftover_mainargs" -> (() => MainargsDefs.nums.constructRaw(leftoverArgs)),
+    "empty_flagged"      -> (() => FlaggedDefs.simple.parse(emptyArgs)),
+    "empty_mainargs"     -> (() => MainargsDefs.simple.constructRaw(emptyArgs)),
+    "empty_caseapp"      -> (() => CaseappDefs.simple.detailedParse(emptyArgs)),
+    "simple_flagged"     -> (() => FlaggedDefs.simple.parse(simpleArgs)),
+    "simple_mainargs"    -> (() => MainargsDefs.simple.constructRaw(simpleArgs)),
+    "simple_caseapp"     -> (() => CaseappDefs.simple.detailedParse(simpleArgs)),
+    "repeated_flagged"   -> (() => FlaggedDefs.simple.parse(repeatedArgs)),
+    "repeated_mainargs"  -> (() => MainargsDefs.simple.constructRaw(repeatedArgs)),
+    "repeated_caseapp"   -> (() => CaseappDefs.simple.detailedParse(repeatedArgs)),
+    "bundled_flagged"    -> (() => FlaggedDefs.simple.parse(bundledArgs)),
+    "bundled_mainargs"   -> (() => MainargsDefs.simple.constructRaw(bundledArgs)),
+    "counter_flagged"    -> (() => FlaggedDefs.verbosity.parse(counterArgs)),
+    "counter_caseapp"    -> (() => CaseappDefs.verbosity.detailedParse(counterArgs)),
+    "group_flagged"      -> (() => FlaggedDefs.withGroup.parse(groupArgs)),
+    "group_caseapp"      -> (() => CaseappDefs.withGroup.detailedParse(groupArgs)),
+    "leftover_flagged"   -> (() => FlaggedDefs.nums.parse(leftoverArgs)),
+    "leftover_mainargs"  -> (() => MainargsDefs.nums.constructRaw(leftoverArgs)),
     "realistic_flagged"  -> (() => RealisticDefs.flaggedDocker.parse(realisticArgs)),
     "realistic_mainargs" -> (() => RealisticDefs.mainargsDocker.runEither(realisticArgs)),
     "realistic_caseapp"  -> (() => RealisticDefs.caseappDocker(realisticArgs))
