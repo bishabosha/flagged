@@ -15,10 +15,11 @@ JMH covers the JVM; `bench-portable/` runs the same runtime scenarios (shared de
 best-of-rounds timer:
 
 ```console
-$ ./mill bench-portable.jvm.run      # JVM reference
-$ ./mill bench-portable.js.run       # Node
-$ ./mill bench-portable.jsWasm.run   # Wasm
-$ ./mill bench-portable.native.run   # Native (release-fast)
+$ ./mill bench-portable.jvm.run        # JVM reference
+$ ./mill bench-portable.js.run         # Node
+$ ./mill bench-portable.jsWasm.run     # Wasm
+$ ./mill bench-portable.native.run     # Native (release-fast)
+$ ./mill bench-portable.nativeMax.run  # Native (release-full, thin LTO, no GC)
 ```
 
 ```console
@@ -30,8 +31,10 @@ $ ./mill bench.runJmh -p lib=flagged -p scenario=options25 'CompileBench.*'
 ```
 
 For allocation, read the `gc.alloc.rate.norm` rows (bytes allocated per parse). For quick
-iteration add `-f 0 -wi 1 -i 1`; published numbers should use the defaults (forked JVM, 5+5
-iterations).
+iteration add `-f 0 -wi 1 -i 1`; published numbers use the annotation defaults for
+`CompileBench` (one forked JVM) and `-f 5 -prof gc` for the runtime suites (`RuntimeBench`,
+`MethodBench`, `BaselineBench`) — five forks per benchmark for every library, latency and
+allocation from the same runs.
 
 ## What is measured
 
@@ -79,6 +82,10 @@ it; setup asserts both succeed and agree on the invoked result.
 
 - Compile times measure a warm in-process compiler on this module's classpath; absolute values
   are not comparable to cold `scala-cli`/sbt runs, only across `lib` values within a scenario.
+- All three libraries sit on the benchmark classpath as jars: flagged as its packaged jar
+  (`FlaggedFromJar` in `build.mill` swaps the local classes directory for `flagged.jvm.jar`),
+  mainargs and case-app from the coursier cache — matching how a project resolving them from a
+  Maven repository sees them, and keeping the compiler's classpath reads symmetric.
 - Library versions are pinned in `build.mill`; results are only meaningful for the versions
   they were run against.
 - flagged reports errors accumulated and case-app also continues after errors, while mainargs
