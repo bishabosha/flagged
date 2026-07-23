@@ -49,6 +49,14 @@ object KebabProbe:
     "pushDefault", "mergeStrategy", "rebaseOnto", "parseURL", "enableHTTP2"
   )
 
+  /** `n` distinct multiword identifiers (prefix x suffix combinations), for the scaling curve. */
+  def genLabels(n: Int): List[String] =
+    val prefixes = List("max", "min", "log", "output", "input", "connect", "read", "write", "cache",
+      "config", "retry", "buffer", "chunk", "remote", "branch", "merge")
+    val suffixes =
+      List("Retries", "Level", "TimeoutMs", "Path", "Format", "Delay", "Size", "Prefix")
+    (for s <- suffixes; p <- prefixes yield p + s).take(n)
+
   private val lowerArms =
     ('A' to 'Z').map(c => s"""  case "$c" => "${c.toLower}"""").mkString("\n")
   private val upperArms =
@@ -238,3 +246,11 @@ object KebabProbe:
         "dedup50-tuple" -> dedupTupleSource(classifierRegex, labels)
       )
     do println(f"$name%-16s ${best(src)}%8.1f")
+    println()
+    // the working encoding's scaling curve (membership fold is quadratic in the field count)
+    println(f"${"n"}%-6s dedup-tuple  labels-only  (ms, best of 5)")
+    for n <- List(4, 8, 16, 32, 64, 128) do
+      val ls = genLabels(n)
+      val d  = best(dedupTupleSource(classifierRegex, ls))
+      val b  = best(s"object Use:\n  type Labels = ${tupleType(ls)}\n")
+      println(f"$n%-6d $d%11.1f $b%12.1f")
