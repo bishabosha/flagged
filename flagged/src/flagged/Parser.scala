@@ -33,8 +33,9 @@ object Trailing:
   *   - [[Parser.Product]] — a fixed number of consecutive tokens, one per element (`--point 3 4`)
   *   - [[Parser.Repeated]] — any number of occurrences of a `Value` element, combined
   *   - [[Parser.Trailing]] — the raw arguments after `--`, taken verbatim
-  *   - [[Parser.Command]] — a single command's grammar; as a field, a spliced options group
-  *     ([[Parser.CommandGroup]] is a sum: nested subcommands)
+  *   - [[Parser.Command]] — a single command's grammar ([[Parser.CommandGroup]] is a sum: nested
+  *     subcommands; [[Parser.Shared]] is a spliceable options group). A full command cannot be a
+  *     field — a group-case with it as sole field embeds it as a subcommand instead
   *
   * The same type is used at every level, and field semantics follow the instance's subtype, which
   * derivation requires to be statically known. Every parser is also runnable: `parse`/`parseOrExit`
@@ -42,7 +43,7 @@ object Trailing:
   */
 @scala.annotation.implicitNotFound(
   "No given Parser[${A}] found.\n" +
-    "For a subcommand enum add `derives Parser.CommandGroup`; for a spliceable options group add `derives Parser.Command`;\n" +
+    "For a subcommand enum add `derives Parser.CommandGroup`; for a spliceable options group add `derives Parser.Shared`;\n" +
     "for an enum parsed by case name, add `derives Parser.Enumerated`;\n" +
     "for other value types provide one with Parser.of / Parser.flag / Parser.repeated / Parser.trailing."
 )
@@ -357,6 +358,21 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     /** Derivation for subcommands: `enum Cmd derives Parser.CommandGroup`. */
     inline def derived[A](using m: Mirror.SumOf[A]): CommandGroup[A] = internal.Derive.sum[A]
 
+  /** A spliceable options group: as a field of another command, its options parse as if declared
+    * inline and the group is rebuilt as a value. Derivation enforces the invariants that make
+    * splicing always safe — no positional, trailing, subcommand, or `@greedy` fields — so a command
+    * embedding a `Shared` group needs no knowledge of its contents. A `Shared` is still a
+    * [[Command]]: it parses standalone, renders help, and `emap`/`withProg` keep the shape (and its
+    * invariants — they never change the option specs).
+    */
+  sealed trait Shared[A] extends Command[A]:
+    override def emap[B](f: A => Result[B, String]): Shared[B] = makeShared(emapImpl(f), prog)
+    override def withProg(name: String): Shared[A]             = makeShared(impl, name)
+  object Shared:
+    /** Derivation for a spliceable options group: `case class LogOpts(...) derives Parser.Shared`.
+      */
+    inline def derived[A](using m: Mirror.ProductOf[A]): Shared[A] = internal.Derive.shared[A]
+
   // ---- constructors ----------------------------------------------------------
 
   /** Build a single-value parser from a name and a parse function. */
@@ -446,6 +462,14 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
   /** Called by derivation for sums. Not intended for direct use. */
   def makeGroup[A](cmd: flagged.internal.Command, name: String): CommandGroup[A] =
     new CommandGroup[A]:
+      private[flagged] def impl = cmd
+      def prog                  = name
+
+  /** Called by derivation for shared groups. Not intended for direct use: [[Shared]]'s splice
+    * invariants are guaranteed only for derived instances.
+    */
+  def makeShared[A](cmd: flagged.internal.Command, name: String): Shared[A] =
+    new Shared[A]:
       private[flagged] def impl = cmd
       def prog                  = name
 

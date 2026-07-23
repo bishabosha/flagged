@@ -8,7 +8,7 @@ import flagged.*
 case class Output(
     @short('q') @help("Operate quietly") quiet: Boolean = false,
     @short('v') @help("Increase verbosity (repeatable)") verbose: Count = Count(0)
-) derives Parser.Command
+) derives Parser.Shared
 
 /** A git-like CLI demonstrating nested subcommands derived from enums. */
 @name("gitto")

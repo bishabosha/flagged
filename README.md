@@ -125,7 +125,7 @@ The field's `Parser` instance decides its shape:
 | `x: (A, B)` (any tuple of `Value` types, or a case class deriving `Parser.Product`) | fixed multi-token value: `--x 1 2` |
 | `x: E` (enum deriving `Parser.CommandGroup`) | nested subcommands |
 | `x: E` (enum deriving `Parser.Enumerated`) | value matched by case name (`--color red`) |
-| `x: P` (case class deriving `Parser.Command`) | options group spliced into this command |
+| `x: P` (case class deriving `Parser.Shared`) | options group spliced into this command |
 | `x: Trailing` | the raw arguments after `--`, verbatim |
 | `@positional x: A` | positional argument (same rules) |
 
@@ -199,7 +199,7 @@ A single `@run` method will become the name of the root program, otherwise a gro
   `map`/`emap` — including whole commands, which gives cross-field validation before
   your code runs. Flag and repeated shapes are pluggable too (`Parser.flag`,
   `Parser.repeated`), so occurrence bounds and non-empty constraints are expressible.
-- **Option groups:** a case-class-typed field splices that group's options into the
+- **Option groups:** a `derives Parser.Shared` case-class field splices that group's options into the
   surrounding command and reconstructs the group as a value. Groups nest, work inside
   subcommand cases, can be optional (`Option[Group]`), and can be prefixed (`@name`
   on the field) to be spliced more than once.
@@ -255,14 +255,39 @@ enum LogLevel derives Parser.Enumerated:
 gives you `--level warn` (kebab-cased, matched exactly) and the metavar
 `<debug|info|warn|error>`.
 
-### Share options between commands
+### Embed a command defined elsewhere
 
-A field whose type is a case class with its own `Parser` splices that group's
-options into the surrounding command — they parse as if declared inline, and the
-group is reconstructed as a value:
+A command-group case whose sole field carries a full `Parser.Command` embeds that
+command wholesale — options, positionals, trailing and all. The case's grammar *is*
+the embedded command's (safe, because subcommand dispatch hands the remaining tokens
+to it rather than merging grammars), and the parse result is wrapped in the case:
 
 ```scala
-case class LogOpts(@short('q') quiet: Boolean = false, logLevel: String = "info") derives Parser.Command
+// from another module or classpath
+case class ExternalTool(@short('f') force: Boolean = false, @positional target: String)
+    derives Parser.Command
+
+enum Cli derives Parser.CommandGroup:
+  case Build(release: Boolean = false)
+  @name("ext") @help("Run the external tool")
+  case External(tool: ExternalTool)
+// cli ext -f thing   →   Cli.External(ExternalTool(force = true, target = "thing"))
+```
+
+`@name`/`@help`/`@hidden` on the *case* rename and document the embedded command
+locally; annotations on the field itself are a compile error (they could not take
+effect).
+
+### Share options between commands
+
+A field whose type derives `Parser.Shared` splices that group's options into the
+surrounding command — they parse as if declared inline, and the group is
+reconstructed as a value. `Shared` derivation enforces the invariants that make
+splicing always safe (no positional, trailing, subcommand, or `@greedy` fields), at
+compile time:
+
+```scala
+case class LogOpts(@short('q') quiet: Boolean = false, logLevel: String = "info") derives Parser.Shared
 
 case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser.Command
 // serve --port 9000 -q --log-level debug

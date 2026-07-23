@@ -50,7 +50,8 @@ a library not named does not have it.
 | Variadic positionals, typed | repeated `@positional` field | mainargs `Leftover[T]`; scopt `.unbounded()`; scallop `trailArg[List[T]]`; picocli `index = "1..*"`; case-app `RemainingArgs` (untyped) |
 | Number-only options (`-5`, as `tail -5`) | no — `-<digits>` is a value, by design | scallop `number()` |
 | Subcommands | enums or `@run` objects, arbitrarily nested | scallop, picocli: arbitrarily nested; case-app: nested via multi-word names; scopt `cmd().children`, nestable into one flat config; mainargs: one level |
-| Shared option groups (splicing) | yes, nested, spliced into the command | mainargs `TokensReader.Class`; case-app `@Recurse`; picocli `@Mixin`; scopt: builder fragments (values stay flat) |
+| Shared option groups (splicing) | `derives Parser.Shared`, nested; splice-safety invariants checked at the group's derivation | mainargs `TokensReader.Class`; case-app `@Recurse`; picocli `@Mixin`; scopt: builder fragments (values stay flat) |
+| Embedding a foreign command as a subcommand | sole-field group case substitutes the full command | picocli: subcommand classes from any source; case-app: `Command` objects |
 | Optional group | `Option[Group]` | case-app; picocli `@ArgGroup` multiplicity `0..1` |
 | Prefixed group names | `@name` on the group field | case-app `@Recurse("prefix")` |
 | Declarative cross-option constraints | no — `emap` checks after parse | scallop `conflicts`/`codependent`/`requireOne`; picocli `@ArgGroup` exclusive / co-occurring |

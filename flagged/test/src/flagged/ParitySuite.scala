@@ -19,7 +19,7 @@ case class ParityCount(
 case class ParityAuth(
     user: String,
     pass: String
-) derives Parser.Command
+) derives Parser.Shared
 
 case class ParityApp(
     url: String,
@@ -133,7 +133,7 @@ case class ParityNet(
 case class ParityOut(
     color: Boolean = false,
     pager: Boolean = false
-) derives Parser.Command
+) derives Parser.Shared
 
 case class ParityGrouped(
     input: String = "",

@@ -21,7 +21,7 @@ case class FVerbosity(
 case class FLog(
     @short('q') quiet: Boolean = false,
     logLevel: String = "info"
-) derives Parser.Command
+) derives Parser.Shared
 
 case class FWithGroup(
     host: String = "localhost",

@@ -234,13 +234,20 @@ object Assemble:
       case cg: Parser.CommandGroup[?] =>
         Plan.Commands(f.index, f.optional, f.default, cg.impl)
 
-      case c: Parser.Command[?] =>
-        val inner = c.impl
+      case s: Parser.Shared[?] =>
+        // backstop for instances built through `makeShared` directly: derivation guarantees these
+        val inner = s.impl
         if inner.positionals.nonEmpty then
           bad("a spliced options group cannot contain positional fields")
         if inner.trailing.nonEmpty then
           bad("a spliced options group cannot contain a trailing field")
+        if inner.sub.nonEmpty then bad("a spliced options group cannot contain a subcommand field")
         Plan.Grouped(f.index, f.label, f.nameAnn, f.group, f.optional, f.default, inner)
+
+      case c: Parser.Command[?] =>
+        bad(
+          "a command-shaped Parser cannot be a field: derive Parser.Shared for a spliceable options group (a full command can be embedded as the sole field of a command-group case)"
+        )
 
       case vf: Parser.ValuedFlag[?] =>
         if f.positional then positional("value", Mode.Single(vf, f.optional), posKind)

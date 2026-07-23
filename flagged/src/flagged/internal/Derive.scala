@@ -9,9 +9,11 @@ import flagged.Parser
 import flagged.meta.{Ann, AnnotMirror, Defaults}
 
 /** `Mirror`-based derivation. Structure and construction come from `Mirror`; field semantics are
-  * the field parser's schema: command-shaped instances become nested subcommands (sums) or spliced
-  * option groups (products), value shapes parse as option or positional values. Nothing is derived
-  * across type boundaries — each enum or options group in a command tree provides its own instance.
+  * the field parser's schema: `CommandGroup` instances become nested subcommands, `Shared`
+  * instances spliced option groups, value shapes option or positional values (a bare `Command` is
+  * not a field shape — a group case with one as its sole field embeds it by substitution). Nothing
+  * is derived across type boundaries — each enum or options group in a command tree provides its
+  * own instance.
   *
   * The only macro-backed pieces are [[Defaults]] (term-level: default values are arbitrary
   * expressions), [[flagged.meta.AnnotMirror]] (type-level: annotations reduced to singleton types,
@@ -36,6 +38,25 @@ object Derive:
           versionOf[A, am.MirroredSelfAnnotations]
         )
         Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], onType))
+
+  /** A spliceable options group, for `derives Parser.Shared`: the same derivation as [[product]],
+    * plus the splice invariants checked on the walk's final marks — no positional, trailing,
+    * subcommand, or `@greedy` fields — so a command splicing the group needs no knowledge of its
+    * contents.
+    */
+  inline def shared[A](using m: Mirror.ProductOf[A]): Parser.Shared[A] =
+    summonFrom:
+      case am: AnnotMirror.Product[A] =>
+        val onType = Annots.targetAnnotsOf[am.MirroredSelfAnnotations]
+        val cmd    = Assemble.product(
+          labelsOf[m.MirroredElemLabels],
+          sharedFieldsOf[m.MirroredElemTypes, am.MirroredAnnotations],
+          Defaults.derived[A],
+          onType,
+          arr => steps.result.Result.Ok(m.fromProduct(ArrayProduct(arr))),
+          versionOf[A, am.MirroredSelfAnnotations]
+        )
+        Parser.makeShared[A](cmd, Assemble.progName(constValue[m.MirroredLabel], onType))
 
   inline def sum[A](using m: Mirror.SumOf[A]): Parser.CommandGroup[A] =
     summonFrom:
@@ -130,6 +151,37 @@ object Derive:
             checkDupNames[s0 *: sr]
             walk[t0 *: tr, s0 *: sr].fields
 
+  /** [[fieldsOf]] plus the `Parser.Shared` splice invariants, read off the walk's final marks. */
+  inline def sharedFieldsOf[Types <: Tuple, Slots <: Tuple]
+      : List[(Parser[?], Boolean, FieldAnnots)] =
+    inline erasedValue[Types] match
+      case _: EmptyTuple => Nil
+      case _: (t0 *: tr) =>
+        inline erasedValue[Slots] match
+          case _: (s0 *: sr) =>
+            checkDupNames[s0 *: sr]
+            sharedChecked(walk[t0 *: tr, s0 *: sr])
+
+  /** The invariants read the marks through a type parameter, like [[merge]] — a val binding would
+    * widen the transparent walk's refinement.
+    */
+  private transparent inline def sharedChecked[R <: FieldsRes](
+      r: R
+  ): List[(Parser[?], Boolean, FieldAnnots)] =
+    inline if hasBit[r.Marks, PosBit] then
+      error("a shared options group cannot contain positional fields")
+    else ()
+    inline if hasBit[r.Marks, TrailBit] then
+      error("a shared options group cannot contain a trailing field")
+    else ()
+    inline if hasBit[r.Marks, GroupBit] then
+      error("a shared options group cannot contain a subcommand field")
+    else ()
+    inline if hasBit[r.Marks, GreedyBit] then
+      error("a shared options group cannot contain a @greedy option")
+    else ()
+    r.fields
+
   /** Per-subtree summary of the field walk — a single marks bitmask, carried in the *type* of a
     * transparent inline result. Summaries are computed bottom-up and combined in [[merge]], where
     * the shape-dependent cross-field rules are checked — no state flows *into* a subtree, so the
@@ -155,7 +207,7 @@ object Derive:
   type ValuedFlagShape = 3
   type RepeatedShape   = 4
   type TrailingShape   = 5
-  type CommandShape    = 6 // a spliced options group
+  type SharedShape     = 6 // a spliced options group
   type GroupShape      = 7 // a subcommand group
   type ProductShape    = 8 // a fixed-arity multi-token value
 
@@ -399,7 +451,7 @@ object Derive:
                           HasAnnT[flagged.group, Anns] match
                             case true  => "@group has no effect on a subcommand field"
                             case false => ""
-    case CommandShape =>
+    case SharedShape =>
       HasAnnT[flagged.positional, Anns] match
         case true  => "@positional cannot be combined with a command-shaped Parser"
         case false =>
@@ -418,7 +470,7 @@ object Derive:
   type MarksOf[S <: Int, Anns] <: Int = S match
     case TrailingShape => TrailBit
     case GroupShape    => GroupBit
-    case CommandShape  => NoMarks
+    case SharedShape   => NoMarks
     case _             =>
       PosGreedyMark[Anns, S]
 
@@ -458,8 +510,12 @@ object Derive:
           case _: Parser.Repeated[?]     => fin[RepeatedShape, F, Anns](p)
           case _: Parser.Trailing[?]     => fin[TrailingShape, F, Anns](p)
           case _: Parser.CommandGroup[?] => fin[GroupShape, F, Anns](p)
-          case _: Parser.Command[?]      => fin[CommandShape, F, Anns](p)
-          case _                         =>
+          case _: Parser.Shared[?]       => fin[SharedShape, F, Anns](p)
+          case _: Parser.Command[?]      =>
+            error(
+              "a command-shaped Parser cannot be a field: derive Parser.Shared for a spliceable options group, or Parser.CommandGroup for subcommands (a full command can be embedded as the sole field of a command-group case)"
+            )
+          case _ =>
             error(
               "the shape of this field's Parser is not statically known: give the given a shape type such as Parser.Value[X], or build it with the Parser constructors / derivation clauses"
             )
@@ -555,8 +611,55 @@ object Derive:
     summonFrom:
       case v: ValueOf[H]          => SubEntry.Leaf(v.value)
       case p: Parser[H]           => SubEntry.Node(() => p)
-      case m: Mirror.ProductOf[H] => SubEntry.Node(() => product[H](using m))
+      case m: Mirror.ProductOf[H] => SubEntry.Node(() => caseCommand[H](using m))
       case _                      => SubEntry.Node(() => summonInline[Parser[H]])
+
+  /** A product case of the sum: normally derived in place; a case whose sole field carries a full
+    * `Parser.Command` embeds that command wholesale — substitution: the case's grammar *is* the
+    * embedded command's (options, positionals, trailing and all — safe, because subcommand dispatch
+    * delegates the remaining tokens rather than merging grammars), and the build wraps its result
+    * in the case constructor. `@name`/`@help`/`@hidden` still apply on the *case*; `Shared` and
+    * `CommandGroup` fields keep their splice/nesting meaning. Deliberately scoped to group cases: a
+    * top-level wrapper class has no need for it (use the command's parser directly).
+    */
+  inline def caseCommand[H](using m: Mirror.ProductOf[H]): Parser[H] =
+    inline erasedValue[m.MirroredElemTypes] match
+      case _: (e *: EmptyTuple) =>
+        // decided by a boolean probe so `product[H]` expands outside any summonFrom binder —
+        // a `p: Parser[e]` binder in scope would shadow the field givens its inner summons need
+        inline if isEmbeddableCommand[e] then embedCase[H, e]
+        else product[H]
+      case _ => product[H]
+
+  /** Whether `E`'s instance is a full command — not a subcommand group, not a shared group. */
+  private transparent inline def isEmbeddableCommand[E]: Boolean =
+    summonFrom:
+      case p: Parser[E] =>
+        inline p match
+          case _: Parser.CommandGroup[?] => false
+          case _: Parser.Shared[?]       => false
+          case _: Parser.Command[?]      => true
+          case _                         => false
+      case _ => false
+
+  /** The substitution itself: the embedded command's grammar with the build composed with the case
+    * constructor. The sole field may not carry annotations (they could not take effect — rename or
+    * hide via the annotations on the enum case).
+    */
+  inline def embedCase[H, E](using m: Mirror.ProductOf[H]): Parser[H] =
+    summonFrom:
+      case am: AnnotMirror.Product[H] =>
+        inline erasedValue[am.MirroredAnnotations] match
+          case _: (EmptyTuple *: EmptyTuple) => ()
+          case _                             =>
+            error(
+              "annotations have no effect on an embedded command field (put @name/@help/@hidden on the enum case)"
+            )
+        val c = summonInline[Parser[E]].asInstanceOf[Parser.Command[E]]
+        Parser.make[H](
+          c.emapImpl(a => steps.result.Result.Ok(m.fromProduct(Tuple1(a)))),
+          c.prog
+        )
 
   // ---- singleton helpers ------------------------------------------------------
 
