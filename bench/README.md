@@ -65,7 +65,7 @@ cannot pose as a fast one.
 | `leftover` | flagged, mainargs | `-s 2 1 2 3 4 5` — typed leftover `Int`s (case-app's remaining args are untyped; option first because mainargs treats everything after the first leftover token as leftover) |
 | `counter` | flagged, case-app | `-v -v -v --target x` (`Count` vs `Int @@ Counter`; mainargs has no counters) |
 | `group` | flagged, case-app | `--host h --port 8080 -q --log-level warn` — shared options group (splice vs `@Recurse`) |
-| `realistic` | all three | a 34-token `run ...` command line against the docker-style CLI above (subcommand dispatch, 17 option occurrences of which 7 hit repeatable options, image + command positionals); setup asserts all three agree on every parsed field |
+| `realistic` | all three + scopt, scallop, picocli | a 34-token `run ...` command line against the docker-style CLI above (subcommand dispatch, 17 option occurrences of which 7 hit repeatable options, image + command positionals); setup asserts every library agrees on every parsed field. The scopt/scallop/picocli rows (`bench/src/RealisticJvmDefs.scala`, `PicocliDocker.java`) are runtime-only: builder/DSL/reflection libraries with no derivation to measure at compile time, and picocli is Java, so none appear in the compile or portable tables |
 
 Definitions per library live in `src/defs/`; scenarios use the closest idiomatic encoding for
 each (e.g. `Flag` for mainargs booleans, `@ExtraName` for case-app short names).

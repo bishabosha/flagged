@@ -2,7 +2,7 @@ package bench
 
 import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.*
-import bench.defs.{FlaggedDefs, MainargsDefs, CaseappDefs, RealisticDefs}
+import bench.defs.{FlaggedDefs, MainargsDefs, CaseappDefs, RealisticDefs, RealisticJvmDefs}
 
 /** Parse latency for identical command lines across the three libraries, against parsers built once
   * in setup (derivation cost is the compile-time benchmark's subject, construction cost is excluded
@@ -43,6 +43,7 @@ class RuntimeBench:
     "--cpus", "1.5", "--restart", "on-failure", "--network", "bridge", "--detach", "--rm",
     "--read-only", "nginx:1.27", "nginx-debug"
   )
+  private val realisticArr = realisticArgs.toArray
 
   /** A failed parse can be faster than a successful one; assert every scenario succeeds. */
   @Setup
@@ -73,8 +74,11 @@ class RuntimeBench:
       "leftover_mainargs" -> mOk(MainargsDefs.nums.constructRaw(leftoverArgs)),
       "map_flagged"       -> fOk(FlaggedDefs.defines.parse(mapArgs)),
       "map_mainargs"      -> mOk(MainargsDefs.defines.constructRaw(mapArgs)),
-      // all three parse and agree on every field, not just succeed
-      "realistic"         -> RealisticDefs.agrees(realisticArgs)
+      // every library parses and agrees on every field, not just succeeds
+      "realistic"         -> RealisticDefs.agrees(realisticArgs),
+      "realistic_scopt"   -> RealisticJvmDefs.scoptAgrees(realisticArgs),
+      "realistic_scallop" -> RealisticJvmDefs.scallopAgrees(realisticArgs),
+      "realistic_picocli" -> RealisticJvmDefs.picocliAgrees(realisticArr)
     )
     val failing = checks.collect { case (name, false) => name }
     if failing.nonEmpty then
@@ -97,6 +101,11 @@ class RuntimeBench:
   @Benchmark def realistic_flagged: Any  = RealisticDefs.flaggedDocker.parse(realisticArgs)
   @Benchmark def realistic_mainargs: Any = RealisticDefs.mainargsDocker.runEither(realisticArgs)
   @Benchmark def realistic_caseapp: Any  = RealisticDefs.caseappDocker(realisticArgs)
+
+  // JVM-only rows: builder/DSL/reflection libraries, runtime comparison only
+  @Benchmark def realistic_scopt: Any   = RealisticJvmDefs.scoptParse(realisticArgs)
+  @Benchmark def realistic_scallop: Any = RealisticJvmDefs.scallopParse(realisticArgs)
+  @Benchmark def realistic_picocli: Any = RealisticJvmDefs.picocliParse(realisticArr)
 
   // ---- flagged x mainargs ---------------------------------------------------------
 

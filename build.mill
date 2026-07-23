@@ -124,7 +124,14 @@ object `bench-portable` extends Module:
 object bench extends BaseModule, JmhModule, FlaggedFromJar:
   def jmhCoreVersion = "1.37"
   def moduleDeps     = Seq(`bench-portable`.jvm)
-  def mvnDeps = super.mvnDeps() ++ Seq(mvn"org.scala-lang::scala3-compiler:${Versions.scala}")
+  def mvnDeps = super.mvnDeps() ++ Seq(
+    mvn"org.scala-lang::scala3-compiler:${Versions.scala}",
+    // realistic-scenario runtime rows only: builder/reflection libraries with no
+    // derivation to measure at compile time (picocli is Java, JVM-only)
+    mvn"com.github.scopt::scopt:4.1.0",
+    mvn"org.rogach::scallop:5.1.0",
+    mvn"info.picocli:picocli:4.7.6"
+  )
 
 object examples extends BaseModule:
   def moduleDeps = Seq(flagged.jvm)

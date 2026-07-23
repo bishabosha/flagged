@@ -364,10 +364,11 @@ Temurin JDK 25, Scala 3.8.3).
 benchmark scenarios, against ~149–214 ms for mainargs and ~396–439 ms for case-app.
 Cost grows linearly with field count, at under 2 ms per field.
 
-**Parse latency:** on non-trivial argument lists Flagged parses in 0.08–0.62 µs,
-1.8–97× faster than mainargs and case-app on the same scenarios, allocating 3.7–175×
+**Parse latency:** on non-trivial argument lists Flagged parses in 0.08–0.75 µs,
+1.8–88× faster than mainargs and case-app on the same scenarios, allocating 3.7–182×
 less — the widest gap on the `realistic` scenario, a docker-style subcommand CLI
-(16× vs mainargs, 97× vs case-app); the hot path aims to allocate only what is necessary to build the target data (further improvements could be made to avoid boxing). The same holds on non-JVM platforms: Flagged
+(13× vs mainargs, 88× vs case-app; scopt, scallop, and picocli, measured on the same
+scenario at runtime only, come out 78–217× slower than Flagged); the hot path aims to allocate only what is necessary to build the target data (further improvements could be made to avoid boxing). The same holds on non-JVM platforms: Flagged
 is the fastest of the three on every scenario on Scala.js, WebAssembly, and Scala
 Native.
 
@@ -378,12 +379,13 @@ derived one
 since its cost grows with options × tokens where the engine's grows with tokens.
 - `@main` def (scala builtin parsing) is the fastest by far (but only handles positional arguments)
 
-## Comparison with mainargs and case-app
+## Comparison with other libraries
 
-[`docs/comparison.md`](docs/comparison.md) has a feature matrix, the deliberate
-behavioral differences (each pinned down in `ParitySuite` against the other
-library's documented behavior), and Flagged's known gaps — shell completions and
-unrecognized-argument passthrough being the two that matter.
+[`docs/comparison.md`](docs/comparison.md) has a feature matrix covering mainargs,
+case-app, scopt, scallop, and picocli, the deliberate behavioral differences from
+mainargs/case-app (each pinned down in `ParitySuite` against the other library's
+documented behavior), and Flagged's known gaps, ranked — shell completions and
+unrecognized-argument passthrough being the two at the top.
 
 ## Getting Flagged
 

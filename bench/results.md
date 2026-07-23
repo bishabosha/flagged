@@ -2,8 +2,8 @@
 
 Produced by the suites in this directory (see `README.md` for methodology and caveats). All
 tables were measured on the date below at the commit below — the base tables in one session,
-the `realistic` rows and the cross-platform table in a follow-up run the same day after the
-`realistic` scenario was added (library sources unchanged in between) — with flagged on the
+the `realistic` table and the cross-platform table in follow-up runs the same day as the
+scenario and its extra libraries were added (library sources unchanged in between) — with flagged on the
 benchmark classpath as its packaged jar (`FlaggedFromJar` in `build.mill`), like the
 mainargs/case-app jars from the coursier cache. JMH scores are averages ± 99.9% confidence intervals; the compile
 table is one forked JVM (3 warmup + 5 measurement iterations), and the runtime tables
@@ -16,7 +16,8 @@ inlining plan, so every library gets the same five-fork aggregation.
   (`FlaggedFromJar`, `nativeMax`)
 - Hardware: Apple M3 Max, 64 GB, macOS 26.5.1
 - JVM: Temurin OpenJDK 25.0.2, Scala 3.8.3, JMH 1.37
-- Library versions: mainargs 0.7.8, case-app 2.1.0
+- Library versions: mainargs 0.7.8, case-app 2.1.0; `realistic` runtime rows also scopt 4.1.0,
+  scallop 5.1.0, picocli 4.7.6
 
 ## Compile time
 
@@ -82,17 +83,6 @@ where user code supplies them (`Parser.of`, `emap`, custom combinators).
 | `simple` — B/op | 464 | 5 632 | 8 707 |
 | `repeated` — µs/op | 0.135 ± 0.005 | 1.000 ± 0.021 | 4.738 ± 0.056 |
 | `repeated` — B/op | 656 | 5 490 | 25 371 |
-| `realistic` — µs/op | 0.615 ± 0.003 | 9.989 ± 0.082 | 59.398 ± 1.823 |
-| `realistic` — B/op | 2 128 | 34 448 | 371 972 |
-
-`realistic` is a docker-style CLI modeled on a subset of `docker` `run`/`pull`/`ps`
-(github.com/docker/cli, Apache-2.0): one subcommand level, a 20-field `run` command with
-mostly optional and four repeatable options, parsed from a 34-token command line — each
-library in its idiomatic subcommand encoding (flagged an enum `Parser.CommandGroup`, mainargs
-`ParserForMethods`, case-app options classes with first-token dispatch; definitions in
-`bench-portable/src/defs/RealisticDefs.scala`, setup asserts all three agree on every parsed
-field). It is the widest gap in the suite: flagged parses it 16× faster than mainargs and 97×
-faster than case-app, allocating 16× and 175× less.
 
 ### flagged × mainargs (short clusters, typed leftover, `Map[K,V]`)
 
@@ -114,8 +104,38 @@ faster than case-app, allocating 16× and 175× less.
 | `group` — µs/op | 0.157 ± 0.009 | 3.216 ± 0.025 |
 | `group` — B/op | 624 | 18 510 |
 
-On non-trivial argument lists flagged parses in 0.08–0.62 µs across all scenarios, 1.8–97×
-faster than mainargs and case-app on the same inputs, allocating 3.7–175× less — the remaining
+### `realistic` — a docker-style CLI, wider field
+
+`realistic` is modeled on a subset of `docker` `run`/`pull`/`ps` (github.com/docker/cli,
+Apache-2.0): one subcommand level, a 20-field `run` command with mostly optional and four
+repeatable options, parsed from a 34-token command line. Beyond the three derivation
+libraries, this scenario also measures the most-used builder/DSL/reflection libraries — scopt,
+scallop, and picocli (the Java standard) — at runtime only, since they have no derivation to
+measure at compile time. Each library uses its idiomatic subcommand encoding (flagged an enum
+`Parser.CommandGroup`, mainargs `ParserForMethods`, case-app options classes with first-token
+dispatch, scopt `cmd(...).children` over one flat config, scallop a `ScallopConf` with
+`Subcommand` objects, picocli annotated Java classes; definitions in
+`bench-portable/src/defs/RealisticDefs.scala` and `bench/src/RealisticJvmDefs.scala`). Setup
+asserts all six agree on every parsed field. All rows below are from one run:
+
+| Library | µs/op | B/op |
+|---|---|---|
+| flagged | 0.745 ± 0.070 | 2 147 |
+| mainargs | 9.835 ± 0.199 | 34 696 |
+| scopt 4.1.0 | 57.991 ± 0.342 | 93 866 |
+| picocli 4.7.6 | 64.303 ± 0.654 | 89 306 |
+| case-app | 65.509 ± 1.629 | 390 524 |
+| scallop 5.1.0 | 161.841 ± 0.761 | 472 525 |
+
+flagged parses this line 13× faster than mainargs and 78–217× faster than the rest,
+allocating 16–220× less. The non-derivation libraries pay for their models at parse time:
+scopt copies its 30-field config on every action, picocli walks its reflective model (built
+once in setup — `parseArgs` resets and repopulates the annotated fields), and scallop
+constructs and verifies the whole `ScallopConf` per argument list, which is its usage model —
+definition and parse are coupled, so parser construction is part of every parse.
+
+On non-trivial argument lists flagged parses in 0.08–0.75 µs across all scenarios, 1.8–88×
+faster than mainargs and case-app on the same inputs, allocating 3.7–182× less — the remaining
 bytes are the parse's actual output (the config object, `Some` wrappers for declared Option
 fields, value substrings of `=`-forms and `k=v` entries) plus one set of per-parse state
 arrays. The closest contests are mainargs' `Map` (1.8×) and `Leftover` (2.2×), whose per-token
