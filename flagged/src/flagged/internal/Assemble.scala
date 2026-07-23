@@ -55,9 +55,10 @@ private final case class Field(
   * `(Parser, optional)` pair per field, dispatched on the parser's schema.
   *
   * Combination rules that are visible in types (annotations, `Option` wrapping, and the shapes of
-  * shape-refined instances) are rejected at compile time in `Derive`; the checks here are the
-  * runtime backstop for shape-erased instances, plus the inherently value-level rules (name
-  * uniqueness, positional ordering).
+  * shape-refined instances) are rejected at compile time in `Derive`, and the command factories are
+  * private, so every command descends from a checked derivation. What remains here is the
+  * inherently value-level residue: name uniqueness (kebab-derived names), positional ordering
+  * (optionality depends on defaults, a term-level fact), and splice storage layout.
   */
 object Assemble:
 
@@ -224,25 +225,15 @@ object Assemble:
     def positional(metavar: String, mode: Mode, kind: PosKind): Plan =
       Plan.Positional(PosSpec(f.long, f.help, metavar, f.index, mode, f.default), kind)
 
-    if (f.split.nonEmpty || f.greedy) && !f.parser.isInstanceOf[Parser.Repeated[?]] then
-      bad("@split/@greedy require a field with a repeated Parser (a collection)")
-    if f.greedy && f.positional then
-      bad("@greedy has no effect on a positional field (a repeated positional is already greedy)")
-    if f.greedy && f.split.nonEmpty then bad("@split cannot be combined with @greedy")
-
     f.parser match
       case cg: Parser.CommandGroup[?] =>
         Plan.Commands(f.index, f.optional, f.default, cg.impl)
 
       case s: Parser.Shared[?] =>
-        // backstop for instances built through `makeShared` directly: derivation guarantees these
-        val inner = s.impl
-        if inner.positionals.nonEmpty then
-          bad("a spliced options group cannot contain positional fields")
-        if inner.trailing.nonEmpty then
-          bad("a spliced options group cannot contain a trailing field")
-        if inner.sub.nonEmpty then bad("a spliced options group cannot contain a subcommand field")
-        Plan.Grouped(f.index, f.label, f.nameAnn, f.group, f.optional, f.default, inner)
+        // splice-content invariants need no check here: every Shared instance descends from
+        // checked derivation (the factory is private), which rejects positionals, trailing,
+        // subcommands, and @greedy at compile time
+        Plan.Grouped(f.index, f.label, f.nameAnn, f.group, f.optional, f.default, s.impl)
 
       case c: Parser.Command[?] =>
         bad(
@@ -334,16 +325,7 @@ object Assemble:
     checkPositionalOrder(posKinds.result())
     if sub.nonEmpty && positionals.nonEmpty then
       invalid("mixing positional fields with a subcommand field is ambiguous and not supported")
-    // greedy consumption and other free-token consumers cannot coexist (spliced groups can
-    // smuggle a greedy option past the per-product compile-time check, so re-check here)
     val optionSpecs = opts.result()
-    val hasGreedy   = optionSpecs.exists(_.mode match
-      case Mode.Repeated(_, _, g) => g
-      case _                      => false)
-    if hasGreedy then
-      if positionals.nonEmpty then
-        invalid("a command with a @greedy option cannot have positional fields")
-      if sub.nonEmpty then invalid("a command with a @greedy option cannot have a subcommand field")
 
     val allSplices = splices.result()
     // `build` expects exactly the parent's own field slots

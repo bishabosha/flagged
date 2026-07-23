@@ -6,7 +6,7 @@ import scala.collection.Factory
 import scala.collection.immutable.ArraySeq
 import scala.deriving.Mirror
 import flagged.internal.{Assemble, Engine, HelpFmt}
-import scala.annotation.nowarn
+import scala.annotation.{nowarn, publicInBinary}
 import Result.eval, eval.{check, ok}
 
 /** A counting flag: `-vvv` parses as `Count(3)`, absent as `Count(0)`. */
@@ -307,8 +307,10 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     inline def derived[A](using m: Mirror.ProductOf[A]): Product[A] =
       internal.Derive.productValue[A]
 
-  /** Called by derivation. Not intended for direct use. */
-  private[flagged] def productOf[A](
+  /** Called by derivation (`@publicInBinary`: referenced from inline expansions at user call sites,
+    * but not part of the source API).
+    */
+  @publicInBinary private[flagged] def productOf[A](
       elems: IArray[Value[?]],
       metas: IArray[String],
       build: Array[Any] => Result[A, String]
@@ -454,21 +456,34 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
       )
     )
 
-  /** Called by derivation. Not intended for direct use. */
-  def make[A](cmd: flagged.internal.Command, name: String): Command[A] = new Command[A]:
+  /** Called by derivation (`@publicInBinary`: referenced from inline expansions at user call sites,
+    * but not part of the source API — command parsers exist only through checked derivation and
+    * shape-preserving transforms).
+    */
+  @publicInBinary private[flagged] def make[A](
+      cmd: flagged.internal.Command,
+      name: String
+  ): Command[A] = new Command[A]:
     private[flagged] def impl = cmd
     def prog                  = name
 
-  /** Called by derivation for sums. Not intended for direct use. */
-  def makeGroup[A](cmd: flagged.internal.Command, name: String): CommandGroup[A] =
+  /** Called by derivation for sums (`@publicInBinary`: see [[make]]). */
+  @publicInBinary private[flagged] def makeGroup[A](
+      cmd: flagged.internal.Command,
+      name: String
+  ): CommandGroup[A] =
     new CommandGroup[A]:
       private[flagged] def impl = cmd
       def prog                  = name
 
-  /** Called by derivation for shared groups. Not intended for direct use: [[Shared]]'s splice
-    * invariants are guaranteed only for derived instances.
+  /** Called by derivation for shared groups (`@publicInBinary`: see [[make]]). Privacy is what
+    * makes [[Shared]]'s splice invariants airtight: every instance descends from checked
+    * derivation.
     */
-  def makeShared[A](cmd: flagged.internal.Command, name: String): Shared[A] =
+  @publicInBinary private[flagged] def makeShared[A](
+      cmd: flagged.internal.Command,
+      name: String
+  ): Shared[A] =
     new Shared[A]:
       private[flagged] def impl = cmd
       def prog                  = name
