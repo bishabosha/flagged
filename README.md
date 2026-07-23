@@ -360,13 +360,14 @@ Full methodology and tables are in [`bench/`](bench/results.md); the comparison
 below is against mainargs 0.7.8 and case-app 2.1.0 on the same inputs (Apple M3 Max,
 Temurin JDK 25, Scala 3.8.3).
 
-**Compile time** is probably what people care most about for a derivation-heavy library. Derivation adds ~56–95 ms per file over a plain-data baseline across the
-benchmark scenarios, against ~189–214 ms for mainargs and ~396–437 ms for case-app.
+**Compile time** is probably what people care most about for a derivation-heavy library. Derivation adds ~56–123 ms per file over a plain-data baseline across the
+benchmark scenarios, against ~149–214 ms for mainargs and ~396–439 ms for case-app.
 Cost grows linearly with field count, at under 2 ms per field.
 
-**Parse latency:** on non-trivial argument lists Flagged parses in 0.08–0.29 µs,
-1.8–35× faster than mainargs and case-app on the same scenarios, allocating 3.7–39×
-less; the hot path aims to allocate only what is necessary to build the target data (further improvements could be made to avoid boxing). The same holds on non-JVM platforms: Flagged
+**Parse latency:** on non-trivial argument lists Flagged parses in 0.08–0.62 µs,
+1.8–97× faster than mainargs and case-app on the same scenarios, allocating 3.7–175×
+less — the widest gap on the `realistic` scenario, a docker-style subcommand CLI
+(16× vs mainargs, 97× vs case-app); the hot path aims to allocate only what is necessary to build the target data (further improvements could be made to avoid boxing). The same holds on non-JVM platforms: Flagged
 is the fastest of the three on every scenario on Scala.js, WebAssembly, and Scala
 Native.
 

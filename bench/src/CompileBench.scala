@@ -15,7 +15,8 @@ import scala.compiletime.uninitialized
   * derivation), `commands` (a three-command interface, each command with options), `methods` (the
   * same interface as `@run`/`@main` command methods; case-app has no method-based API, so its entry
   * reuses the command-objects encoding, and mainargs' `commands` entry is already
-  * `ParserForMethods` — its two entries measure the same source).
+  * `ParserForMethods` — its two entries measure the same source), `realistic` (the docker-style
+  * interface of `bench.defs.RealisticDefs` — one subcommand level, one large command).
   */
 @State(Scope.Benchmark)
 @BenchmarkMode(Array(Mode.AverageTime))
@@ -28,7 +29,7 @@ class CompileBench:
   @Param(Array("flagged", "mainargs", "caseapp", "baseline"))
   var lib: String = uninitialized
 
-  @Param(Array("options10", "options25", "commands", "methods"))
+  @Param(Array("options10", "options25", "commands", "methods", "realistic"))
   var scenario: String = uninitialized
 
   private var compileArgs: Array[String] = uninitialized
@@ -89,6 +90,10 @@ object BenchSources:
     case ("mainargs", "methods")   => mainargsCommands // ParserForMethods is its methods form
     case ("caseapp", "methods")    => caseappCommands  // no method-based API: closest encoding
     case ("baseline", "methods")   => baselineMethods
+    case ("flagged", "realistic")  => flaggedRealistic
+    case ("mainargs", "realistic") => mainargsRealistic
+    case ("caseapp", "realistic")  => caseappRealistic
+    case ("baseline", "realistic") => baselineRealistic
     case other                     => throw new IllegalArgumentException(other.toString)
 
   private val fields10 =
@@ -222,4 +227,178 @@ object BenchSources:
       |  case Remove(name: String, force: Boolean = false)
       |  case Ls(verbose: Boolean = false, limit: Int = 10)
       |object Use { val value = Cli.Ls() }
+      |""".stripMargin
+
+  // The docker-style realistic interface (`bench.defs.RealisticDefs`), per library. Field lists
+  // mirror the runtime defs; the source shape is what a user would write for that library.
+
+  private val flaggedRealistic =
+    """import flagged.*
+      |enum Docker derives Parser.CommandGroup:
+      |  case Run(
+      |      name: Option[String] = None,
+      |      @short('e') env: List[String] = Nil,
+      |      @short('p') publish: List[String] = Nil,
+      |      @short('v') volume: List[String] = Nil,
+      |      @short('l') label: List[String] = Nil,
+      |      @short('w') workdir: Option[String] = None,
+      |      @short('u') user: Option[String] = None,
+      |      entrypoint: Option[String] = None,
+      |      network: String = "default",
+      |      restart: String = "no",
+      |      @short('m') memory: Option[String] = None,
+      |      cpus: Option[Double] = None,
+      |      pull: String = "missing",
+      |      @short('d') detach: Boolean = false,
+      |      rm: Boolean = false,
+      |      @short('i') interactive: Boolean = false,
+      |      @short('t') tty: Boolean = false,
+      |      readOnly: Boolean = false,
+      |      @positional image: String,
+      |      @positional cmd: List[String] = Nil
+      |  )
+      |  case Pull(
+      |      platform: Option[String] = None,
+      |      @short('q') quiet: Boolean = false,
+      |      @short('a') allTags: Boolean = false,
+      |      @positional image: String
+      |  )
+      |  case Ps(
+      |      @short('a') all: Boolean = false,
+      |      @short('q') quiet: Boolean = false,
+      |      @short('f') filter: List[String] = Nil,
+      |      @short('n') last: Int = -1,
+      |      format: Option[String] = None
+      |  )
+      |object Use { val parser = summon[Parser.CommandGroup[Docker]] }
+      |""".stripMargin
+
+  private val mainargsRealistic =
+    """import mainargs.{main, arg, Flag, Leftover, ParserForMethods}
+      |object Docker {
+      |  @main def run(
+      |      name: Option[String] = None,
+      |      @arg(short = 'e') env: Seq[String] = Nil,
+      |      @arg(short = 'p') publish: Seq[String] = Nil,
+      |      @arg(short = 'v') volume: Seq[String] = Nil,
+      |      @arg(short = 'l') label: Seq[String] = Nil,
+      |      @arg(short = 'w') workdir: Option[String] = None,
+      |      @arg(short = 'u') user: Option[String] = None,
+      |      entrypoint: Option[String] = None,
+      |      network: String = "default",
+      |      restart: String = "no",
+      |      @arg(short = 'm') memory: Option[String] = None,
+      |      cpus: Option[Double] = None,
+      |      pull: String = "missing",
+      |      @arg(short = 'd') detach: Flag = Flag(),
+      |      rm: Flag = Flag(),
+      |      @arg(short = 'i') interactive: Flag = Flag(),
+      |      @arg(short = 't') tty: Flag = Flag(),
+      |      readOnly: Flag = Flag(),
+      |      args: Leftover[String]
+      |  ) = ()
+      |  @main def pull(
+      |      platform: Option[String] = None,
+      |      @arg(short = 'q') quiet: Flag = Flag(),
+      |      @arg(short = 'a') allTags: Flag = Flag(),
+      |      image: String
+      |  ) = ()
+      |  @main def ps(
+      |      @arg(short = 'a') all: Flag = Flag(),
+      |      @arg(short = 'q') quiet: Flag = Flag(),
+      |      @arg(short = 'f') filter: Seq[String] = Nil,
+      |      @arg(short = 'n') last: Int = -1,
+      |      format: Option[String] = None
+      |  ) = ()
+      |  val parser = ParserForMethods(this)
+      |}
+      |""".stripMargin
+
+  private val caseappRealistic =
+    """import caseapp.*
+      |final case class RunOptions(
+      |    name: Option[String] = None,
+      |    @ExtraName("e") env: List[String] = Nil,
+      |    @ExtraName("p") publish: List[String] = Nil,
+      |    @ExtraName("v") volume: List[String] = Nil,
+      |    @ExtraName("l") label: List[String] = Nil,
+      |    @ExtraName("w") workdir: Option[String] = None,
+      |    @ExtraName("u") user: Option[String] = None,
+      |    entrypoint: Option[String] = None,
+      |    network: String = "default",
+      |    restart: String = "no",
+      |    @ExtraName("m") memory: Option[String] = None,
+      |    cpus: Option[Double] = None,
+      |    pull: String = "missing",
+      |    @ExtraName("d") detach: Boolean = false,
+      |    rm: Boolean = false,
+      |    @ExtraName("i") interactive: Boolean = false,
+      |    @ExtraName("t") tty: Boolean = false,
+      |    readOnly: Boolean = false
+      |)
+      |object Run extends Command[RunOptions] {
+      |  def run(options: RunOptions, args: RemainingArgs): Unit = ()
+      |}
+      |final case class PullOptions(
+      |    platform: Option[String] = None,
+      |    @ExtraName("q") quiet: Boolean = false,
+      |    @ExtraName("a") allTags: Boolean = false
+      |)
+      |object Pull extends Command[PullOptions] {
+      |  def run(options: PullOptions, args: RemainingArgs): Unit = ()
+      |}
+      |final case class PsOptions(
+      |    @ExtraName("a") all: Boolean = false,
+      |    @ExtraName("q") quiet: Boolean = false,
+      |    @ExtraName("f") filter: List[String] = Nil,
+      |    @ExtraName("n") last: Int = -1,
+      |    format: Option[String] = None
+      |)
+      |object Ps extends Command[PsOptions] {
+      |  def run(options: PsOptions, args: RemainingArgs): Unit = ()
+      |}
+      |object Docker extends CommandsEntryPoint {
+      |  def progName = "docker"
+      |  def commands = Seq(Run, Pull, Ps)
+      |}
+      |""".stripMargin
+
+  private val baselineRealistic =
+    """enum Docker:
+      |  case Run(
+      |      name: Option[String] = None,
+      |      env: List[String] = Nil,
+      |      publish: List[String] = Nil,
+      |      volume: List[String] = Nil,
+      |      label: List[String] = Nil,
+      |      workdir: Option[String] = None,
+      |      user: Option[String] = None,
+      |      entrypoint: Option[String] = None,
+      |      network: String = "default",
+      |      restart: String = "no",
+      |      memory: Option[String] = None,
+      |      cpus: Option[Double] = None,
+      |      pull: String = "missing",
+      |      detach: Boolean = false,
+      |      rm: Boolean = false,
+      |      interactive: Boolean = false,
+      |      tty: Boolean = false,
+      |      readOnly: Boolean = false,
+      |      image: String,
+      |      cmd: List[String] = Nil
+      |  )
+      |  case Pull(
+      |      platform: Option[String] = None,
+      |      quiet: Boolean = false,
+      |      allTags: Boolean = false,
+      |      image: String
+      |  )
+      |  case Ps(
+      |      all: Boolean = false,
+      |      quiet: Boolean = false,
+      |      filter: List[String] = Nil,
+      |      last: Int = -1,
+      |      format: Option[String] = None
+      |  )
+      |object Use { val value = Docker.Ps() }
       |""".stripMargin

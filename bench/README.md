@@ -49,6 +49,7 @@ with no parsing library at all, giving the compiler's floor for the file shape.
 | `options25` | one options class with twenty-five defaulted fields (wide derivation) |
 | `commands` | a three-command interface, each command with its own options |
 | `methods` | the same interface as command *methods* (flagged `@run` + `Parser.methods`, mainargs `ParserForMethods`); mainargs' `commands` entry is already its method encoding, so its two rows measure the same source, and case-app has no method-based API, so its entry reuses the command-objects encoding |
+| `realistic` | a docker-style CLI modeled on a subset of `docker` `run`/`pull`/`ps` (github.com/docker/cli, Apache-2.0): one subcommand level, a 20-field command with mostly optional and several repeatable options — each library in its idiomatic subcommand encoding (see `bench-portable/src/defs/RealisticDefs.scala`) |
 
 **`RuntimeBench`** — average time per parse of a fixed command line, against parser instances
 built once in setup (all three libraries pay derivation at compile time or construction once; the
@@ -64,6 +65,7 @@ cannot pose as a fast one.
 | `leftover` | flagged, mainargs | `-s 2 1 2 3 4 5` — typed leftover `Int`s (case-app's remaining args are untyped; option first because mainargs treats everything after the first leftover token as leftover) |
 | `counter` | flagged, case-app | `-v -v -v --target x` (`Count` vs `Int @@ Counter`; mainargs has no counters) |
 | `group` | flagged, case-app | `--host h --port 8080 -q --log-level warn` — shared options group (splice vs `@Recurse`) |
+| `realistic` | all three | a 34-token `run ...` command line against the docker-style CLI above (subcommand dispatch, 17 option occurrences of which 7 hit repeatable options, image + command positionals); setup asserts all three agree on every parsed field |
 
 Definitions per library live in `src/defs/`; scenarios use the closest idiomatic encoding for
 each (e.g. `Flag` for mainargs booleans, `@ExtraName` for case-app short names).

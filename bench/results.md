@@ -1,9 +1,11 @@
 # Benchmark results
 
 Produced by the suites in this directory (see `README.md` for methodology and caveats). All
-tables were measured in one session at the commit below, with flagged on the benchmark
-classpath as its packaged jar (`FlaggedFromJar` in `build.mill`), like the mainargs/case-app
-jars from the coursier cache. JMH scores are averages ± 99.9% confidence intervals; the compile
+tables were measured on the date below at the commit below — the base tables in one session,
+the `realistic` rows and the cross-platform table in a follow-up run the same day after the
+`realistic` scenario was added (library sources unchanged in between) — with flagged on the
+benchmark classpath as its packaged jar (`FlaggedFromJar` in `build.mill`), like the
+mainargs/case-app jars from the coursier cache. JMH scores are averages ± 99.9% confidence intervals; the compile
 table is one forked JVM (3 warmup + 5 measurement iterations), and the runtime tables
 (`RuntimeBench`, `MethodBench`, `BaselineBench`) are five forked JVMs per benchmark
 (5 warmup + 5 measurement iterations each, all libraries alike), with allocation from the same
@@ -28,9 +30,12 @@ shape. Only comparisons within a row are meaningful.
 | `options25` (25 defaulted fields) | 45.4 ± 2.6 | 124.1 ± 3.4 | 238.7 ± 36.0 | 471.2 ± 16.6 |
 | `commands` (3 subcommands) | 48.6 ± 7.7 | 115.0 ± 24.0 | 241.4 ± 20.9 | 463.4 ± 32.5 |
 | `methods` (3 command methods) | 27.6 ± 1.4 | 122.2 ± 7.8 | 241.9 ± 22.2 | 464.0 ± 91.1 |
+| `realistic` (docker-style CLI) | 57.8 ± 6.1 | 181.1 ± 14.7 | 206.4 ± 12.9 | 497.0 ± 43.2 |
 
-Derivation cost over the baseline: flagged adds ~56–95 ms, mainargs ~189–214 ms, case-app
-~396–437 ms; flagged is the cheapest of the three in every scenario. The `methods` row is the
+Derivation cost over the baseline: flagged adds ~56–123 ms, mainargs ~149–214 ms, case-app
+~396–439 ms; flagged is the cheapest of the three in every scenario, though its linear
+per-field cost narrows the gap to mainargs on the wide `realistic` interface (a subcommand
+group whose `run` command has 20 fields; see the runtime section). The `methods` row is the
 `commands` interface as command *methods* — flagged `@run` with `Parser.methods`, against
 mainargs' `ParserForMethods` (its `commands` entry is already that encoding, so its two rows
 measure the same source; case-app has no method-based API, so its entry reuses the
@@ -77,6 +82,17 @@ where user code supplies them (`Parser.of`, `emap`, custom combinators).
 | `simple` — B/op | 464 | 5 632 | 8 707 |
 | `repeated` — µs/op | 0.135 ± 0.005 | 1.000 ± 0.021 | 4.738 ± 0.056 |
 | `repeated` — B/op | 656 | 5 490 | 25 371 |
+| `realistic` — µs/op | 0.615 ± 0.003 | 9.989 ± 0.082 | 59.398 ± 1.823 |
+| `realistic` — B/op | 2 128 | 34 448 | 371 972 |
+
+`realistic` is a docker-style CLI modeled on a subset of `docker` `run`/`pull`/`ps`
+(github.com/docker/cli, Apache-2.0): one subcommand level, a 20-field `run` command with
+mostly optional and four repeatable options, parsed from a 34-token command line — each
+library in its idiomatic subcommand encoding (flagged an enum `Parser.CommandGroup`, mainargs
+`ParserForMethods`, case-app options classes with first-token dispatch; definitions in
+`bench-portable/src/defs/RealisticDefs.scala`, setup asserts all three agree on every parsed
+field). It is the widest gap in the suite: flagged parses it 16× faster than mainargs and 97×
+faster than case-app, allocating 16× and 175× less.
 
 ### flagged × mainargs (short clusters, typed leftover, `Map[K,V]`)
 
@@ -98,8 +114,8 @@ where user code supplies them (`Parser.of`, `emap`, custom combinators).
 | `group` — µs/op | 0.157 ± 0.009 | 3.216 ± 0.025 |
 | `group` — B/op | 624 | 18 510 |
 
-On non-trivial argument lists flagged parses in 0.08–0.29 µs across all scenarios, 1.8–35×
-faster than mainargs and case-app on the same inputs, allocating 3.7–39× less — the remaining
+On non-trivial argument lists flagged parses in 0.08–0.62 µs across all scenarios, 1.8–97×
+faster than mainargs and case-app on the same inputs, allocating 3.7–175× less — the remaining
 bytes are the parse's actual output (the config object, `Some` wrappers for declared Option
 fields, value substrings of `=`-forms and `k=v` entries) plus one set of per-parse state
 arrays. The closest contests are mainargs' `Map` (1.8×) and `Leftover` (2.2×), whose per-token
@@ -186,29 +202,33 @@ ns per parse, best of 5 rounds:
 
 | Benchmark | JVM | JS | JS/Wasm | Native | Native (max) |
 |---|---|---|---|---|---|
-| empty — flagged | 34 | 265 | 157 | 161 | 111 |
-| empty — mainargs | 265 | 1 338 | 1 036 | 660 | 518 |
-| empty — case-app | 147 | 357 | 268 | 265 | 179 |
-| simple — flagged | 205 | 820 | 779 | 394 | 293 |
-| simple — mainargs | 1 218 | 6 738 | 6 625 | 3 387 | 2 578 |
-| simple — case-app | 1 249 | 4 673 | 3 400 | 5 960 | 3 459 |
-| repeated — flagged | 162 | 1 031 | 946 | 486 | 386 |
-| repeated — mainargs | 1 018 | 6 508 | 6 602 | 3 501 | 2 564 |
-| repeated — case-app | 5 450 | 12 399 | 9 645 | 17 966 | 10 490 |
-| bundled — flagged | 144 | 766 | 508 | 322 | 421 |
-| bundled — mainargs | 1 208 | 7 445 | 6 422 | 3 788 | 2 942 |
-| counter — flagged | 95 | 741 | 592 | 347 | 238 |
-| counter — case-app | 2 290 | 6 569 | 4 318 | 8 225 | 4 646 |
-| group — flagged | 184 | 1 194 | 992 | 544 | 388 |
-| group — case-app | 3 481 | 9 566 | 6 409 | 12 428 | 7 103 |
-| leftover — flagged | 180 | 1 357 | 725 | 514 | 397 |
-| leftover — mainargs | 385 | 2 566 | 1 599 | 1 240 | 1 094 |
+| empty — flagged | 40 | 290 | 161 | 154 | 102 |
+| empty — mainargs | 249 | 1 343 | 1 056 | 659 | 466 |
+| empty — case-app | 139 | 373 | 257 | 262 | 173 |
+| simple — flagged | 202 | 993 | 780 | 408 | 279 |
+| simple — mainargs | 1 296 | 7 182 | 6 567 | 3 516 | 2 305 |
+| simple — case-app | 1 431 | 4 647 | 3 367 | 6 098 | 3 151 |
+| repeated — flagged | 148 | 1 075 | 953 | 522 | 354 |
+| repeated — mainargs | 1 044 | 7 323 | 6 585 | 3 500 | 2 458 |
+| repeated — case-app | 5 222 | 11 978 | 9 601 | 18 548 | 9 377 |
+| bundled — flagged | 100 | 830 | 511 | 325 | 241 |
+| bundled — mainargs | 1 211 | 8 065 | 6 416 | 3 893 | 2 725 |
+| counter — flagged | 89 | 817 | 590 | 351 | 234 |
+| counter — case-app | 2 225 | 6 456 | 4 171 | 8 362 | 4 560 |
+| group — flagged | 174 | 1 319 | 967 | 550 | 386 |
+| group — case-app | 3 602 | 9 572 | 6 355 | 12 789 | 6 966 |
+| leftover — flagged | 161 | 1 423 | 717 | 529 | 406 |
+| leftover — mainargs | 405 | 2 761 | 1 594 | 1 287 | 1 131 |
+| realistic — flagged | 795 | 5 166 | 4 484 | 1 856 | 1 362 |
+| realistic — mainargs | 9 758 | 61 471 | 42 649 | 24 728 | 16 591 |
+| realistic — case-app | 72 642 | 198 645 | 127 283 | 257 346 | 152 352 |
 
 flagged is the fastest of the three on every scenario on every platform. In the maxed Native
-build flagged parses in 0.24–0.42 µs — roughly 1.5–3× the JVM and ahead of Scala.js by 2–3× —
-with one inversion in this run: `bundled` came out slower under the max configuration (421 ns)
-than under release-fast (322 ns), within this harness's round-to-round variance. The
-WebAssembly backend beats the JavaScript one on every flagged scenario.
+build flagged parses the small scenarios in 0.23–0.41 µs and the realistic docker-style line
+in 1.4 µs — roughly 1.5–2.5× the portable-harness JVM column and ahead of Scala.js by 3–4×.
+The WebAssembly backend beats the JavaScript one on every flagged scenario. case-app's
+`realistic` parse is slower on Native than on the JVM or JS (0.15–0.26 ms per parse on every
+platform).
 
 Why Native trails the JVM: an ahead-of-time build has no profile-guided optimization, so the
 remaining polymorphic dispatch and the workload's own allocations stay real, where HotSpot

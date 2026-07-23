@@ -2,7 +2,7 @@ package bench
 
 import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.*
-import bench.defs.{FlaggedDefs, MainargsDefs, CaseappDefs}
+import bench.defs.{FlaggedDefs, MainargsDefs, CaseappDefs, RealisticDefs}
 
 /** Parse latency for identical command lines across the three libraries, against parsers built once
   * in setup (derivation cost is the compile-time benchmark's subject, construction cost is excluded
@@ -15,6 +15,8 @@ import bench.defs.{FlaggedDefs, MainargsDefs, CaseappDefs}
   *     typed leftover, or `Map[K,V]`)
   *   - `counter` / `group` — flagged and case-app only (mainargs has no counters or `@Recurse`
   *     equivalent beyond class splicing, which the `simple` scenario already covers)
+  *   - `realistic` — a docker-style CLI (one subcommand level, one large command; see
+  *     [[bench.defs.RealisticDefs]]), each library in its idiomatic subcommand encoding
   */
 @State(Scope.Benchmark)
 @BenchmarkMode(Array(Mode.AverageTime))
@@ -33,6 +35,14 @@ class RuntimeBench:
   // option first: mainargs treats everything from the first leftover token on as leftover
   private val leftoverArgs = Seq("-s", "2", "1", "2", "3", "4", "5")
   private val mapArgs      = Seq("--define", "a=1", "--define", "b=2", "--define", "c=3")
+  // options before positionals: mainargs' Leftover consumes everything after the image token
+  private val realisticArgs = Seq(
+    "run", "--name", "web", "-e", "PGHOST=db", "-e", "PGPORT=5432", "-p", "8080:80",
+    "-p", "8443:443", "-v", "/srv/site:/usr/share/nginx/html:ro", "--label", "app=web",
+    "--label", "env=prod", "--workdir", "/app", "--user", "1000:1000", "--memory", "512m",
+    "--cpus", "1.5", "--restart", "on-failure", "--network", "bridge", "--detach", "--rm",
+    "--read-only", "nginx:1.27", "nginx-debug"
+  )
 
   /** A failed parse can be faster than a successful one; assert every scenario succeeds. */
   @Setup
@@ -62,7 +72,9 @@ class RuntimeBench:
       "leftover_flagged"  -> fOk(FlaggedDefs.nums.parse(leftoverArgs)),
       "leftover_mainargs" -> mOk(MainargsDefs.nums.constructRaw(leftoverArgs)),
       "map_flagged"       -> fOk(FlaggedDefs.defines.parse(mapArgs)),
-      "map_mainargs"      -> mOk(MainargsDefs.defines.constructRaw(mapArgs))
+      "map_mainargs"      -> mOk(MainargsDefs.defines.constructRaw(mapArgs)),
+      // all three parse and agree on every field, not just succeed
+      "realistic"         -> RealisticDefs.agrees(realisticArgs)
     )
     val failing = checks.collect { case (name, false) => name }
     if failing.nonEmpty then
@@ -81,6 +93,10 @@ class RuntimeBench:
   @Benchmark def repeated_flagged: Any  = FlaggedDefs.simple.parse(repeatedArgs)
   @Benchmark def repeated_mainargs: Any = MainargsDefs.simple.constructRaw(repeatedArgs)
   @Benchmark def repeated_caseapp: Any  = CaseappDefs.simple.detailedParse(repeatedArgs)
+
+  @Benchmark def realistic_flagged: Any  = RealisticDefs.flaggedDocker.parse(realisticArgs)
+  @Benchmark def realistic_mainargs: Any = RealisticDefs.mainargsDocker.runEither(realisticArgs)
+  @Benchmark def realistic_caseapp: Any  = RealisticDefs.caseappDocker(realisticArgs)
 
   // ---- flagged x mainargs ---------------------------------------------------------
 
