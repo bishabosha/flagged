@@ -61,6 +61,7 @@ object Derive:
   inline def sum[A](using m: Mirror.SumOf[A]): Parser.CommandGroup[A] =
     summonFrom:
       case am: AnnotMirror.Sum[A] =>
+        checkSumRules[am.MirroredAnnotations]
         val annots = Annots.sumAnnots[A]
         val cmd    = Assemble.sum(
           labelsOf[m.MirroredElemLabels],
@@ -571,6 +572,44 @@ object Derive:
   inline def checkDupNames[Slots <: Tuple]: Unit =
     inline if constValue[DupNameErr[Slots] == ""] then ()
     else error(constValue[DupNameErr[Slots]])
+
+  // ---- sum-level rules --------------------------------------------------------
+
+  /** Sum-level compile checks over the per-case annotation slots: at most one `@default` case, and
+    * no duplicate constant command names (`@name` primaries and aliases) across cases.
+    * Kebab-derived command-name collisions are value-level and checked at construction in
+    * [[Assemble.sum]].
+    */
+  inline def checkSumRules[Slots]: Unit =
+    inline erasedValue[Slots] match
+      case _: EmptyTuple => ()
+      case _: (s0 *: sr) =>
+        inline if constValue[MultiDefaultT[s0 *: sr, false]] then
+          error("only one @default command is supported")
+        else ()
+        inline if constValue[DupCaseNameErr[s0 *: sr] == ""] then ()
+        else error(constValue[DupCaseNameErr[s0 *: sr]])
+
+  /** Whether more than one case carries `@default`. */
+  type MultiDefaultT[Slots, Seen <: Boolean] <: Boolean = Slots match
+    case EmptyTuple => false
+    case s *: t     =>
+      HasAnnT[flagged.default, s] match
+        case true =>
+          Seen match
+            case true  => true
+            case false => MultiDefaultT[t, true]
+        case false => MultiDefaultT[t, Seen]
+
+  /** Duplicate constant command names across the sum's cases, one fold over the slots. */
+  type DupCaseNameErr[Slots] = DupCaseNameErrAcc[Slots, EmptyTuple]
+
+  type DupCaseNameErrAcc[Slots, Seen <: Tuple] <: String = Slots match
+    case EmptyTuple => ""
+    case s *: t     =>
+      OverlapsT[Seen, LongsOf[s]] match
+        case true  => "duplicate command name"
+        case false => DupCaseNameErrAcc[t, Tuple.Concat[Seen, LongsOf[s]]]
 
   /** Whether annotation slot `Anns` contains an `A` — a compile-time constant. Match types rather
     * than inline-match recursion: reduction happens in the (cached) type domain instead of one

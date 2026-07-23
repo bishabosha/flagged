@@ -147,9 +147,14 @@ object Assemble:
         case SubEntry.Node(p) => p().command
       SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden, anns.aliases)
     }.toVector
-    val defaultIdxs = annots.perCase.zipWithIndex.collect { case (a, i) if a.default => i }
-    if defaultIdxs.sizeIs > 1 then invalid("only one @default command is supported")
-    val defaultCase = defaultIdxs.headOption.map(cases(_))
+    // kebab-derived command names can collide only at the value level (constant @name/alias
+    // duplicates are compile errors); a silent collision would shadow the later command
+    val caseNames = mutable.Set.empty[String]
+    for c <- cases; n <- c.name :: c.aliases do
+      if !caseNames.add(n) then invalid(s"duplicate command name '$n'")
+    val defaultCase = annots.perCase.zipWithIndex.collectFirst {
+      case (a, i) if a.default => cases(i)
+    }
     Command(
       annots.onType.help.getOrElse(""),
       Vector.empty,
@@ -294,7 +299,7 @@ object Assemble:
         posKinds += ((spec.name, kind))
         poss += spec
       case Plan.Commands(index, optional, default, inner) =>
-        if sub.nonEmpty then invalid("only one subcommand field is supported per command")
+        // at most one: derivation checks GroupBit x GroupBit at compile time
         val g = inner.sub.get
         sub = Some(SubGroup(index, optional, default, g.cases, g.defaultCase))
       case Plan.Grouped(index, label, prefix, group, optional, default, inner) =>
@@ -317,14 +322,12 @@ object Assemble:
         splices += Splice(index, storage, inner, optional, default)
         storage += inner.arity
       case Plan.Rest(spec) =>
-        if trailing.nonEmpty then invalid("only one trailing field is supported per command")
+        // at most one, and never next to positionals or subcommands: compile-checked
         trailing = Some(spec)
     }
 
     val positionals = poss.result()
     checkPositionalOrder(posKinds.result())
-    if sub.nonEmpty && positionals.nonEmpty then
-      invalid("mixing positional fields with a subcommand field is ambiguous and not supported")
     val optionSpecs = opts.result()
 
     val allSplices = splices.result()
@@ -355,10 +358,11 @@ object Assemble:
         if !shorts.add(c) then invalid(s"duplicate short option '-$c'$origin")
       }
 
+  /** Required-before-optional is inherently value-level: optionality depends on a field default, a
+    * term-level fact. (Repeated-must-be-last is compile-checked and needs no re-check.)
+    */
   private def checkPositionalOrder(kinds: List[(String, PosKind)]): Unit =
     kinds.zipWithIndex.foreach { case ((nm, kind), idx) =>
-      if kind == PosKind.Repeated && idx != kinds.length - 1 then
-        invalid(s"positional '$nm': a repeated positional must be the last positional field")
       if kind == PosKind.Required && kinds.take(idx).exists(_(1) != PosKind.Required) then
         invalid(s"positional '$nm': required positionals must come before optional ones")
     }
