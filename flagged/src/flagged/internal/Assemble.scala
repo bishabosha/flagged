@@ -10,49 +10,9 @@ enum SubEntry:
   case Leaf(value: Any)
   case Node(parser: () => Parser[?])
 
-/** The resolved role of one product field: the complete shape × `@positional` × `Option[_]` matrix
-  * lives in [[Assemble.resolveField]], which produces exactly one of these. Aggregation into a
-  * `Command` then needs only cross-field rules.
-  */
-private enum Plan:
-  case Named(spec: OptSpec)
-  case Positional(spec: PosSpec, kind: PosKind)
-  case Commands(index: Int, optional: Boolean, default: Option[() => Any], inner: Command)
-  case Grouped(
-      index: Int,
-      label: String,
-      prefix: Option[String],
-      group: Option[String],
-      optional: Boolean,
-      default: Option[() => Any],
-      inner: Command
-  )
-  case Rest(spec: TrailingSpec)
-
-private enum PosKind:
-  case Required, Optional, Repeated
-
-/** Everything known about one field before shape resolution. */
-private final case class Field(
-    index: Int,
-    label: String,
-    long: String,
-    nameAnn: Option[String],
-    short: Option[Char],
-    help: String,
-    positional: Boolean,
-    hidden: Boolean,
-    group: Option[String],
-    aliases: IndexedSeq[String],
-    optional: Boolean,
-    default: Option[() => Any],
-    parser: Parser[?],
-    split: Option[Char] = None,
-    greedy: Boolean = false
-)
-
-/** Builds the runtime `Command` model from what inline derivation collected — one
-  * `(Parser, optional)` pair per field, dispatched on the parser's schema.
+/** Builds the runtime `Command` model as inline derivation walks the fields: the walk feeds a
+  * [[Assemble.FieldsBuilder]] one `addField` call per field, which dispatches on the parser's
+  * schema and writes the finished spec directly — no intermediate per-field representation.
   *
   * Combination rules that are visible in types (annotations, `Option` wrapping, and the shapes of
   * shape-refined instances) are rejected at compile time in `Derive`, and the command factories are
@@ -63,6 +23,10 @@ private final case class Field(
 object Assemble:
 
   def kebab(s: String): String =
+    // fast path: a label that is already kebab (all lower, no digit runs) is its own name
+    var j = 0
+    while j < s.length && (s(j).isLower || s(j) == '-') do j += 1
+    if j == s.length then return s
     val b = new StringBuilder
     var i = 0
     while i < s.length do
@@ -170,182 +134,161 @@ object Assemble:
 
   // ---- product assembly -------------------------------------------------------
 
-  def product(
-      labels: IndexedSeq[String],
-      fields: IndexedSeq[(Parser[?], Boolean, FieldAnnots)],
-      defaults: Defaults[?],
-      onType: TargetAnnots,
-      build: Array[Any] => Result[Any, String],
-      version: Option[() => String]
-  ): Command =
-    val n     = labels.length
-    val plans = labels.lazyZip(fields).lazyZip(labels.indices).map { (label, triple, i) =>
-      val (parser, opt, anns) = triple
-      resolveField(
-        Field(
-          index = i,
-          label = label,
-          long = anns.name.getOrElse(kebab(label)),
-          nameAnn = anns.name,
-          short = anns.short,
-          help = anns.help.getOrElse(""),
-          positional = anns.positional,
-          hidden = anns.hidden,
-          group = anns.group,
-          aliases = anns.aliases,
-          optional = opt,
-          default =
-            if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None,
-          parser = parser,
-          split = anns.split,
-          greedy = anns.greedy
-        )
-      )
-    }
-    combine(n, plans, onType, build, version)
+  def fieldsBuilder(n: Int, defaults: Defaults[?]): FieldsBuilder = FieldsBuilder(n, defaults)
 
-  /** Translate one field into its [[Plan]]. Shape x annotation combinations are guaranteed by the
-    * compile-time layer in `Derive`; only value-level rules (reserved/duplicate names via
-    * kebab-cased labels, splice contents) are checked here.
+  /** The runtime half of product derivation, fused: the inline field walk calls [[addField]] once
+    * per field in declaration order, and each call resolves the field's role from its parser's
+    * shape and writes the finished spec straight into the command being assembled — no intermediate
+    * per-field records. Shape × annotation combinations are guaranteed by the compile-time layer in
+    * `Derive`; only value-level rules (reserved/duplicate names via kebab-cased labels, positional
+    * ordering) are checked here. [[result]] closes the command.
     */
-  private def resolveField(f: Field): Plan =
-    def bad(msg: String): Nothing = invalid(s"field '${f.label}': $msg")
-    def posKind                   =
-      if f.optional || f.default.nonEmpty then PosKind.Optional else PosKind.Required
-    def named(metavar: String, mode: Mode): Plan =
-      if f.long == "help" then bad("option name 'help' is reserved")
-      Plan.Named(
-        OptSpec(
-          f.long,
-          f.short,
-          f.help,
-          metavar,
-          f.index,
-          mode,
-          f.default,
-          f.hidden,
-          f.group,
-          f.aliases
-        )
-      )
-    def positional(metavar: String, mode: Mode, kind: PosKind): Plan =
-      Plan.Positional(PosSpec(f.long, f.help, metavar, f.index, mode, f.default), kind)
+  final class FieldsBuilder private[Assemble] (n: Int, defaults: Defaults[?]):
+    private val names                                           = NameRegistry()
+    private var opts: mutable.Builder[OptSpec, Vector[OptSpec]] = null
+    private var poss: mutable.Builder[PosSpec, Vector[PosSpec]] = null
+    private var spls: mutable.Builder[Splice, Vector[Splice]]   = null
+    private var sub: SubGroup                                   = null
+    private var trailing: TrailingSpec                          = null
+    private var storage         = n // spliced children's specs live past the parent's own slots
+    private var index           = 0
+    private var optionalPosSeen = false
 
-    f.parser match
-      case cg: Parser.CommandGroup[?] =>
-        Plan.Commands(f.index, f.optional, f.default, cg.impl)
+    private def addOpt(spec: OptSpec): Unit =
+      if opts == null then opts = Vector.newBuilder
+      opts += spec
 
-      case s: Parser.Shared[?] =>
-        // splice-content invariants need no check here: every Shared instance descends from
-        // checked derivation (the factory is private), which rejects positionals, trailing,
-        // subcommands, and @greedy at compile time
-        Plan.Grouped(f.index, f.label, f.nameAnn, f.group, f.optional, f.default, s.impl)
-
-      case c: Parser.Command[?] =>
-        bad(
-          "a command-shaped Parser cannot be a field: derive Parser.Shared for a spliceable options group (a full command can be embedded as the sole field of a command-group case)"
-        )
-
-      case vf: Parser.ValuedFlag[?] =>
-        if f.positional then positional("value", Mode.Single(vf, f.optional), posKind)
-        else named("", Mode.Flag(vf, f.optional))
-
-      case fl: Parser.Flag[?] =>
-        named("", Mode.Flag(fl, false))
-
-      case v: Parser.Value[?] =>
-        val mode = Mode.Single(v, f.optional)
-        if f.positional then positional(v.typeName, mode, posKind) else named(v.typeName, mode)
-
-      case pr: Parser.Product[?] =>
-        // the metavar arrives pre-bracketed (`<x> <y>`); help renders it verbatim
-        val mode = Mode.Product(pr, f.optional)
-        if f.positional then positional(pr.helpMetavar, mode, posKind)
-        else named(pr.helpMetavar, mode)
-
-      case r: Parser.Repeated[?] =>
-        val mode = Mode.Repeated(r, f.split.getOrElse(0), f.greedy)
-        if f.positional then positional(r.typeName, mode, PosKind.Repeated)
-        else named(r.typeName, mode)
-
-      case t: Parser.Trailing[?] =>
-        Plan.Rest(TrailingSpec(f.index, f.help, t, f.optional, f.default))
-
-  /** Cross-field aggregation: name uniqueness, at-most-one subcommand/trailing field, positional
-    * ordering, splice storage layout.
-    */
-  private def combine(
-      n: Int,
-      plans: Seq[Plan],
-      onType: TargetAnnots,
-      build: Array[Any] => Result[Any, String],
-      version: Option[() => String]
-  ): Command =
-    val names = NameRegistry()
-
-    val opts     = Vector.newBuilder[OptSpec]
-    val poss     = Vector.newBuilder[PosSpec]
-    val posKinds = Vector.newBuilder[(String, PosKind)]
-    val splices  = Vector.newBuilder[Splice]
-    var sub      = Option.empty[SubGroup]
-    var trailing = Option.empty[TrailingSpec]
-    var storage  = n // spliced children's specs live past the parent's own slots
-
-    plans.foreach {
-      case Plan.Named(spec) =>
-        names.register(spec.long, spec.short, from = None)
-        spec.aliases.foreach(a => names.register(a, None, from = None))
-        opts += spec
-      case Plan.Positional(spec, kind) =>
-        posKinds += ((spec.name, kind))
-        poss += spec
-      case Plan.Commands(index, optional, default, inner) =>
-        // at most one: derivation checks GroupBit x GroupBit at compile time
-        val g = inner.sub.get
-        sub = Some(SubGroup(index, optional, default, g.cases, g.defaultCase))
-      case Plan.Grouped(index, label, prefix, group, optional, default, inner) =>
-        inner.opts.foreach { o =>
-          // a prefixed splice renames its options (--net-host) and drops their short aliases,
-          // so the same group can be spliced more than once
-          val long    = prefix.fold(o.long)(pre => s"$pre-${o.long}")
-          val short   = if prefix.isEmpty then o.short else None
-          val aliases = o.aliases.map(a => prefix.fold(a)(pre => s"$pre-$a"))
-          names.register(long, short, from = Some(label))
-          aliases.foreach(a => names.register(a, None, from = Some(label)))
-          opts += o.copy(
-            long = long,
-            short = short,
-            index = storage + o.index,
-            group = o.group.orElse(group),
-            aliases = aliases
+    def addField(label: String, parser: Parser[?], optional: Boolean, anns: FieldAnnots): Unit =
+      val i = index
+      index += 1
+      val default =
+        if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None
+      def bad(msg: String): Nothing                = invalid(s"field '$label': $msg")
+      def named(metavar: String, mode: Mode): Unit =
+        val long = anns.name.getOrElse(kebab(label))
+        if long == "help" then bad("option name 'help' is reserved")
+        names.register(long, anns.short, from = None)
+        anns.aliases.foreach(a => names.register(a, None, from = None))
+        addOpt(
+          OptSpec(
+            long,
+            anns.short,
+            anns.help.getOrElse(""),
+            metavar,
+            i,
+            mode,
+            default,
+            anns.hidden,
+            anns.group,
+            anns.aliases
           )
-        }
-        splices += Splice(index, storage, inner, optional, default)
-        storage += inner.arity
-      case Plan.Rest(spec) =>
-        // at most one, and never next to positionals or subcommands: compile-checked
-        trailing = Some(spec)
-    }
+        )
+      def positional(metavar: String, mode: Mode, required: Boolean): Unit =
+        // required-before-optional is inherently value-level: optionality depends on a field
+        // default, a term-level fact (repeated-must-be-last is compile-checked)
+        if required then
+          if optionalPosSeen then
+            invalid(
+              s"positional '${anns.name.getOrElse(kebab(label))}': required positionals must come before optional ones"
+            )
+        else optionalPosSeen = true
+        if poss == null then poss = Vector.newBuilder
+        poss += PosSpec(
+          anns.name.getOrElse(kebab(label)),
+          anns.help.getOrElse(""),
+          metavar,
+          i,
+          mode,
+          default
+        )
+      def requiredPos = !(optional || default.nonEmpty)
 
-    val positionals = poss.result()
-    checkPositionalOrder(posKinds.result())
-    val optionSpecs = opts.result()
+      parser match
+        case cg: Parser.CommandGroup[?] =>
+          // at most one: derivation checks GroupBit x GroupBit at compile time
+          val g = cg.impl.sub.get
+          sub = SubGroup(i, optional, default, g.cases, g.defaultCase)
 
-    val allSplices = splices.result()
-    // `build` expects exactly the parent's own field slots
-    val fullBuild: Array[Any] => Result[Any, String] =
-      if allSplices.isEmpty then build else arr => build(arr.take(n))
-    Command(
-      onType.help.getOrElse(""),
-      optionSpecs,
-      positionals,
-      sub,
-      trailing,
-      allSplices,
-      fullBuild,
-      storage,
-      version
-    )
+        case sh: Parser.Shared[?] =>
+          // splice-content invariants need no check here: every Shared instance descends from
+          // checked derivation (the factory is private), which rejects positionals, trailing,
+          // subcommands, and @greedy at compile time
+          val inner  = sh.impl
+          val prefix = anns.name
+          inner.opts.foreach { o =>
+            // a prefixed splice renames its options (--net-host) and drops their short aliases,
+            // so the same group can be spliced more than once
+            val long    = prefix.fold(o.long)(pre => s"$pre-${o.long}")
+            val short   = if prefix.isEmpty then o.short else None
+            val aliases = o.aliases.map(a => prefix.fold(a)(pre => s"$pre-$a"))
+            names.register(long, short, from = Some(label))
+            aliases.foreach(a => names.register(a, None, from = Some(label)))
+            addOpt(
+              o.copy(
+                long = long,
+                short = short,
+                index = storage + o.index,
+                group = o.group.orElse(anns.group),
+                aliases = aliases
+              )
+            )
+          }
+          if spls == null then spls = Vector.newBuilder
+          spls += Splice(i, storage, inner, optional, default)
+          storage += inner.arity
+
+        case c: Parser.Command[?] =>
+          bad(
+            "a command-shaped Parser cannot be a field: derive Parser.Shared for a spliceable options group (a full command can be embedded as the sole field of a command-group case)"
+          )
+
+        case vf: Parser.ValuedFlag[?] =>
+          if anns.positional then positional("value", Mode.Single(vf, optional), requiredPos)
+          else named("", Mode.Flag(vf, optional))
+
+        case fl: Parser.Flag[?] =>
+          named("", Mode.Flag(fl, false))
+
+        case v: Parser.Value[?] =>
+          val mode = Mode.Single(v, optional)
+          if anns.positional then positional(v.typeName, mode, requiredPos)
+          else named(v.typeName, mode)
+
+        case pr: Parser.Product[?] =>
+          // the metavar arrives pre-bracketed (`<x> <y>`); help renders it verbatim
+          val mode = Mode.Product(pr, optional)
+          if anns.positional then positional(pr.helpMetavar, mode, requiredPos)
+          else named(pr.helpMetavar, mode)
+
+        case r: Parser.Repeated[?] =>
+          val mode = Mode.Repeated(r, anns.split.getOrElse(0), anns.greedy)
+          if anns.positional then positional(r.typeName, mode, required = false)
+          else named(r.typeName, mode)
+
+        case t: Parser.Trailing[?] =>
+          // at most one, and never next to positionals or subcommands: compile-checked
+          trailing = TrailingSpec(i, anns.help.getOrElse(""), t, optional, default)
+
+    def result(
+        onType: TargetAnnots,
+        build: Array[Any] => Result[Any, String],
+        version: Option[() => String]
+    ): Command =
+      val allSplices = if spls == null then Vector.empty[Splice] else spls.result()
+      // `build` expects exactly the parent's own field slots
+      val fullBuild: Array[Any] => Result[Any, String] =
+        if allSplices.isEmpty then build else arr => build(arr.take(n))
+      Command(
+        onType.help.getOrElse(""),
+        if opts == null then Vector.empty else opts.result(),
+        if poss == null then Vector.empty else poss.result(),
+        if sub == null then None else Some(sub),
+        if trailing == null then None else Some(trailing),
+        allSplices,
+        fullBuild,
+        storage,
+        version
+      )
 
   /** Long / short option names claimed so far; duplicates are construction errors. */
   private final class NameRegistry:
@@ -358,15 +301,3 @@ object Assemble:
       short.foreach { c =>
         if !shorts.add(c) then invalid(s"duplicate short option '-$c'$origin")
       }
-
-  /** Required-before-optional is inherently value-level: optionality depends on a field default, a
-    * term-level fact. (Repeated-must-be-last is compile-checked and needs no re-check.)
-    */
-  private def checkPositionalOrder(kinds: IndexedSeq[(String, PosKind)]): Unit =
-    var optionalSeen = false
-    kinds.foreach { (nm, kind) =>
-      if kind == PosKind.Required then
-        if optionalSeen then
-          invalid(s"positional '$nm': required positionals must come before optional ones")
-      else optionalSeen = true
-    }

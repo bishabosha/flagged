@@ -173,11 +173,10 @@ object DeriveMethods:
       m: M,
       onMethod: TargetAnnots
   ): Command =
-    Assemble.product(
-      Derive.labelsOf[m.MirroredElemLabels],
-      Derive.fieldsOf[m.MirroredElemTypes, m.MirroredAnnotations],
-      m,
-      onMethod,
-      arr => Result.Ok(m.invoke(o, arr)),
-      Derive.versionOf[T, m.MirroredSelfAnnotations]
-    )
+    Derive
+      .fieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, m.MirroredAnnotations](m)
+      .result(
+        onMethod,
+        arr => Result.Ok(m.invoke(o, arr)),
+        Derive.versionOf[T, m.MirroredSelfAnnotations]
+      )
