@@ -8,7 +8,7 @@ import scala.collection.mutable
 /** One case of a derived sum: either a singleton value or a nested command. */
 enum SubEntry:
   case Leaf(value: Any)
-  case Node(parser: () => Parser[?])
+  case Node(parser: Parser[?])
 
 /** Builds the runtime `Command` model as inline derivation walks the fields: the walk feeds a
   * [[Assemble.FieldsBuilder]] one `addField` call per field, which dispatches on the parser's
@@ -76,8 +76,8 @@ object Assemble:
           TrailingSpec(0, "", t, false, None)
         return Command(
           "",
-          Vector.empty,
-          Vector.empty,
+          IArray.empty,
+          IArray.empty,
           None,
           Some(spec),
           Vector.empty,
@@ -88,8 +88,8 @@ object Assemble:
         return c.impl
     Command(
       "",
-      Vector.empty,
-      Vector(PosSpec("value", "", p.typeName, 0, mode, None)),
+      IArray.empty,
+      IArray(PosSpec("value", "", p.typeName, 0, mode, None)),
       None,
       None,
       Vector.empty,
@@ -108,7 +108,7 @@ object Assemble:
       val help = anns.help.getOrElse("")
       val cmd  = entries(i) match
         case SubEntry.Leaf(v) => Command.leaf(v, help)
-        case SubEntry.Node(p) => p().command
+        case SubEntry.Node(p) => p.command
       SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden, anns.aliases)
     }
     // kebab-derived command names can collide only at the value level (constant @name/alias
@@ -122,8 +122,8 @@ object Assemble:
       if i < 0 then None else Some(cases(i))
     Command(
       annots.onType.help.getOrElse(""),
-      Vector.empty,
-      Vector.empty,
+      IArray.empty,
+      IArray.empty,
       Some(SubGroup(0, false, None, cases, defaultCase)),
       None,
       Vector.empty,
@@ -144,19 +144,38 @@ object Assemble:
     * ordering) are checked here. [[result]] closes the command.
     */
   final class FieldsBuilder private[Assemble] (n: Int, defaults: Defaults[?]):
-    private val names                                           = NameRegistry()
-    private var opts: mutable.Builder[OptSpec, Vector[OptSpec]] = null
-    private var poss: mutable.Builder[PosSpec, Vector[PosSpec]] = null
-    private var spls: mutable.Builder[Splice, Vector[Splice]]   = null
-    private var sub: SubGroup                                   = null
-    private var trailing: TrailingSpec                          = null
+    // the long lookup the finished Command parses with, built as fields arrive — duplicate
+    // detection is the map insert itself
+    private var lookup: java.util.HashMap[String, OptSpec]    = null
+    private var opts: mutable.ArrayBuffer[OptSpec]            = null
+    private var shorts: mutable.ArrayBuffer[OptSpec]          = null
+    private var poss: mutable.ArrayBuffer[PosSpec]            = null
+    private var spls: mutable.Builder[Splice, Vector[Splice]] = null
+    private var sub: SubGroup                                 = null
+    private var trailing: TrailingSpec                        = null
     private var storage         = n // spliced children's specs live past the parent's own slots
     private var index           = 0
     private var optionalPosSeen = false
 
-    private def addOpt(spec: OptSpec): Unit =
-      if opts == null then opts = Vector.newBuilder
+    private def origin(from: String): String =
+      if from == null then "" else s" (from options group '$from')"
+
+    /** Register `spec` under `key` (`--`-prefixed); the insert doubles as duplicate detection. */
+    private def putName(key: String, spec: OptSpec, from: String): Unit =
+      if lookup == null then lookup = new java.util.HashMap
+      if lookup.put(key, spec) != null then invalid(s"duplicate option name '$key'${origin(from)}")
+
+    private def addOpt(spec: OptSpec, from: String): Unit =
+      if opts == null then opts = mutable.ArrayBuffer.empty
       opts += spec
+      putName(spec.longDisplay, spec, from)
+      spec.aliases.foreach(a => putName("--" + a, spec, from))
+      spec.short.foreach { c =>
+        if shorts == null then shorts = mutable.ArrayBuffer.empty
+        else if shorts.exists(_.short.contains(c)) then
+          invalid(s"duplicate short option '-$c'${origin(from)}")
+        shorts += spec
+      }
 
     def addField(label: String, parser: Parser[?], optional: Boolean, anns: FieldAnnots): Unit =
       val i = index
@@ -167,8 +186,6 @@ object Assemble:
       def named(metavar: String, mode: Mode): Unit =
         val long = anns.name.getOrElse(kebab(label))
         if long == "help" then bad("option name 'help' is reserved")
-        names.register(long, anns.short, from = None)
-        anns.aliases.foreach(a => names.register(a, None, from = None))
         addOpt(
           OptSpec(
             long,
@@ -181,7 +198,8 @@ object Assemble:
             anns.hidden,
             anns.group,
             anns.aliases
-          )
+          ),
+          from = null
         )
       def positional(metavar: String, mode: Mode, required: Boolean): Unit =
         // required-before-optional is inherently value-level: optionality depends on a field
@@ -192,7 +210,7 @@ object Assemble:
               s"positional '${anns.name.getOrElse(kebab(label))}': required positionals must come before optional ones"
             )
         else optionalPosSeen = true
-        if poss == null then poss = Vector.newBuilder
+        if poss == null then poss = mutable.ArrayBuffer.empty
         poss += PosSpec(
           anns.name.getOrElse(kebab(label)),
           anns.help.getOrElse(""),
@@ -221,8 +239,6 @@ object Assemble:
             val long    = prefix.fold(o.long)(pre => s"$pre-${o.long}")
             val short   = if prefix.isEmpty then o.short else None
             val aliases = o.aliases.map(a => prefix.fold(a)(pre => s"$pre-$a"))
-            names.register(long, short, from = Some(label))
-            aliases.foreach(a => names.register(a, None, from = Some(label)))
             addOpt(
               o.copy(
                 long = long,
@@ -230,7 +246,8 @@ object Assemble:
                 index = storage + o.index,
                 group = o.group.orElse(anns.group),
                 aliases = aliases
-              )
+              ),
+              from = label
             )
           }
           if spls == null then spls = Vector.newBuilder
@@ -271,33 +288,30 @@ object Assemble:
 
     def result(
         onType: TargetAnnots,
-        build: Array[Any] => Result[Any, String],
+        build: (Array[Any], Int) => Result[Any, String],
         version: Option[() => String]
     ): Command =
       val allSplices = if spls == null then Vector.empty[Splice] else spls.result()
-      // `build` expects exactly the parent's own field slots
-      val fullBuild: Array[Any] => Result[Any, String] =
-        if allSplices.isEmpty then build else arr => build(arr.take(n))
+      // `build` receives the whole storage plus the parent's own field count — no trimming
       Command(
         onType.help.getOrElse(""),
-        if opts == null then Vector.empty else opts.result(),
-        if poss == null then Vector.empty else poss.result(),
+        if opts == null then IArray.empty else IArray.unsafeFromArray(opts.toArray),
+        if poss == null then IArray.empty else IArray.unsafeFromArray(poss.toArray),
         if sub == null then None else Some(sub),
         if trailing == null then None else Some(trailing),
         allSplices,
-        fullBuild,
+        arr => build(arr, n),
         storage,
-        version
+        version,
+        if lookup == null then Command.noLookup else lookup,
+        if shorts == null then Command.noShortChars
+        else
+          val cs = new Array[Char](shorts.length)
+          var k  = 0
+          while k < cs.length do
+            cs(k) = shorts(k).short.get
+            k += 1
+          cs
+        ,
+        if shorts == null then Command.noShortSpecs else shorts.toArray
       )
-
-  /** Long / short option names claimed so far; duplicates are construction errors. */
-  private final class NameRegistry:
-    private val longs  = mutable.Set.empty[String]
-    private val shorts = mutable.Set.empty[Char]
-
-    def register(long: String, short: Option[Char], from: Option[String]): Unit =
-      val origin = from.fold("")(l => s" (from options group '$l')")
-      if !longs.add(long) then invalid(s"duplicate option name '--$long'$origin")
-      short.foreach { c =>
-        if !shorts.add(c) then invalid(s"duplicate short option '-$c'$origin")
-      }

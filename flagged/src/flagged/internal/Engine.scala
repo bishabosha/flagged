@@ -76,7 +76,7 @@ private[flagged] object Engine:
 
       val shortChars = cmd.shortChars
       val shortSpecs = cmd.shortSpecs
-      val posSpecs   = cmd.posSpecs
+      val posSpecs   = cmd.positionals
       val subGroup   = cmd.sub.orNull
 
       /** With a `@default` command and no own options, unrecognized tokens are its arguments. */
@@ -442,7 +442,7 @@ private[flagged] object Engine:
         val absent = if cmd.splices.isEmpty then null else markAbsent(cmd.splices, 0, null)
         if absent == null then Set.empty else absent
 
-      val optSpecs = cmd.optSpecs
+      val optSpecs = cmd.opts
       var oi       = 0
       while oi < optSpecs.length do
         val o = optSpecs(oi)

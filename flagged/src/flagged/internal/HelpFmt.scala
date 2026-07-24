@@ -38,7 +38,9 @@ private[flagged] object HelpFmt:
 
     if cmd.positionals.nonEmpty then
       b ++= "\nArguments:\n"
-      b ++= table(cmd.positionals.map(p => s"<${p.name}>" -> withExtras(p.help, posExtras(p))))
+      b ++= table(
+        cmd.positionals.toSeq.map(p => s"<${p.name}>" -> withExtras(p.help, posExtras(p)))
+      )
       b += '\n'
 
     cmd.trailing.filter(_.help.nonEmpty).foreach { t =>
@@ -47,7 +49,8 @@ private[flagged] object HelpFmt:
       b += '\n'
     }
 
-    val visible                 = if showHidden then cmd.opts else cmd.opts.filterNot(_.hidden)
+    val allOpts                 = cmd.opts.toSeq
+    val visible                 = if showHidden then allOpts else allOpts.filterNot(_.hidden)
     val (ungrouped, inSections) = visible.partition(_.group.isEmpty)
     val hasHidden          = cmd.opts.exists(_.hidden) || cmd.sub.exists(_.cases.exists(_.hidden))
     def optRow(o: OptSpec) = optLeft(o) -> withExtras(o.help, optExtras(o, showHidden))

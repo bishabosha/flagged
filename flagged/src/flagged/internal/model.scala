@@ -7,12 +7,14 @@ import steps.result.Result
   */
 
 /** Exposes the engine's value array as the `Product` a `Mirror#fromProduct` consumes — the
-  * generated constructor call reads `productElement(n)` only, so no tuple is built or copied.
+  * generated constructor call reads `productElement(n)` only, so no tuple is built or copied. The
+  * arity is explicit: under splices the array is the whole storage (the spliced children's slots
+  * sit past the parent's own fields) and is passed without trimming.
   */
-final class ArrayProduct(arr: Array[Any]) extends Product:
+final class ArrayProduct(arr: Array[Any], n: Int) extends Product:
   def canEqual(that: Any): Boolean = false
-  def productArity: Int            = arr.length
-  def productElement(n: Int): Any  = arr(n)
+  def productArity: Int            = n
+  def productElement(i: Int): Any  = arr(i)
 enum Mode:
   /** Flag: takes no token; built from the occurrence count (a [[flagged.Parser.ValuedFlag]]
     * additionally handles the explicit `--flag=value` form). If `optional` the field is an
@@ -122,32 +124,22 @@ final case class TrailingSpec(
 
 final case class Command(
     description: String,
-    opts: Vector[OptSpec],
-    positionals: Vector[PosSpec],
+    opts: IArray[OptSpec],
+    positionals: IArray[PosSpec],
     sub: Option[SubGroup],
     trailing: Option[TrailingSpec],
     splices: IndexedSeq[Splice],
     build: Array[Any] => Result[Any, String], // fallible: `emap` validation composes here
     arity: Int, // value-storage size: own fields plus spliced children's storage
-    version: Option[() => String] = None // from Versioned[A]; called by --version and help
+    version: Option[() => String] = None, // from Versioned[A]; called by --version and help
+    // per-token lookups, built during assembly (duplicate-name detection rides on the map
+    // inserts): java.util maps return null instead of allocating an Option, and the long keys
+    // carry their `--` prefix so a plain long token needs no substring at all (the key doubles
+    // as the option's display spelling)
+    longLookup: java.util.HashMap[String, OptSpec] = Command.noLookup,
+    shortChars: Array[Char] = Command.noShortChars,
+    shortSpecs: Array[OptSpec] = Command.noShortSpecs
 ):
-  // per-token lookups: java.util maps return null instead of allocating an Option, and the
-  // long keys carry their `--` prefix so a plain long token needs no substring at all (and the
-  // key doubles as the option's display spelling)
-  lazy val longLookup: java.util.HashMap[String, OptSpec] =
-    val m = new java.util.HashMap[String, OptSpec]
-    opts.foreach { o =>
-      m.put(o.longDisplay, o)
-      o.aliases.foreach(a => m.put("--" + a, o))
-    }
-    m
-  private lazy val shorts: Vector[OptSpec] = opts.filter(_.short.isDefined)
-  lazy val shortChars: Array[Char]         = shorts.map(_.short.get).toArray
-  lazy val shortSpecs: Array[OptSpec]      = shorts.toArray
-
-  // hot-loop views: Vector.apply walks a tree per element; the engine indexes these instead
-  lazy val optSpecs: Array[OptSpec] = opts.toArray
-  lazy val posSpecs: Array[PosSpec] = positionals.toArray
 
   /** Build spliced children from their storage slices, then build this command's value; the first
     * failing build (e.g. an `emap` validation) short-circuits. `counts` holds per-slot mention
@@ -186,14 +178,19 @@ final case class Command(
     loop(0)
 
 object Command:
+  // shared empties for option-less commands; the map is never mutated after construction
+  private[internal] val noLookup     = new java.util.HashMap[String, OptSpec]
+  private[internal] val noShortChars = Array.empty[Char]
+  private[internal] val noShortSpecs = Array.empty[OptSpec]
+
   /** A command with no parameters that always produces `value` (parameterless enum case / case
     * object).
     */
   def leaf(value: Any, description: String): Command =
     Command(
       description,
-      Vector.empty,
-      Vector.empty,
+      IArray.empty,
+      IArray.empty,
       None,
       None,
       Vector.empty,

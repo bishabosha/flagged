@@ -156,7 +156,7 @@ object DeriveMethods:
       b += ((
         constValue[sr.mirror.MirroredLabel],
         anns,
-        SubEntry.Node(() => Parser.makeGroup[Any](cmd, name))
+        SubEntry.Node(Parser.makeGroup[Any](cmd, name))
       ))
 
   private inline def methodEntry[T, M <: MethodMirror[T]](
@@ -166,7 +166,7 @@ object DeriveMethods:
     val anns = Annots.targetAnnotsOf[m.MirroredSelfAnnotations]
     val cmd  = methodCmd[T, M](o, m, anns)
     val name = anns.name.getOrElse(Assemble.kebab(constValue[m.MirroredLabel]))
-    (constValue[m.MirroredLabel], anns, SubEntry.Node(() => Parser.make[Any](cmd, name)))
+    (constValue[m.MirroredLabel], anns, SubEntry.Node(Parser.make[Any](cmd, name)))
 
   private inline def methodCmd[T, M <: MethodMirror[T]](
       o: T,
@@ -177,6 +177,6 @@ object DeriveMethods:
       .fieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, m.MirroredAnnotations](m)
       .result(
         onMethod,
-        arr => Result.Ok(m.invoke(o, arr)),
+        (arr, _) => Result.Ok(m.invoke(o, arr)),
         Derive.versionOf[T, m.MirroredSelfAnnotations]
       )

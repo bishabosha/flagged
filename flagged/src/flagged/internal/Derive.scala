@@ -33,7 +33,7 @@ object Derive:
           Defaults.derived[A]
         ).result(
           onType,
-          arr => steps.result.Result.Ok(m.fromProduct(ArrayProduct(arr))),
+          (arr, k) => steps.result.Result.Ok(m.fromProduct(ArrayProduct(arr, k))),
           versionOf[A, am.MirroredSelfAnnotations]
         )
         Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], onType))
@@ -52,7 +52,7 @@ object Derive:
             Defaults.derived[A]
           ).result(
             onType,
-            arr => steps.result.Result.Ok(m.fromProduct(ArrayProduct(arr))),
+            (arr, k) => steps.result.Result.Ok(m.fromProduct(ArrayProduct(arr, k))),
             versionOf[A, am.MirroredSelfAnnotations]
           )
         Parser.makeShared[A](cmd, Assemble.progName(constValue[m.MirroredLabel], onType))
@@ -101,7 +101,7 @@ object Derive:
         Parser.productOf[A](
           valuesOfAll[m.MirroredElemTypes],
           IArray.from(labelsOf[m.MirroredElemLabels].map(Assemble.kebab)),
-          arr => m.fromProduct(ArrayProduct(arr))
+          arr => m.fromProduct(ArrayProduct(arr, arr.length))
         )
 
   /** The `Value` parser of every element type. */
@@ -720,9 +720,9 @@ object Derive:
   inline def entryOf[H]: SubEntry =
     summonFrom:
       case v: ValueOf[H]          => SubEntry.Leaf(v.value)
-      case p: Parser[H]           => SubEntry.Node(() => p)
-      case m: Mirror.ProductOf[H] => SubEntry.Node(() => caseCommand[H](using m))
-      case _                      => SubEntry.Node(() => summonInline[Parser[H]])
+      case p: Parser[H]           => SubEntry.Node(p)
+      case m: Mirror.ProductOf[H] => SubEntry.Node(caseCommand[H](using m))
+      case _                      => SubEntry.Node(summonInline[Parser[H]])
 
   /** A product case of the sum: normally derived in place; a case whose sole field carries a full
     * `Parser.Command` embeds that command wholesale — substitution: the case's grammar *is* the
