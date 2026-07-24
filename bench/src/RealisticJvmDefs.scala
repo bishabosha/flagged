@@ -92,8 +92,9 @@ final class ScallopDocker(args: Seq[String]) extends ScallopConf(args):
 
 object RealisticJvmDefs:
 
-  private val builder     = OParser.builder[ScoptConfig]
-  private val scoptParser =
+  private val builder = OParser.builder[ScoptConfig]
+
+  private def mkScoptParser =
     import builder.*
     OParser.sequence(
       programName("docker"),
@@ -144,8 +145,14 @@ object RealisticJvmDefs:
         )
     )
 
+  private val scoptParser = mkScoptParser
+
   def scoptParse(args: Seq[String]): Option[ScoptConfig] =
     OParser.parse(scoptParser, args, ScoptConfig())
+
+  /** Construct the `OParser` chain and parse — the one-shot cost. */
+  def scoptOneshot(args: Seq[String]): Option[ScoptConfig] =
+    OParser.parse(mkScoptParser, args, ScoptConfig())
 
   def scallopParse(args: Seq[String]): ScallopDocker = new ScallopDocker(args)
 

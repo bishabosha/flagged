@@ -77,6 +77,14 @@ on the `simple` and `realistic` grammars — flagged's inline derivation body (f
 `Assemble`), mainargs' `ParserForClass`/`ParserForMethods`, case-app's `Parser[T]`. Shared
 value-level givens (element readers) are singletons for every library and are not rebuilt.
 
+**`OneshotBench`** — the whole per-process cost in one measurement: construct the parser and
+parse one command line per invocation, on the `simple` and `realistic` grammars (all six
+libraries meet in `realistic`). Each library constructs what its idiom needs for the
+invocation: flagged and mainargs build the whole command group, case-app's first-token
+dispatch constructs only the invoked command's parser, scopt rebuilds its `OParser` chain,
+scallop's `ScallopConf` is construct-and-parse by design, and picocli rebuilds its reflective
+model. `ConstructBench` and `RuntimeBench` are the two halves measured separately.
+
 **`MethodBench`** — the method-based counterpart to `RuntimeBench`: parse-and-invoke latency for
 command methods, flagged's `@run` derivation against mainargs' `ParserForMethods` (the two
 libraries with a method parser). Both sides select a method, parse its parameters, and invoke
