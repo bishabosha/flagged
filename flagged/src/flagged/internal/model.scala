@@ -122,7 +122,8 @@ private[flagged] final case class TrailingSpec(
     optional: Boolean,
     default: Option[() => Any]
 ):
-  def build(l: IndexedSeq[String]): Result[Any, String] = parser.build(l)
+  def buildInto(l: IndexedSeq[String], out: Array[Any], i: Int): Result[Unit, String] =
+    parser.buildInto(l, out, i)
 
 private[flagged] final case class Command(
     description: String,

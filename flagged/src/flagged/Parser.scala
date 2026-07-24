@@ -14,7 +14,10 @@ final case class Count(value: Int)
 
 object Count:
   given Parser.Flag[Count]:
-    def fromCount(n: Int) = Ok(Count(n))
+    def fromCount(n: Int)                                                    = Ok(Count(n))
+    override private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
+      Result.task:
+        out(i) = Count(n)
 
 /** The raw arguments after `--`, collected verbatim (no option parsing). Empty when no `--` is
   * given; use `Option[Trailing]` to distinguish an absent `--` from a present-but-empty one.
@@ -24,6 +27,9 @@ final case class Trailing(args: IndexedSeq[String] = Vector.empty)
 object Trailing:
   given Parser.Trailing[Trailing]:
     def build(l: IndexedSeq[String]) = Ok(Trailing(l))
+    override private[flagged] def buildInto(l: IndexedSeq[String], out: Array[Any], i: Int) =
+      Result.task:
+        out(i) = Trailing(l)
 
 /** Describes how command-line input becomes an `A`. The *shape* is the subtype:
   *
@@ -320,9 +326,19 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     final def typeName: String                          = "args"
     def emap[B](f: A => Result[B, String]): Trailing[B] = trailing(l => build(l).flatMap(f))
 
+    /** Engine protocol: combine the raw arguments into `out(i)`; the shared [[Result.done]] on
+      * success (the built-in instance overrides — only user-supplied `build`s allocate an `Ok`).
+      */
+    private[flagged] def buildInto(
+        l: IndexedSeq[String],
+        out: Array[Any],
+        i: Int
+    ): Result[Unit, String] =
+      intoSlot(build(l), out, i)
+
     /** One token builds as a single trailing argument. */
     private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-      intoSlot(build(Vector(s)), out, i)
+      buildInto(Vector(s), out, i)
 
   /** A single command's grammar: named options, positionals, trailing, splices. As a field of
     * another command, its options are spliced in.

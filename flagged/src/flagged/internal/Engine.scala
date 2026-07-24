@@ -69,7 +69,7 @@ private[flagged] object Engine:
 
       var subValue   = Option.empty[Any]
       var subErrored = false
-      var trailValue = Option.empty[Any]
+      var trailSeen  = false
       var idx        = from
       var posIdx     = 0
       var noMoreOpts = false
@@ -280,10 +280,11 @@ private[flagged] object Engine:
         else if tok == "--" then
           cmd.trailing match
             case Some(t) =>
-              // divert everything after `--` to the trailing field, verbatim
-              t.build(args.drop(idx)) match
-                case Ok(v)    => trailValue = Some(v)
+              // divert everything after `--` to the trailing field, verbatim — written straight
+              // into the slot (wrapped for an Option field at finishing)
+              t.buildInto(args.drop(idx), values, t.index) match
                 case Err(msg) => report(s"invalid arguments after '--': $msg")
+                case _        => trailSeen = true
               idx = args.length
             case None => noMoreOpts = true
         else if tok.startsWith("--") then
@@ -460,19 +461,17 @@ private[flagged] object Engine:
 
       cmd.trailing match
         case Some(t) =>
-          values(t.index) = trailValue match
-            case Some(v) => if t.optional then Some(v) else v
-            case None    =>
-              t.default match
-                case Some(d) => d()
-                case None    =>
-                  if t.optional then None
-                  else
-                    t.build(Vector.empty) match
-                      case Ok(v)    => v
-                      case Err(msg) =>
-                        report(s"missing arguments after '--': $msg")
-                        null
+          if trailSeen then
+            if t.optional then values(t.index) = Some(values(t.index))
+          else
+            t.default match
+              case Some(d) => values(t.index) = d()
+              case None    =>
+                if t.optional then values(t.index) = None
+                else
+                  t.buildInto(Vector.empty, values, t.index) match
+                    case Err(msg) => report(s"missing arguments after '--': $msg")
+                    case _        => ()
         case None => ()
 
       cmd.sub match
