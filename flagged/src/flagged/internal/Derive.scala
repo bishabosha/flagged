@@ -218,12 +218,12 @@ object Derive:
   type ResOf[M <: Int] = FieldsRes { type Marks = M }
 
   inline def resOf[M <: Int](
-      fields: List[(Parser[?], Boolean, FieldAnnots)]
+      inline fields: List[(Parser[?], Boolean, FieldAnnots)]
   ): ResOf[M] =
     new FieldsRes(fields).asInstanceOf[ResOf[M]]
 
   /** A plain named option's summary: nothing special. */
-  inline def plainRes(fields: List[(Parser[?], Boolean, FieldAnnots)]) =
+  inline def plainRes(inline fields: List[(Parser[?], Boolean, FieldAnnots)]) =
     resOf[NoMarks](fields)
 
   inline def isZero[M <: Int]: Boolean = constValue[M == 0]

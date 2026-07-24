@@ -82,7 +82,7 @@ object Annots:
   // Every flagged annotation has zero or one parameter and no defaults, so a matched occurrence
   // materialises as a single constValue — no Mirror/Defaults machinery per query.
 
-  private inline def const1[Args]: Any = constValue[Tuple.Head[Args & NonEmptyTuple]]
+  private inline def const1[Args, T]: T = constValue[Tuple.Head[Args & NonEmptyTuple] & T]
 
   inline def targetAnnotsOfSome[Anns]: TargetAnnots =
     collectTarget[Anns](Nil, None, false, false)
@@ -100,9 +100,9 @@ object Annots:
         val names = revNames.reverse
         TargetAnnots(names.headOption, help, hidden, names.drop(1), default)
       case _: (Ann[flagged.name, args, ?] *: t) =>
-        collectTarget[t](const1[args].asInstanceOf[String] :: revNames, help, hidden, default)
+        collectTarget[t](const1[args, String] :: revNames, help, hidden, default)
       case _: (Ann[flagged.help, args, ?] *: t) =>
-        collectTarget[t](revNames, Some(const1[args].asInstanceOf[String]), hidden, default)
+        collectTarget[t](revNames, Some(const1[args, String]), hidden, default)
       case _: (Ann[flagged.hidden, ?, ?] *: t) =>
         collectTarget[t](revNames, help, true, default)
       case _: (Ann[flagged.default, ?, ?] *: t) =>
@@ -146,7 +146,7 @@ object Annots:
         )
       case _: (Ann[flagged.name, args, ?] *: t) =>
         collectField[t](
-          const1[args].asInstanceOf[String] :: revNames,
+          const1[args, String] :: revNames,
           short,
           help,
           group,
@@ -158,7 +158,7 @@ object Annots:
       case _: (Ann[flagged.short, args, ?] *: t) =>
         collectField[t](
           revNames,
-          Some(const1[args].asInstanceOf[Char]),
+          Some(const1[args, Char]),
           help,
           group,
           positional,
@@ -170,7 +170,7 @@ object Annots:
         collectField[t](
           revNames,
           short,
-          Some(const1[args].asInstanceOf[String]),
+          Some(const1[args, String]),
           group,
           positional,
           hidden,
@@ -182,7 +182,7 @@ object Annots:
           revNames,
           short,
           help,
-          Some(const1[args].asInstanceOf[String]),
+          Some(const1[args, String]),
           positional,
           hidden,
           split,
@@ -203,7 +203,7 @@ object Annots:
               group,
               positional,
               hidden,
-              Some(const1[args].asInstanceOf[Char]),
+              Some(const1[args, Char]),
               greedy
             )
           case _ =>
