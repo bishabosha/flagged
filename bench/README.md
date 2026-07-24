@@ -80,6 +80,20 @@ it; setup asserts both succeed and agree on the invoked result.
 | `method` | `--foo hello --bar 42 --baz` against a lone command method (the `simple` grammar) |
 | `commands` | `add core --url https://x.git` against a three-command interface, dispatching on the first token |
 
+## Probes
+
+Non-JMH instruments, each a `runMain` with a warm in-process `dotty` driver:
+
+- `bench.ScalingProbe` — derivation compile time by field count (the scaling table).
+- `bench.AblationProbe` — derivation cost by component at a fixed field count (interpret with
+  care: variants exercise different compiler subsystems with different JIT warmth).
+- `bench.RuleCostProbe` — the cost model of type-level validation encodings: verdicts cache per
+  compilation unit, one reduction's cost is set by what sits in match-type scrutinee position
+  (data ≈ free, ops-on-literals cheap, unreduced computations expensive and re-reduced without
+  memoization when nested). These measurements shaped `Derive`'s single-pass rules encoding.
+- `bench.KebabProbe` — feasibility and cost of a type-level kebab-case transform over
+  `scala.compiletime.ops` (works; ~0.4 ms per identifier; ops fold only plain constant types).
+
 ## Caveats
 
 - Compile times measure a warm in-process compiler on this module's classpath; absolute values

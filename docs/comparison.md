@@ -10,7 +10,7 @@ each test names the library whose documented behavior it was checked against. Th
 scallop, and picocli entries are based on their documentation plus empirical spot-checks of
 the syntax behaviors (the same probes that back the `realistic` benchmark encodings); they are
 not pinned as tests. JMH benchmarks comparing derivation compile time and parse
-latency/allocation live in `bench/` (see `bench/README.md`); all six libraries meet in the
+latency/allocation live in `bench/` (see `bench/README.md`, current numbers in `bench/results.md`); all six libraries meet in the
 `realistic` runtime scenario.
 
 ## The libraries
