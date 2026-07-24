@@ -85,23 +85,30 @@ object Annots:
   private inline def const1[Args]: Any = constValue[Tuple.Head[Args & NonEmptyTuple]]
 
   inline def targetAnnotsOfSome[Anns]: TargetAnnots =
-    collectTarget[Anns](TargetAnnots.empty, Nil)
+    collectTarget[Anns](Nil, None, false, false)
 
-  inline def collectTarget[Anns](acc: TargetAnnots, revNames: List[String]): TargetAnnots =
+  // the folds thread each extracted value as a parameter and call the constructor once at the
+  // end — no intermediate copies
+  inline def collectTarget[Anns](
+      revNames: List[String],
+      help: Option[String],
+      hidden: Boolean,
+      default: Boolean
+  ): TargetAnnots =
     inline erasedValue[Anns] match
       case _: EmptyTuple =>
         val names = revNames.reverse
-        acc.copy(name = names.headOption, aliases = names.drop(1))
+        TargetAnnots(names.headOption, help, hidden, names.drop(1), default)
       case _: (Ann[flagged.name, args, ?] *: t) =>
-        collectTarget[t](acc, const1[args].asInstanceOf[String] :: revNames)
+        collectTarget[t](const1[args].asInstanceOf[String] :: revNames, help, hidden, default)
       case _: (Ann[flagged.help, args, ?] *: t) =>
-        collectTarget[t](acc.copy(help = Some(const1[args].asInstanceOf[String])), revNames)
+        collectTarget[t](revNames, Some(const1[args].asInstanceOf[String]), hidden, default)
       case _: (Ann[flagged.hidden, ?, ?] *: t) =>
-        collectTarget[t](acc.copy(hidden = true), revNames)
+        collectTarget[t](revNames, help, true, default)
       case _: (Ann[flagged.default, ?, ?] *: t) =>
-        collectTarget[t](acc.copy(default = true), revNames)
+        collectTarget[t](revNames, help, hidden, true)
       case _: (_ *: t) =>
-        collectTarget[t](acc, revNames)
+        collectTarget[t](revNames, help, hidden, default)
 
   inline def fieldAnnotsOf[Anns]: FieldAnnots =
     inline erasedValue[Anns] match
@@ -109,37 +116,101 @@ object Annots:
       case _             => fieldAnnotsOfSome[Anns]
 
   inline def fieldAnnotsOfSome[Anns]: FieldAnnots =
-    collectField[Anns](FieldAnnots.empty, Nil)
+    collectField[Anns](Nil, None, None, None, false, false, None, false)
 
-  inline def collectField[Anns](acc: FieldAnnots, revNames: List[String]): FieldAnnots =
+  inline def collectField[Anns](
+      revNames: List[String],
+      short: Option[Char],
+      help: Option[String],
+      group: Option[String],
+      positional: Boolean,
+      hidden: Boolean,
+      split: Option[Char],
+      greedy: Boolean
+  ): FieldAnnots =
     inline erasedValue[Anns] match
       case _: EmptyTuple =>
         val names = revNames.reverse
-        acc.copy(name = names.headOption, aliases = names.drop(1))
+        FieldAnnots(
+          names.headOption,
+          short,
+          help,
+          positional,
+          hidden,
+          group,
+          names.drop(1),
+          split,
+          greedy
+        )
       case _: (Ann[flagged.name, args, ?] *: t) =>
-        collectField[t](acc, const1[args].asInstanceOf[String] :: revNames)
+        collectField[t](
+          const1[args].asInstanceOf[String] :: revNames,
+          short,
+          help,
+          group,
+          positional,
+          hidden,
+          split,
+          greedy
+        )
       case _: (Ann[flagged.short, args, ?] *: t) =>
-        collectField[t](acc.copy(short = Some(const1[args].asInstanceOf[Char])), revNames)
+        collectField[t](
+          revNames,
+          Some(const1[args].asInstanceOf[Char]),
+          help,
+          group,
+          positional,
+          hidden,
+          split,
+          greedy
+        )
       case _: (Ann[flagged.help, args, ?] *: t) =>
-        collectField[t](acc.copy(help = Some(const1[args].asInstanceOf[String])), revNames)
+        collectField[t](
+          revNames,
+          short,
+          Some(const1[args].asInstanceOf[String]),
+          group,
+          positional,
+          hidden,
+          split,
+          greedy
+        )
       case _: (Ann[flagged.group, args, ?] *: t) =>
-        collectField[t](acc.copy(group = Some(const1[args].asInstanceOf[String])), revNames)
+        collectField[t](
+          revNames,
+          short,
+          help,
+          Some(const1[args].asInstanceOf[String]),
+          positional,
+          hidden,
+          split,
+          greedy
+        )
       case _: (Ann[flagged.positional, ?, ?] *: t) =>
-        collectField[t](acc.copy(positional = true), revNames)
+        collectField[t](revNames, short, help, group, true, hidden, split, greedy)
       case _: (Ann[flagged.hidden, ?, ?] *: t) =>
-        collectField[t](acc.copy(hidden = true), revNames)
+        collectField[t](revNames, short, help, group, positional, true, split, greedy)
       case _: (Ann[flagged.split, args, dflt] *: t) =>
         // the separator may be defaulted (`@split`): resolve it through the Defaults mirror
         inline erasedValue[dflt] match
           case _: (false *: EmptyTuple) =>
-            collectField[t](acc.copy(split = Some(const1[args].asInstanceOf[Char])), revNames)
+            collectField[t](
+              revNames,
+              short,
+              help,
+              group,
+              positional,
+              hidden,
+              Some(const1[args].asInstanceOf[Char]),
+              greedy
+            )
           case _ =>
             val sep = summonInline[Defaults[flagged.split]].defaultArgument(0).asInstanceOf[Char]
-            collectField[t](acc.copy(split = Some(sep)), revNames)
+            collectField[t](revNames, short, help, group, positional, hidden, Some(sep), greedy)
       case _: (Ann[flagged.greedy, ?, ?] *: t) =>
-        collectField[t](acc.copy(greedy = true), revNames)
+        collectField[t](revNames, short, help, group, positional, hidden, split, true)
       case _: (_ *: t) =>
-        collectField[t](acc, revNames)
+        collectField[t](revNames, short, help, group, positional, hidden, split, greedy)
 
   // both walks halve the slot tuple (inline depth O(log n), matching Derive.walk) — annotation
   // slots hold only literal constant types, which survive the destructuring binders
