@@ -83,20 +83,20 @@ Options:
 
 ### Parse semantics
 
-Supported option syntax: `--name value` and `--name=value`; short aliases with
-separate (`-n Jamie`), attached (`-nJamie`), or `=` values; short-flag bundling
-(`-er`, `-rn 3`); `-` and negative numbers treated as values; options may appear
-after positionals (permutation, as in GNU getopt). Repeated scalar options are
-last-wins — `--verbose=false --verbose` is true — which keeps shell aliases
-composable; accumulation is opt-in through collection types and `Count`.
-
-`--` ends option parsing, following [POSIX Utility Syntax Guidelines, guideline 10]:
-the first `--` is dropped and everything after it is positional, even when it begins
-with `-`. Because Flagged permutes, the `--` is honored wherever it appears, matching
-the default behavior of GNU [getopt(3)], Python's argparse, and Rust's clap (strict
-POSIX, without permutation, would stop scanning at the first operand). When a command
-declares a `Trailing` field, `--` instead hands everything after it to that field
-verbatim — the delegation idiom of `ssh host -- cmd` or `docker run img -- cmd`.
+- Supported option syntax: `--name value` and `--name=value`
+- short aliases with separate (`-n Jamie`), attached (`-nJamie`), or assignment (`-n=Jamie`) values
+- short flags can be combined (`-er`, `-rn 3`)
+- options may appear after positionals (permutation, as in GNU getopt).
+- Repeated scalar options are last-wins (e.g. for `--verbose=false --verbose`, verbose is true)
+  - so shell aliases can set up some default options.
+- Repeated options can accumulate via collection types, or `Count` for flags.
+- `--` ends option parsing, following [POSIX Utility Syntax Guidelines, guideline 10]:
+  the first `--` is dropped and everything after it is positional, even when it begins
+  with `-`. Because Flagged permutes, the `--` is honored wherever it appears, matching
+  the default behavior of GNU [getopt(3)], Python's argparse, and Rust's clap (strict
+  POSIX, without permutation, would stop scanning at the first operand). When a command
+  declares a `Trailing` field, `--` instead hands everything after it to that field
+  verbatim — the delegation idiom of `ssh host -- cmd` or `docker run img -- cmd`.
 
 [POSIX Utility Syntax Guidelines]: https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap12.html
 [POSIX Utility Syntax Guidelines, guideline 10]: https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap12.html
