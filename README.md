@@ -434,11 +434,9 @@ mainargs/case-app (each pinned down in `ParitySuite` against the other library's
 documented behavior), and Flagged's known gaps, ranked — shell completions and
 unrecognized-argument passthrough being the two at the top.
 
-## Getting Flagged
+## Local publishing
 
-Flagged is not yet published to a Maven repository. To try it out, clone this
-repository and run `./mill flagged.jvm.test`, or any of the demos in `examples/`
-(`./mill examples.runMain examples.greetMain --help`); to use it in a project,
-vendor `flagged/src` plus the source folders for your platform
-(`flagged/src-jvm`, `flagged/src-js`, `flagged/src-native`,
-`flagged/src-jvm-native`).
+Until Flagged is published, to try it out, clone this repository and run `./mill flagged.jvm.test`,
+or any of the demos in `examples/` (`./mill examples.runMain examples.greetMain --help`).
+
+To use it in a project, run `./mill flagged._.publishLocal` (or just `./mill flagged.jvm.publishLocal` for quickest access)
