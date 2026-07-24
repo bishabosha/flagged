@@ -48,11 +48,11 @@ enum Annots[A]:
 
 object Annots:
 
-  def makeProduct[A](onType: TargetAnnots, perField: IndexedSeq[FieldAnnots]): Annots.Product[A] =
-    Annots.Product(onType, perField)
+  def makeProduct[A](onType: TargetAnnots, perField: Seq[FieldAnnots]): Annots.Product[A] =
+    Annots.Product(onType, perField.toIndexedSeq)
 
-  def makeSum[A](onType: TargetAnnots, perCase: IndexedSeq[TargetAnnots]): Annots.Sum[A] =
-    Annots.Sum(onType, perCase)
+  def makeSum[A](onType: TargetAnnots, perCase: Seq[TargetAnnots]): Annots.Sum[A] =
+    Annots.Sum(onType, perCase.toIndexedSeq)
 
   /** Extract flagged's annotations for a product into typed records. */
   inline def productAnnots[A]: Annots.Product[A] =
@@ -220,9 +220,12 @@ object Annots:
   type Half[T <: Tuple] = Tuple.Size[T] / 2
 
   inline def fieldAnnotsEach[Slots]: IndexedSeq[FieldAnnots] =
-    val b = Vector.newBuilder[FieldAnnots]
-    fieldAnnotsInto[Slots](b)
-    b.result()
+    inline erasedValue[Slots] match
+      case _: EmptyTuple => Vector.empty
+      case _             =>
+        val b = Vector.newBuilder[FieldAnnots]
+        fieldAnnotsInto[Slots](b)
+        b.result()
 
   inline def fieldAnnotsInto[Slots](b: scala.collection.mutable.Growable[FieldAnnots]): Unit =
     inline erasedValue[Slots] match
@@ -238,9 +241,12 @@ object Annots:
         fieldAnnotsInto[Tuple.Drop[h *: t, Half[h *: t]]](b)
 
   inline def targetAnnotsEach[Slots]: IndexedSeq[TargetAnnots] =
-    val b = Vector.newBuilder[TargetAnnots]
-    targetAnnotsInto[Slots](b)
-    b.result()
+    inline erasedValue[Slots] match
+      case _: EmptyTuple => Vector.empty
+      case _             =>
+        val b = Vector.newBuilder[TargetAnnots]
+        targetAnnotsInto[Slots](b)
+        b.result()
 
   inline def targetAnnotsInto[Slots](b: scala.collection.mutable.Growable[TargetAnnots]): Unit =
     inline erasedValue[Slots] match

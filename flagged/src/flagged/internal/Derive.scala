@@ -122,9 +122,12 @@ object Derive:
   // ---- fields ---------------------------------------------------------------
 
   inline def labelsOf[L <: Tuple]: IndexedSeq[String] =
-    val b = Vector.newBuilder[String]
-    labelsInto[L](b)
-    b.result()
+    inline erasedValue[L] match
+      case _: EmptyTuple    => Vector.empty
+      case _: NonEmptyTuple =>
+        val b = Vector.newBuilder[String]
+        labelsInto[L](b)
+        b.result()
 
   inline def labelsInto[L <: Tuple](b: scala.collection.mutable.Growable[String]): Unit =
     inline erasedValue[L] match
@@ -667,9 +670,12 @@ object Derive:
   // those instead.
 
   inline def entriesOf[T <: Tuple]: IndexedSeq[SubEntry] =
-    val b = Vector.newBuilder[SubEntry]
-    entriesInto[T](b)
-    b.result()
+    inline erasedValue[T] match
+      case _: EmptyTuple    => Vector.empty
+      case _: NonEmptyTuple =>
+        val b = Vector.newBuilder[SubEntry]
+        entriesInto[T](b)
+        b.result()
 
   inline def entriesInto[T <: Tuple](b: scala.collection.mutable.Growable[SubEntry]): Unit =
     inline erasedValue[T] match
@@ -741,9 +747,12 @@ object Derive:
   // ---- singleton helpers ------------------------------------------------------
 
   inline def singletonValues[T <: Tuple]: IndexedSeq[Any] =
-    val b = Vector.newBuilder[Any]
-    singletonsInto[T](b)
-    b.result()
+    inline erasedValue[T] match
+      case _: EmptyTuple    => Vector.empty
+      case _: NonEmptyTuple =>
+        val b = Vector.newBuilder[Any]
+        singletonsInto[T](b)
+        b.result()
 
   inline def singletonsInto[T <: Tuple](b: scala.collection.mutable.Growable[Any]): Unit =
     inline erasedValue[T] match
