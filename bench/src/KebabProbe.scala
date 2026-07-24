@@ -3,7 +3,6 @@ package bench
 import java.nio.file.Files
 import dotty.tools.dotc.Driver
 import dotty.tools.dotc.reporting.StoreReporter
-import flagged.internal.Assemble
 
 /** Experiment: can the kebab-case transform run at compile time using only `scala.compiletime.ops`
   * types, and what does it cost?
@@ -191,7 +190,24 @@ object KebabProbe:
 
   private def verifySource(classifier: String): String =
     machinery(classifier) + "\nobject Use:\n" +
-      labels.map(l => s"""  assertEq["$l", "${Assemble.kebab(l)}"]""").mkString("\n") + "\n"
+      labels.map(l => s"""  assertEq["$l", "${kebab(l)}"]""").mkString("\n") + "\n"
+
+  /** Reference transform, mirroring `Assemble.kebab` (private to the library): the probe embeds its
+    * output as the expected value each type-level classifier must reproduce.
+    */
+  private def kebab(s: String): String =
+    val b = new StringBuilder
+    var i = 0
+    while i < s.length do
+      val c = s(i)
+      if i > 0 then
+        val p        = s(i - 1)
+        val boundary =
+          (c.isUpper && !p.isUpper) || (c.isDigit && !p.isDigit) || (c.isLetter && p.isDigit)
+        if boundary && p != '-' then b += '-'
+      b += c.toLower
+      i += 1
+    b.result()
 
   private def compile(src: String, silent: Boolean = true): (Double, Boolean) =
     val dir = Files.createTempDirectory("kebab-probe")

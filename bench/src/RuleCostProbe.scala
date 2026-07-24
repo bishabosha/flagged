@@ -19,7 +19,8 @@ object RuleCostProbe:
 
   def src(n: Int, expr: String): String =
     val vals = (1 to n).map(i => s"  val v$i = compiletime.constValue[$expr]").mkString("\n")
-    s"""import flagged.internal.Derive.*
+    s"""package flagged.probe // subpackage of `flagged`: the probe exercises private[flagged] internals
+       |import flagged.internal.Derive.*
        |import scala.compiletime
        |import scala.compiletime.ops.any.{==, !=}
        |import scala.compiletime.ops.int.{BitwiseAnd, BitwiseOr}
