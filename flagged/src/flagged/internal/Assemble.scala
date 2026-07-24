@@ -43,7 +43,7 @@ private final case class Field(
     positional: Boolean,
     hidden: Boolean,
     group: Option[String],
-    aliases: List[String],
+    aliases: IndexedSeq[String],
     optional: Boolean,
     default: Option[() => Any],
     parser: Parser[?],
@@ -86,8 +86,8 @@ object Assemble:
   /** By-name parser for an all-singleton enum, honoring `@name` on cases. */
   def enumValueParser(
       typeLabel: String,
-      caseLabels: List[String],
-      values: List[Any],
+      caseLabels: IndexedSeq[String],
+      values: IndexedSeq[Any],
       perCase: IndexedSeq[TargetAnnots]
   ): Parser.Enumerated[Any] =
     val names = caseLabels.zipWithIndex.map { (l, i) =>
@@ -116,7 +116,7 @@ object Assemble:
           Vector.empty,
           None,
           Some(spec),
-          Nil,
+          Vector.empty,
           arr => Result.Ok(arr(0)),
           1
         )
@@ -128,15 +128,15 @@ object Assemble:
       Vector(PosSpec("value", "", p.typeName, 0, mode, None)),
       None,
       None,
-      Nil,
+      Vector.empty,
       arr => Result.Ok(arr(0)),
       1
     )
 
   def sum(
-      caseLabels: List[String],
+      caseLabels: IndexedSeq[String],
       annots: Annots.Sum[?],
-      entries: List[SubEntry],
+      entries: IndexedSeq[SubEntry],
       version: Option[() => String]
   ): Command =
     val cases = entries.zipWithIndex.map { (e, i) =>
@@ -150,7 +150,7 @@ object Assemble:
     // kebab-derived command names can collide only at the value level (constant @name/alias
     // duplicates are compile errors); a silent collision would shadow the later command
     val caseNames = mutable.Set.empty[String]
-    for c <- cases; n <- c.name :: c.aliases do
+    for c <- cases; n <- c.name +: c.aliases do
       if !caseNames.add(n) then invalid(s"duplicate command name '$n'")
     val defaultCase = annots.perCase.zipWithIndex.collectFirst {
       case (a, i) if a.default => cases(i)
@@ -161,7 +161,7 @@ object Assemble:
       Vector.empty,
       Some(SubGroup(0, false, None, cases, defaultCase)),
       None,
-      Nil,
+      Vector.empty,
       arr => Result.Ok(arr(0)),
       1,
       version
@@ -170,7 +170,7 @@ object Assemble:
   // ---- product assembly -------------------------------------------------------
 
   def product(
-      labels: List[String],
+      labels: IndexedSeq[String],
       fields: IndexedSeq[(Parser[?], Boolean, FieldAnnots)],
       defaults: Defaults[?],
       onType: TargetAnnots,
@@ -284,8 +284,8 @@ object Assemble:
 
     val opts     = Vector.newBuilder[OptSpec]
     val poss     = Vector.newBuilder[PosSpec]
-    val posKinds = List.newBuilder[(String, PosKind)]
-    val splices  = List.newBuilder[Splice]
+    val posKinds = Vector.newBuilder[(String, PosKind)]
+    val splices  = Vector.newBuilder[Splice]
     var sub      = Option.empty[SubGroup]
     var trailing = Option.empty[TrailingSpec]
     var storage  = n // spliced children's specs live past the parent's own slots
@@ -361,7 +361,7 @@ object Assemble:
   /** Required-before-optional is inherently value-level: optionality depends on a field default, a
     * term-level fact. (Repeated-must-be-last is compile-checked and needs no re-check.)
     */
-  private def checkPositionalOrder(kinds: List[(String, PosKind)]): Unit =
+  private def checkPositionalOrder(kinds: IndexedSeq[(String, PosKind)]): Unit =
     kinds.zipWithIndex.foreach { case ((nm, kind), idx) =>
       if kind == PosKind.Required && kinds.take(idx).exists(_(1) != PosKind.Required) then
         invalid(s"positional '$nm': required positionals must come before optional ones")

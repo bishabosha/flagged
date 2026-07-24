@@ -153,7 +153,7 @@ class SpliceSuite extends munit.FunSuite:
 
   test("a shared group cannot contain a trailing field (compile time)") {
     val e = compileErrors(
-      "case class WithTrailing(x: Int = 1, rest: Trailing = Trailing(Nil)) derives Parser.Shared"
+      "case class WithTrailing(x: Int = 1, rest: Trailing = Trailing()) derives Parser.Shared"
     )
     assert(e.contains("cannot contain a trailing field"), e)
   }
@@ -181,7 +181,7 @@ class SpliceSuite extends munit.FunSuite:
   test("a sole-field command-group case embeds a full command by substitution") {
     assertEquals(
       ok(Flagged.parse[Workbench](Seq("ext", "-f", "thing", "--", "a", "-b"))),
-      Workbench.External(EmbeddedTool(force = true, target = "thing", Trailing(List("a", "-b"))))
+      Workbench.External(EmbeddedTool(force = true, target = "thing", Trailing(Vector("a", "-b"))))
     )
   }
 
@@ -218,7 +218,7 @@ enum Deploy derives Parser.CommandGroup:
 case class EmbeddedTool(
     @short('f') force: Boolean = false,
     @positional target: String,
-    rest: Trailing = Trailing(Nil)
+    rest: Trailing = Trailing()
 ) derives Parser.Command
 
 enum Workbench derives Parser.CommandGroup:

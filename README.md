@@ -304,12 +304,12 @@ Declare a `Trailing` field: everything after `--` lands in it verbatim, unparsed
 the delegation idiom of `docker run img -- cmd args...`:
 
 ```scala
-case class Run(@short('i') image: String = "alpine", cmd: Trailing = Trailing(Nil)) derives Parser.Command
-// run -i ubuntu -- echo --not-an-option   →   Run("ubuntu", Trailing(List("echo", "--not-an-option")))
+case class Run(@short('i') image: String = "alpine", cmd: Trailing = Trailing()) derives Parser.Command
+// run -i ubuntu -- echo --not-an-option   →   Run("ubuntu", Trailing(Vector("echo", "--not-an-option")))
 ```
 
 An `Option[Trailing]` field distinguishes an absent `--` (`None`) from a
-present-but-empty one (`Some(Trailing(Nil))`). One trailing field per command; in
+present-but-empty one (`Some(Trailing())`). One trailing field per command; in
 help it appears as `[-- <args>]` in the usage line.
 
 ### Take several values for one option

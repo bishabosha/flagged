@@ -19,11 +19,11 @@ object Count:
 /** The raw arguments after `--`, collected verbatim (no option parsing). Empty when no `--` is
   * given; use `Option[Trailing]` to distinguish an absent `--` from a present-but-empty one.
   */
-final case class Trailing(args: List[String])
+final case class Trailing(args: IndexedSeq[String] = Vector.empty)
 
 object Trailing:
   given Parser.Trailing[Trailing]:
-    def build(l: List[String]) = Ok(Trailing(l))
+    def build(l: IndexedSeq[String]) = Ok(Trailing(l))
 
 /** Describes how command-line input becomes an `A`. The *shape* is the subtype:
   *
@@ -77,7 +77,7 @@ sealed trait Parser[A]:
   final def parse(args: Seq[String]): ParseResult[A] = parse(args, typeName)
 
   final def parse(args: Seq[String], prog: String): ParseResult[A] =
-    Engine.run(command, prog, Nil, args.toIndexedSeq, 0).asInstanceOf[ParseResult[A]]
+    Engine.run(command, prog, Vector.empty, args.toIndexedSeq, 0).asInstanceOf[ParseResult[A]]
 
   /** Parse `args`; on `--help` print the help screen and exit 0, on error print a message to stderr
     * and exit 2. Intended for `@main` methods and scripts.
@@ -98,12 +98,13 @@ sealed trait Parser[A]:
   /** The rendered top-level help screen. */
   final def help: String = help(typeName)
 
-  final def help(prog: String): String = HelpFmt.render(command, prog, Nil)
+  final def help(prog: String): String = HelpFmt.render(command, prog, Vector.empty)
 
   /** [[help]] including `@hidden` options and subcommands — what `--help-all` prints. */
   final def helpAll: String = helpAll(typeName)
 
-  final def helpAll(prog: String): String = HelpFmt.render(command, prog, Nil, showHidden = true)
+  final def helpAll(prog: String): String =
+    HelpFmt.render(command, prog, Vector.empty, showHidden = true)
 
 object Parser extends ParserLowPriority, internal.PlatformValues:
   def apply[A](using p: Parser[A]): Parser[A] = p
@@ -326,17 +327,17 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
       Result.task:
         out(i) = build(elems)
 
-  /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with `Nil`
-    * when no `--` is given — return `Err` to require one).
+  /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with an
+    * empty sequence when no `--` is given — return `Err` to require one).
     */
   sealed trait Trailing[A] extends Parser[A]:
-    def build(l: List[String]): Result[A, String]
+    def build(l: IndexedSeq[String]): Result[A, String]
     final def typeName: String                          = "args"
     def emap[B](f: A => Result[B, String]): Trailing[B] = trailing(l => build(l).flatMap(f))
 
     /** One token builds as a single trailing argument. */
     private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-      intoSlot(build(List(s)), out, i)
+      intoSlot(build(Vector(s)), out, i)
 
   /** A single command's grammar: named options, positionals, trailing, splices. As a field of
     * another command, its options are spliced in.
@@ -440,8 +441,8 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
           intoSlot(combine(b.result().asInstanceOf[IndexedSeq[E]]), out, i)
 
   /** Opt `A` into trailing shape: it is built from the raw arguments after `--`. */
-  def trailing[A](combine: List[String] => Result[A, String]): Trailing[A] = new Trailing[A]:
-    def build(l: List[String]) = combine(l)
+  def trailing[A](combine: IndexedSeq[String] => Result[A, String]): Trailing[A] = new Trailing[A]:
+    def build(l: IndexedSeq[String]) = combine(l)
 
   /** Derive a command from the single `@run` method of object `o`: its parameters become the
     * options and positionals (same annotations and rules as case-class fields), and a successful

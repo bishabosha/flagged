@@ -23,7 +23,9 @@ object DeriveMethods:
     inline if runMethodCount[r.Entries] + runObjectCount[r.Entries] == 0 then
       error("no @run methods or nested @run objects found in " + constValue[r.mirror.MirroredLabel])
     else
-      val es = entriesOf[T, r.Entries](o, r.mirror, r.entries, 0)
+      val eb = Vector.newBuilder[(String, TargetAnnots, SubEntry)]
+      entriesInto[T, r.Entries](o, r.mirror, r.entries, 0, eb)
+      val es = eb.result()
       Assemble.sum(
         es.map(_(0)),
         Annots.makeSum[Any](Annots.targetAnnotsOf[r.mirror.MirroredSelfAnnotations], es.map(_(1))),
@@ -110,25 +112,22 @@ object DeriveMethods:
     val anns = Annots.targetAnnotsOf[m.MirroredSelfAnnotations]
     (methodCmd[T, M](o, m, anns), anns.name.getOrElse(Assemble.kebab(constValue[m.MirroredLabel])))
 
-  private inline def entriesOf[T, ER](
+  private inline def entriesInto[T, ER](
       o: T,
       g: MethodsMirror[T],
       er: ER,
-      i: Int
-  ): List[(String, TargetAnnots, SubEntry)] =
+      i: Int,
+      b: scala.collection.mutable.Growable[(String, TargetAnnots, SubEntry)]
+  ): Unit =
     inline erasedValue[ER] match
-      case _: EntriesResults.Empty                   => Nil
+      case _: EntriesResults.Empty                   => ()
       case _: EntriesResults.MethodNode[s, m, t, re] =>
         val node = er.asInstanceOf[
           EntriesResults.MethodNode[s, m & MethodMirror[s], t & Tuple, EntriesResults[t & Tuple]]
         ]
-        val head =
-          inline if methodIsRun[m] then
-            List(
-              methodEntry[T, m & MethodMirror[T]](o, g.method(i).asInstanceOf[m & MethodMirror[T]])
-            )
-          else Nil
-        head ::: entriesOf[T, re](o, g, node.rest.asInstanceOf[re], i + 1)
+        inline if methodIsRun[m] then
+          b += methodEntry[T, m & MethodMirror[T]](o, g.method(i).asInstanceOf[m & MethodMirror[T]])
+        entriesInto[T, re](o, g, node.rest.asInstanceOf[re], i + 1, b)
       case _: EntriesResults.ScopeNode[s, t, sr, re, oo] =>
         val node = er.asInstanceOf[
           EntriesResults.ScopeNode[
@@ -139,28 +138,26 @@ object DeriveMethods:
             oo
           ]
         ]
-        scopeEntry[s, sr & MethodResults[s]](node.results) :::
-          entriesOf[T, re](o, g, node.rest.asInstanceOf[re], i + 1)
+        scopeEntryInto[s, sr & MethodResults[s]](node.results, b)
+        entriesInto[T, re](o, g, node.rest.asInstanceOf[re], i + 1, b)
 
   /** Descend into a nested command object: its whole tower was summoned once, during
     * [[MethodResults]] derivation, and rides in the node — only the object instance itself is
     * recovered here, via `ValueOf`.
     */
-  private inline def scopeEntry[S, SR <: MethodResults[S]](
-      sr: SR
-  ): List[(String, TargetAnnots, SubEntry)] =
+  private inline def scopeEntryInto[S, SR <: MethodResults[S]](
+      sr: SR,
+      b: scala.collection.mutable.Growable[(String, TargetAnnots, SubEntry)]
+  ): Unit =
     inline if isRun[sr.mirror.MirroredSelfAnnotations] then
       val anns = Annots.targetAnnotsOf[sr.mirror.MirroredSelfAnnotations]
       val cmd  = group[S, SR](summonInline[ValueOf[S]].value, sr)
       val name = anns.name.getOrElse(Assemble.kebab(constValue[sr.mirror.MirroredLabel]))
-      List(
-        (
-          constValue[sr.mirror.MirroredLabel],
-          anns,
-          SubEntry.Node(() => Parser.makeGroup[Any](cmd, name))
-        )
-      )
-    else Nil
+      b += ((
+        constValue[sr.mirror.MirroredLabel],
+        anns,
+        SubEntry.Node(() => Parser.makeGroup[Any](cmd, name))
+      ))
 
   private inline def methodEntry[T, M <: MethodMirror[T]](
       o: T,

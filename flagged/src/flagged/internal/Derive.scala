@@ -121,20 +121,26 @@ object Derive:
 
   // ---- fields ---------------------------------------------------------------
 
-  inline def labelsOf[L <: Tuple]: List[String] =
+  inline def labelsOf[L <: Tuple]: IndexedSeq[String] =
+    val b = Vector.newBuilder[String]
+    labelsInto[L](b)
+    b.result()
+
+  inline def labelsInto[L <: Tuple](b: scala.collection.mutable.Growable[String]): Unit =
     inline erasedValue[L] match
-      case _: EmptyTuple             => Nil
-      case _: (a *: EmptyTuple)      => constValue[a].asInstanceOf[String] :: Nil
-      case _: (a *: b *: EmptyTuple) =>
-        constValue[a].asInstanceOf[String] :: constValue[b].asInstanceOf[String] :: Nil
-      case _: (a *: b *: c *: EmptyTuple) =>
-        constValue[a].asInstanceOf[String] :: constValue[b].asInstanceOf[String] ::
-          constValue[c].asInstanceOf[String] :: Nil
-      case _: (a *: b *: c *: d *: EmptyTuple) =>
-        constValue[a].asInstanceOf[String] :: constValue[b].asInstanceOf[String] ::
-          constValue[c].asInstanceOf[String] :: constValue[d].asInstanceOf[String] :: Nil
+      case _: EmptyTuple              => ()
+      case _: (a *: EmptyTuple)       => b += constValue[a].asInstanceOf[String]
+      case _: (a *: b0 *: EmptyTuple) =>
+        b += constValue[a].asInstanceOf[String] += constValue[b0].asInstanceOf[String]
+      case _: (a *: b0 *: c *: EmptyTuple) =>
+        b += constValue[a].asInstanceOf[String] += constValue[b0].asInstanceOf[String]
+          += constValue[c].asInstanceOf[String]
+      case _: (a *: b0 *: c *: d *: EmptyTuple) =>
+        b += constValue[a].asInstanceOf[String] += constValue[b0].asInstanceOf[String]
+          += constValue[c].asInstanceOf[String] += constValue[d].asInstanceOf[String]
       case _: NonEmptyTuple =>
-        labelsOf[Tuple.Take[L, HalfN[L]]] ::: labelsOf[Tuple.Drop[L, HalfN[L]]]
+        labelsInto[Tuple.Take[L, HalfN[L]]](b)
+        labelsInto[Tuple.Drop[L, HalfN[L]]](b)
 
   /** The single field rule: summon the field type's `Parser`; `Option[_]` marks it optional. The
     * parser's shape (its `Parser` subtype, which derivation requires to be statically known)
@@ -660,12 +666,18 @@ object Derive:
   // are match types and preserve the exact element type, so sums are traversed with
   // those instead.
 
-  inline def entriesOf[T <: Tuple]: List[SubEntry] =
+  inline def entriesOf[T <: Tuple]: IndexedSeq[SubEntry] =
+    val b = Vector.newBuilder[SubEntry]
+    entriesInto[T](b)
+    b.result()
+
+  inline def entriesInto[T <: Tuple](b: scala.collection.mutable.Growable[SubEntry]): Unit =
     inline erasedValue[T] match
-      case _: EmptyTuple        => Nil
-      case _: (? *: EmptyTuple) => entryOf[Tuple.Head[T & NonEmptyTuple]] :: Nil
+      case _: EmptyTuple        => ()
+      case _: (? *: EmptyTuple) => b += entryOf[Tuple.Head[T & NonEmptyTuple]]
       case _: NonEmptyTuple     =>
-        entriesOf[Tuple.Take[T, HalfN[T]]] ::: entriesOf[Tuple.Drop[T, HalfN[T]]]
+        entriesInto[Tuple.Take[T, HalfN[T]]](b)
+        entriesInto[Tuple.Drop[T, HalfN[T]]](b)
 
   /** One case of the sum being derived. Singleton and product cases belong to the sum's own
     * declaration and are handled in place; a case that is itself a sum is a separate hierarchy and
@@ -728,15 +740,21 @@ object Derive:
 
   // ---- singleton helpers ------------------------------------------------------
 
-  inline def singletonValues[T <: Tuple]: List[Any] =
+  inline def singletonValues[T <: Tuple]: IndexedSeq[Any] =
+    val b = Vector.newBuilder[Any]
+    singletonsInto[T](b)
+    b.result()
+
+  inline def singletonsInto[T <: Tuple](b: scala.collection.mutable.Growable[Any]): Unit =
     inline erasedValue[T] match
-      case _: EmptyTuple        => Nil
+      case _: EmptyTuple        => ()
       case _: (? *: EmptyTuple) =>
         summonFrom:
-          case v: ValueOf[Tuple.Head[T & NonEmptyTuple]] => v.value :: Nil
+          case v: ValueOf[Tuple.Head[T & NonEmptyTuple]] => b += v.value
           case _                                         =>
             error(
               "Parser.Enumerated requires an enum (or sealed trait) whose cases are all parameterless"
             )
       case _: NonEmptyTuple =>
-        singletonValues[Tuple.Take[T, HalfN[T]]] ::: singletonValues[Tuple.Drop[T, HalfN[T]]]
+        singletonsInto[Tuple.Take[T, HalfN[T]]](b)
+        singletonsInto[Tuple.Drop[T, HalfN[T]]](b)

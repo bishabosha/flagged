@@ -11,7 +11,7 @@ final case class TargetAnnots(
     name: Option[String],
     help: Option[String],
     hidden: Boolean = false,
-    aliases: List[String] = Nil,
+    aliases: IndexedSeq[String] = Vector.empty,
     default: Boolean = false
 )
 
@@ -26,7 +26,7 @@ final case class FieldAnnots(
     positional: Boolean,
     hidden: Boolean = false,
     group: Option[String] = None,
-    aliases: List[String] = Nil,
+    aliases: IndexedSeq[String] = Vector.empty,
     split: Option[Char] = None,
     greedy: Boolean = false
 )
@@ -48,11 +48,11 @@ enum Annots[A]:
 
 object Annots:
 
-  def makeProduct[A](onType: TargetAnnots, perField: Seq[FieldAnnots]): Annots.Product[A] =
-    Annots.Product(onType, perField.toIndexedSeq)
+  def makeProduct[A](onType: TargetAnnots, perField: IndexedSeq[FieldAnnots]): Annots.Product[A] =
+    Annots.Product(onType, perField)
 
-  def makeSum[A](onType: TargetAnnots, perCase: Seq[TargetAnnots]): Annots.Sum[A] =
-    Annots.Sum(onType, perCase.toIndexedSeq)
+  def makeSum[A](onType: TargetAnnots, perCase: IndexedSeq[TargetAnnots]): Annots.Sum[A] =
+    Annots.Sum(onType, perCase)
 
   /** Extract flagged's annotations for a product into typed records. */
   inline def productAnnots[A]: Annots.Product[A] =
@@ -85,30 +85,30 @@ object Annots:
   private inline def const1[Args, T]: T = constValue[Tuple.Head[Args & NonEmptyTuple] & T]
 
   inline def targetAnnotsOfSome[Anns]: TargetAnnots =
-    collectTarget[Anns](Nil, None, false, false)
+    collectTarget[Anns](Vector.empty, None, false, false)
 
   // the folds thread each extracted value as an inline parameter and call the constructor once
   // at the end — no intermediate copies, and superseded values are dropped unmaterialised
   inline def collectTarget[Anns](
-      inline revNames: List[String],
+      inline names: Vector[String],
       inline help: Option[String],
       inline hidden: Boolean,
       inline default: Boolean
   ): TargetAnnots =
     inline erasedValue[Anns] match
       case _: EmptyTuple =>
-        val names = revNames.reverse
-        TargetAnnots(names.headOption, help, hidden, names.drop(1), default)
+        val ns = names
+        TargetAnnots(ns.headOption, help, hidden, ns.drop(1), default)
       case _: (Ann[flagged.name, args, ?] *: t) =>
-        collectTarget[t](const1[args, String] :: revNames, help, hidden, default)
+        collectTarget[t](names :+ const1[args, String], help, hidden, default)
       case _: (Ann[flagged.help, args, ?] *: t) =>
-        collectTarget[t](revNames, Some(const1[args, String]), hidden, default)
+        collectTarget[t](names, Some(const1[args, String]), hidden, default)
       case _: (Ann[flagged.hidden, ?, ?] *: t) =>
-        collectTarget[t](revNames, help, true, default)
+        collectTarget[t](names, help, true, default)
       case _: (Ann[flagged.default, ?, ?] *: t) =>
-        collectTarget[t](revNames, help, hidden, true)
+        collectTarget[t](names, help, hidden, true)
       case _: (_ *: t) =>
-        collectTarget[t](revNames, help, hidden, default)
+        collectTarget[t](names, help, hidden, default)
 
   inline def fieldAnnotsOf[Anns]: FieldAnnots =
     inline erasedValue[Anns] match
@@ -116,12 +116,12 @@ object Annots:
       case _             => fieldAnnotsOfSome[Anns]
 
   inline def fieldAnnotsOfSome[Anns]: FieldAnnots =
-    collectField[Anns](Nil, None, None, None, false, false, None, false)
+    collectField[Anns](Vector.empty, None, None, None, false, false, None, false)
 
   // inline parameters: arguments substitute as expressions, so pass-through values bind
   // nothing per step and a value replaced later in the walk is never constructed at all
   inline def collectField[Anns](
-      inline revNames: List[String],
+      inline names: Vector[String],
       inline short: Option[Char],
       inline help: Option[String],
       inline group: Option[String],
@@ -132,21 +132,21 @@ object Annots:
   ): FieldAnnots =
     inline erasedValue[Anns] match
       case _: EmptyTuple =>
-        val names = revNames.reverse
+        val ns = names
         FieldAnnots(
-          names.headOption,
+          ns.headOption,
           short,
           help,
           positional,
           hidden,
           group,
-          names.drop(1),
+          ns.drop(1),
           split,
           greedy
         )
       case _: (Ann[flagged.name, args, ?] *: t) =>
         collectField[t](
-          const1[args, String] :: revNames,
+          names :+ const1[args, String],
           short,
           help,
           group,
@@ -157,7 +157,7 @@ object Annots:
         )
       case _: (Ann[flagged.short, args, ?] *: t) =>
         collectField[t](
-          revNames,
+          names,
           Some(const1[args, Char]),
           help,
           group,
@@ -168,7 +168,7 @@ object Annots:
         )
       case _: (Ann[flagged.help, args, ?] *: t) =>
         collectField[t](
-          revNames,
+          names,
           short,
           Some(const1[args, String]),
           group,
@@ -179,7 +179,7 @@ object Annots:
         )
       case _: (Ann[flagged.group, args, ?] *: t) =>
         collectField[t](
-          revNames,
+          names,
           short,
           help,
           Some(const1[args, String]),
@@ -189,15 +189,15 @@ object Annots:
           greedy
         )
       case _: (Ann[flagged.positional, ?, ?] *: t) =>
-        collectField[t](revNames, short, help, group, true, hidden, split, greedy)
+        collectField[t](names, short, help, group, true, hidden, split, greedy)
       case _: (Ann[flagged.hidden, ?, ?] *: t) =>
-        collectField[t](revNames, short, help, group, positional, true, split, greedy)
+        collectField[t](names, short, help, group, positional, true, split, greedy)
       case _: (Ann[flagged.split, args, dflt] *: t) =>
         // the separator may be defaulted (`@split`): resolve it through the Defaults mirror
         inline erasedValue[dflt] match
           case _: (false *: EmptyTuple) =>
             collectField[t](
-              revNames,
+              names,
               short,
               help,
               group,
@@ -208,39 +208,49 @@ object Annots:
             )
           case _ =>
             val sep = summonInline[Defaults[flagged.split]].defaultArgument(0).asInstanceOf[Char]
-            collectField[t](revNames, short, help, group, positional, hidden, Some(sep), greedy)
+            collectField[t](names, short, help, group, positional, hidden, Some(sep), greedy)
       case _: (Ann[flagged.greedy, ?, ?] *: t) =>
-        collectField[t](revNames, short, help, group, positional, hidden, split, true)
+        collectField[t](names, short, help, group, positional, hidden, split, true)
       case _: (_ *: t) =>
-        collectField[t](revNames, short, help, group, positional, hidden, split, greedy)
+        collectField[t](names, short, help, group, positional, hidden, split, greedy)
 
   // both walks halve the slot tuple (inline depth O(log n), matching Derive.walk) — annotation
   // slots hold only literal constant types, which survive the destructuring binders
 
   type Half[T <: Tuple] = Tuple.Size[T] / 2
 
-  inline def fieldAnnotsEach[Slots]: List[FieldAnnots] =
-    inline erasedValue[Slots] match
-      case _: EmptyTuple                  => Nil
-      case _: (a *: EmptyTuple)           => fieldAnnotsOf[a] :: Nil
-      case _: (a *: b *: EmptyTuple)      => fieldAnnotsOf[a] :: fieldAnnotsOf[b] :: Nil
-      case _: (a *: b *: c *: EmptyTuple) =>
-        fieldAnnotsOf[a] :: fieldAnnotsOf[b] :: fieldAnnotsOf[c] :: Nil
-      case _: (a *: b *: c *: d *: EmptyTuple) =>
-        fieldAnnotsOf[a] :: fieldAnnotsOf[b] :: fieldAnnotsOf[c] :: fieldAnnotsOf[d] :: Nil
-      case _: (h *: t) =>
-        fieldAnnotsEach[Tuple.Take[h *: t, Half[h *: t]]] :::
-          fieldAnnotsEach[Tuple.Drop[h *: t, Half[h *: t]]]
+  inline def fieldAnnotsEach[Slots]: IndexedSeq[FieldAnnots] =
+    val b = Vector.newBuilder[FieldAnnots]
+    fieldAnnotsInto[Slots](b)
+    b.result()
 
-  inline def targetAnnotsEach[Slots]: List[TargetAnnots] =
+  inline def fieldAnnotsInto[Slots](b: scala.collection.mutable.Growable[FieldAnnots]): Unit =
     inline erasedValue[Slots] match
-      case _: EmptyTuple                  => Nil
-      case _: (a *: EmptyTuple)           => targetAnnotsOf[a] :: Nil
-      case _: (a *: b *: EmptyTuple)      => targetAnnotsOf[a] :: targetAnnotsOf[b] :: Nil
-      case _: (a *: b *: c *: EmptyTuple) =>
-        targetAnnotsOf[a] :: targetAnnotsOf[b] :: targetAnnotsOf[c] :: Nil
-      case _: (a *: b *: c *: d *: EmptyTuple) =>
-        targetAnnotsOf[a] :: targetAnnotsOf[b] :: targetAnnotsOf[c] :: targetAnnotsOf[d] :: Nil
+      case _: EmptyTuple                   => ()
+      case _: (a *: EmptyTuple)            => b += fieldAnnotsOf[a]
+      case _: (a *: b0 *: EmptyTuple)      => b += fieldAnnotsOf[a] += fieldAnnotsOf[b0]
+      case _: (a *: b0 *: c *: EmptyTuple) =>
+        b += fieldAnnotsOf[a] += fieldAnnotsOf[b0] += fieldAnnotsOf[c]
+      case _: (a *: b0 *: c *: d *: EmptyTuple) =>
+        b += fieldAnnotsOf[a] += fieldAnnotsOf[b0] += fieldAnnotsOf[c] += fieldAnnotsOf[d]
       case _: (h *: t) =>
-        targetAnnotsEach[Tuple.Take[h *: t, Half[h *: t]]] :::
-          targetAnnotsEach[Tuple.Drop[h *: t, Half[h *: t]]]
+        fieldAnnotsInto[Tuple.Take[h *: t, Half[h *: t]]](b)
+        fieldAnnotsInto[Tuple.Drop[h *: t, Half[h *: t]]](b)
+
+  inline def targetAnnotsEach[Slots]: IndexedSeq[TargetAnnots] =
+    val b = Vector.newBuilder[TargetAnnots]
+    targetAnnotsInto[Slots](b)
+    b.result()
+
+  inline def targetAnnotsInto[Slots](b: scala.collection.mutable.Growable[TargetAnnots]): Unit =
+    inline erasedValue[Slots] match
+      case _: EmptyTuple                   => ()
+      case _: (a *: EmptyTuple)            => b += targetAnnotsOf[a]
+      case _: (a *: b0 *: EmptyTuple)      => b += targetAnnotsOf[a] += targetAnnotsOf[b0]
+      case _: (a *: b0 *: c *: EmptyTuple) =>
+        b += targetAnnotsOf[a] += targetAnnotsOf[b0] += targetAnnotsOf[c]
+      case _: (a *: b0 *: c *: d *: EmptyTuple) =>
+        b += targetAnnotsOf[a] += targetAnnotsOf[b0] += targetAnnotsOf[c] += targetAnnotsOf[d]
+      case _: (h *: t) =>
+        targetAnnotsInto[Tuple.Take[h *: t, Half[h *: t]]](b)
+        targetAnnotsInto[Tuple.Drop[h *: t, Half[h *: t]]](b)

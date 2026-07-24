@@ -49,7 +49,7 @@ final case class OptSpec(
     default: Option[() => Any],
     hidden: Boolean = false,
     group: Option[String] = None,
-    aliases: List[String] = Nil
+    aliases: IndexedSeq[String] = Vector.empty
 ):
   lazy val longDisplay: String  = "--" + long
   lazy val shortDisplay: String = short.fold(longDisplay)("-" + _)
@@ -69,7 +69,7 @@ final case class SubCase(
     help: String,
     command: Command,
     hidden: Boolean = false,
-    aliases: List[String] = Nil
+    aliases: IndexedSeq[String] = Vector.empty
 )
 
 final case class SubGroup(
@@ -118,7 +118,7 @@ final case class TrailingSpec(
     optional: Boolean,
     default: Option[() => Any]
 ):
-  def build(l: List[String]): Result[Any, String] = parser.build(l)
+  def build(l: IndexedSeq[String]): Result[Any, String] = parser.build(l)
 
 final case class Command(
     description: String,
@@ -126,7 +126,7 @@ final case class Command(
     positionals: Vector[PosSpec],
     sub: Option[SubGroup],
     trailing: Option[TrailingSpec],
-    splices: List[Splice],
+    splices: IndexedSeq[Splice],
     build: Array[Any] => Result[Any, String], // fallible: `emap` validation composes here
     arity: Int, // value-storage size: own fields plus spliced children's storage
     version: Option[() => String] = None // from Versioned[A]; called by --version and help
@@ -164,14 +164,15 @@ final case class Command(
       counts: Array[Int],
       base: Int
   ): Result[Any, String] =
-    def loop(remaining: List[Splice]): Result[Any, String] = remaining match
-      case Nil       => build(values)
-      case s :: rest =>
+    def loop(i: Int): Result[Any, String] =
+      if i == splices.length then build(values)
+      else
+        val s = splices(i)
         if s.skipped(counts, base) then
           values(s.slot) = s.default match
             case Some(d) => d()
             case None    => None
-          loop(rest)
+          loop(i + 1)
         else
           s.command.finish(
             values.slice(s.offset, s.offset + s.command.arity),
@@ -180,13 +181,22 @@ final case class Command(
           ) match
             case Result.Ok(v) =>
               values(s.slot) = if s.optional then Some(v) else v
-              loop(rest)
+              loop(i + 1)
             case err => err
-    loop(splices)
+    loop(0)
 
 object Command:
   /** A command with no parameters that always produces `value` (parameterless enum case / case
     * object).
     */
   def leaf(value: Any, description: String): Command =
-    Command(description, Vector.empty, Vector.empty, None, None, Nil, _ => Result.Ok(value), 0)
+    Command(
+      description,
+      Vector.empty,
+      Vector.empty,
+      None,
+      None,
+      Vector.empty,
+      _ => Result.Ok(value),
+      0
+    )

@@ -33,17 +33,17 @@ private[flagged] object Engine:
   def run(
       cmd: Command,
       prog: String,
-      path: List[String],
+      path: IndexedSeq[String],
       args: IndexedSeq[String],
       from: Int
   ): ParseResult[Any] =
     Result:
-      def full = (prog :: path).mkString(" ")
+      def full = (prog +: path).mkString(" ")
       def hint = s"Try '$full --help' for more information."
 
-      var errors: mutable.ListBuffer[String] = null
-      def report(msg: String): Unit          =
-        if errors == null then errors = mutable.ListBuffer.empty[String]
+      var errors: mutable.ArrayBuffer[String] = null
+      def report(msg: String): Unit           =
+        if errors == null then errors = mutable.ArrayBuffer.empty[String]
         errors += msg
       def helpNow(all: Boolean = false): Nothing =
         eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path, all)))
@@ -219,7 +219,7 @@ private[flagged] object Engine:
           else if defaultSubCase != null then runSub(defaultSubCase, idx - 1)
           else
             val sug = Runtime
-              .suggest(tok, subGroup.cases.filterNot(_.hidden).flatMap(c => c.name :: c.aliases))
+              .suggest(tok, subGroup.cases.filterNot(_.hidden).flatMap(c => c.name +: c.aliases))
               .map(s => s" (did you mean '$s'?)")
               .getOrElse("")
             report(s"unknown command '$tok'$sug")
@@ -275,7 +275,7 @@ private[flagged] object Engine:
           cmd.trailing match
             case Some(t) =>
               // divert everything after `--` to the trailing field, verbatim
-              t.build(args.iterator.drop(idx).toList) match
+              t.build(args.drop(idx)) match
                 case Ok(v)    => trailValue = Some(v)
                 case Err(msg) => report(s"invalid arguments after '--': $msg")
               idx = args.length
@@ -298,7 +298,7 @@ private[flagged] object Engine:
               val sug = Runtime
                 .suggest(
                   key.drop(2),
-                  cmd.opts.filterNot(_.hidden).flatMap(o => o.long :: o.aliases)
+                  cmd.opts.filterNot(_.hidden).flatMap(o => o.long +: o.aliases)
                     :+ "help" :+ "help-all" :++ cmd.version.map(_ => "version")
                 )
                 .map(s => s" (did you mean '--$s'?)")
@@ -408,18 +408,18 @@ private[flagged] object Engine:
                 reportInvalid(c.finishInto(values, index), display)
             true
 
-      var missing: mutable.ListBuffer[String] = null
-      def addMissing(display: String): Unit   =
-        if missing == null then missing = mutable.ListBuffer.empty[String]
+      var missing: mutable.ArrayBuffer[String] = null
+      def addMissing(display: String): Unit    =
+        if missing == null then missing = mutable.ArrayBuffer.empty[String]
         missing += display
 
       // slots of skipped splices (optional or defaulted, none of their options occurring): the
       // group falls back to None or its field default, so its required options are not enforced
       // (nested splices recurse)
-      def absentRanges(splices: List[Splice], base: Int): List[Range] =
+      def absentRanges(splices: IndexedSeq[Splice], base: Int): IndexedSeq[Range] =
         splices.flatMap { s =>
           if s.skipped(counts, base) then
-            List((base + s.offset) until (base + s.offset + s.command.arity))
+            Vector((base + s.offset) until (base + s.offset + s.command.arity))
           else absentRanges(s.command.splices, base + s.offset)
         }
       val skipIdx: Set[Int] =
@@ -451,7 +451,7 @@ private[flagged] object Engine:
                 case None    =>
                   if t.optional then None
                   else
-                    t.build(Nil) match
+                    t.build(Vector.empty) match
                       case Ok(v)    => v
                       case Err(msg) =>
                         report(s"missing arguments after '--': $msg")

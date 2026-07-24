@@ -39,7 +39,7 @@ case class GreedyOpts(
 
 case class GreedyTrailing(
     @greedy nums: List[Int] = Nil,
-    cmd: Trailing = Trailing(Nil)
+    cmd: Trailing = Trailing()
 ) derives Parser.Command
 
 class MultiValueSuite extends munit.FunSuite:
@@ -227,7 +227,7 @@ class MultiValueSuite extends munit.FunSuite:
   test("greedy stops at -- and trailing collects the rest") {
     assertEquals(
       ok(Flagged.parse[GreedyTrailing](Seq("--nums", "1", "2", "--", "cmd", "--flag"))),
-      GreedyTrailing(List(1, 2), Trailing(List("cmd", "--flag")))
+      GreedyTrailing(List(1, 2), Trailing(Vector("cmd", "--flag")))
     )
   }
 
