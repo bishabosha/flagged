@@ -38,8 +38,9 @@ object Trailing:
   *     field — a group-case with it as sole field embeds it as a subcommand instead
   *
   * The same type is used at every level, and field semantics follow the instance's subtype, which
-  * derivation requires to be statically known. Every parser is also runnable: `parse`/`parseOrExit`
-  * interpret value shapes as a single-argument command line.
+  * derivation requires to be statically known. Every parser is also runnable: `parse` interprets
+  * value shapes as a single-argument command line ([[Flagged.parseOrExit]] is the exit-on-error
+  * helper for `@main` methods).
   */
 @scala.annotation.implicitNotFound(
   "No given Parser[${A}] found.\n" +
@@ -78,22 +79,6 @@ sealed trait Parser[A]:
 
   final def parse(args: Seq[String], prog: String): ParseResult[A] =
     Engine.run(command, prog, Vector.empty, args.toIndexedSeq, 0).asInstanceOf[ParseResult[A]]
-
-  /** Parse `args`; on `--help` print the help screen and exit 0, on error print a message to stderr
-    * and exit 2. Intended for `@main` methods and scripts.
-    */
-  final def parseOrExit(args: Seq[String]): A = parseOrExit(args, typeName)
-
-  final def parseOrExit(args: Seq[String], prog: String): A =
-    parse(args, prog) match
-      case Ok(a)                      => a
-      case Err(ParseError.Help(text)) =>
-        println(text)
-        internal.PlatformExit.exit(0)
-      case Err(ParseError.Failure(message, hint)) =>
-        System.err.println(s"$prog: $message")
-        if hint.nonEmpty then System.err.println(hint)
-        internal.PlatformExit.exit(2)
 
   /** The rendered top-level help screen. */
   final def help: String = help(typeName)

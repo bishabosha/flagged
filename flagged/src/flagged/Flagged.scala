@@ -26,13 +26,25 @@ object Flagged:
   /** Parse `args`, selecting the grammar like [[parse]]; on `--help` print the help screen and exit
     * 0, on error print a message to stderr and exit 2. Intended for `@main` methods and scripts.
     */
-  def parseOrExit[A](args: Seq[String])(using e: Entry[A]): e.Out = e.parser.parseOrExit(args)
+  def parseOrExit[A](args: Seq[String])(using e: Entry[A]): e.Out =
+    val p = e.parser
+    orExit(p.parse(args), p.typeName)
 
   /** [[parseOrExit]] with `prog` as the program name shown in usage, help, and error messages,
     * instead of one derived from the type, method, or object name.
     */
   def parseOrExit[A](args: Seq[String], prog: String)(using e: Entry[A]): e.Out =
-    e.parser.parseOrExit(args, prog)
+    orExit(e.parser.parse(args, prog), prog)
+
+  private def orExit[A](result: ParseResult[A], prog: String): A = result match
+    case Ok(a)                      => a
+    case Err(ParseError.Help(text)) =>
+      println(text)
+      internal.PlatformExit.exit(0)
+    case Err(ParseError.Failure(message, hint)) =>
+      System.err.println(s"$prog: $message")
+      if hint.nonEmpty then System.err.println(hint)
+      internal.PlatformExit.exit(2)
 
   /** The rendered top-level help screen for `A`, without parsing anything. */
   def help[A](using e: Entry[A]): String = e.parser.help
