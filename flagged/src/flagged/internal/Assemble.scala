@@ -171,7 +171,7 @@ object Assemble:
 
   def product(
       labels: List[String],
-      fields: List[(Parser[?], Boolean, FieldAnnots)],
+      fields: IndexedSeq[(Parser[?], Boolean, FieldAnnots)],
       defaults: Defaults[?],
       onType: TargetAnnots,
       build: Array[Any] => Result[Any, String],
@@ -275,7 +275,7 @@ object Assemble:
     */
   private def combine(
       n: Int,
-      plans: List[Plan],
+      plans: Seq[Plan],
       onType: TargetAnnots,
       build: Array[Any] => Result[Any, String],
       version: Option[() => String]

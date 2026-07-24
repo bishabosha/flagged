@@ -142,33 +142,34 @@ object Derive:
     */
   type FieldsB = scala.collection.mutable.Builder[
     (Parser[?], Boolean, FieldAnnots),
-    List[(Parser[?], Boolean, FieldAnnots)]
+    Seq[(Parser[?], Boolean, FieldAnnots)]
   ]
 
-  inline def fieldsOf[Types <: Tuple, Slots <: Tuple]: List[(Parser[?], Boolean, FieldAnnots)] =
+  inline def fieldsOf[Types <: Tuple, Slots <: Tuple]
+      : IndexedSeq[(Parser[?], Boolean, FieldAnnots)] =
     // one destructuring match per tuple so the walk's match types (`Take`/`Drop`/`Size`) operate
     // on concrete tuple types: the mirror members arrive as abstract paths (`am.MirroredAnnotations`)
     // that inline-match reduction resolves but match-type reduction alone does not
     inline erasedValue[Types] match
-      case _: EmptyTuple => Nil
+      case _: EmptyTuple => Vector.empty
       case _: (t0 *: tr) =>
         inline erasedValue[Slots] match
           case _: (s0 *: sr) =>
             checkDupNames[s0 *: sr]
-            val b = List.newBuilder[(Parser[?], Boolean, FieldAnnots)]
+            val b = Vector.newBuilder[(Parser[?], Boolean, FieldAnnots)]
             walk[t0 *: tr, s0 *: sr](b)
             b.result()
 
   /** [[fieldsOf]] plus the `Parser.Shared` splice invariants, read off the walk's final marks. */
   inline def sharedFieldsOf[Types <: Tuple, Slots <: Tuple]
-      : List[(Parser[?], Boolean, FieldAnnots)] =
+      : IndexedSeq[(Parser[?], Boolean, FieldAnnots)] =
     inline erasedValue[Types] match
-      case _: EmptyTuple => Nil
+      case _: EmptyTuple => Vector.empty
       case _: (t0 *: tr) =>
         inline erasedValue[Slots] match
           case _: (s0 *: sr) =>
             checkDupNames[s0 *: sr]
-            val b = List.newBuilder[(Parser[?], Boolean, FieldAnnots)]
+            val b = Vector.newBuilder[(Parser[?], Boolean, FieldAnnots)]
             sharedChecked(walk[t0 *: tr, s0 *: sr](b))
             b.result()
 
@@ -225,12 +226,12 @@ object Derive:
 
   type ResOf[M <: Int] = FieldsRes { type Marks = M }
 
-  private val fieldsRes = new FieldsRes
+  private val fieldsRes = FieldsRes()
 
-  inline def resOf[M <: Int]: ResOf[M] = fieldsRes.asInstanceOf[ResOf[M]]
+  def resOf[M <: Int]: ResOf[M] = fieldsRes.asInstanceOf[ResOf[M]]
 
   /** A plain named option's summary: nothing special. */
-  inline def plainRes: ResOf[NoMarks] = resOf[NoMarks]
+  def plainRes: ResOf[NoMarks] = resOf[NoMarks]
 
   inline def isZero[M <: Int]: Boolean = constValue[M == 0]
 
@@ -239,7 +240,9 @@ object Derive:
   /** Whether the field's annotation slot is empty — the common case; lets every per-field
     * annotation check and name collection collapse to nothing.
     */
-  private transparent inline def walk[Types <: Tuple, Slots <: Tuple](b: FieldsB): FieldsRes =
+  private transparent inline def walk[Types <: Tuple, Slots <: Tuple](
+      inline b: FieldsB
+  ): FieldsRes =
     inline erasedValue[Types] match
       case _: EmptyTuple         => plainRes
       case _: (f1 *: EmptyTuple) =>
@@ -514,10 +517,14 @@ object Derive:
     case _ *: t                         => PosGreedyMark[t, S]
 
   /** A field either fails with its match-type-computed error or constructs exactly one summary. */
-  private transparent inline def fin[S <: Int, F, Anns](p: Parser[?], b: FieldsB): FieldsRes =
+  private transparent inline def fin[S <: Int, F, Anns](
+      inline p: Parser[?],
+      inline b: FieldsB
+  ): FieldsRes =
     inline if constValue[FieldErr[S, Anns, IsOpt[F]] == ""] then ()
     else error(constValue[FieldErr[S, Anns, IsOpt[F]]])
-    b += ((p, constValue[IsOpt[F]], Annots.fieldAnnotsOf[Anns]))
+    def annots() = Annots.fieldAnnotsOf[Anns]
+    b += ((p, constValue[IsOpt[F]], annots()))
     resOf[MarksOf[S, Anns]]
 
   /** One field: instance selection (the field's single implicit search) and shape dispatch — the
@@ -525,7 +532,7 @@ object Derive:
     * instance *tree*: a summonFrom binder's static type is the pattern type, so the precise subtype
     * is invisible to match types.
     */
-  private transparent inline def fieldRes[F, Anns](b: FieldsB): FieldsRes =
+  private transparent inline def fieldRes[F, Anns](inline b: FieldsB): FieldsRes =
     summonFrom:
       case p: Parser[Unwrap[F]] =>
         inline p match
