@@ -1,9 +1,10 @@
 package flagged.internal
 
 import steps.result.Result
+import scala.annotation.publicInBinary
 
-/** Internal runtime model of a derived command. Public because macro-generated code at user call
-  * sites must reference these types; not intended for direct use.
+/** Internal runtime model of a derived command — `private[flagged]` like the rest of `internal`;
+  * inline expansions reach the pieces they need through `@publicInBinary` terms.
   */
 
 /** Exposes the engine's value array as the `Product` a `Mirror#fromProduct` consumes — the
@@ -11,11 +12,12 @@ import steps.result.Result
   * arity is explicit: under splices the array is the whole storage (the spliced children's slots
   * sit past the parent's own fields) and is passed without trimming.
   */
-final class ArrayProduct(arr: Array[Any], n: Int) extends Product:
+private[flagged] final class ArrayProduct @publicInBinary() (arr: Array[Any], n: Int)
+    extends Product:
   def canEqual(that: Any): Boolean = false
   def productArity: Int            = n
   def productElement(i: Int): Any  = arr(i)
-enum Mode:
+private[flagged] enum Mode:
   /** Flag: takes no token; built from the occurrence count (a [[flagged.Parser.ValuedFlag]]
     * additionally handles the explicit `--flag=value` form). If `optional` the field is an
     * `Option[_]`: absent means `None`, any presence wraps the built value in `Some`.
@@ -41,7 +43,7 @@ enum Mode:
     */
   case Repeated(parser: flagged.Parser.Repeated[?], split: Char = 0, greedy: Boolean = false)
 
-final case class OptSpec(
+private[flagged] final case class OptSpec(
     long: String,
     short: Option[Char],
     help: String,
@@ -56,7 +58,7 @@ final case class OptSpec(
   lazy val longDisplay: String  = "--" + long
   lazy val shortDisplay: String = short.fold(longDisplay)("-" + _)
 
-final case class PosSpec(
+private[flagged] final case class PosSpec(
     name: String,
     help: String,
     metavar: String,
@@ -66,7 +68,7 @@ final case class PosSpec(
 ):
   lazy val display: String = "<" + name + ">"
 
-final case class SubCase(
+private[flagged] final case class SubCase(
     name: String,
     help: String,
     command: Command,
@@ -74,7 +76,7 @@ final case class SubCase(
     aliases: IndexedSeq[String] = Vector.empty
 )
 
-final case class SubGroup(
+private[flagged] final case class SubGroup(
     index: Int,
     optional: Boolean,
     default: Option[() => Any],
@@ -89,7 +91,7 @@ final case class SubGroup(
   * plays the same role for a non-`Option` group: it is used, and the group is not built, when none
   * of its options occur.
   */
-final case class Splice(
+private[flagged] final case class Splice(
     slot: Int,
     offset: Int,
     command: Command,
@@ -113,7 +115,7 @@ final case class Splice(
     (optional || default.nonEmpty) && !mentioned(counts, base)
 
 /** A field collecting the raw arguments after `--`, verbatim. */
-final case class TrailingSpec(
+private[flagged] final case class TrailingSpec(
     index: Int,
     help: String,
     parser: flagged.Parser.Trailing[?],
@@ -122,7 +124,7 @@ final case class TrailingSpec(
 ):
   def build(l: IndexedSeq[String]): Result[Any, String] = parser.build(l)
 
-final case class Command(
+private[flagged] final case class Command(
     description: String,
     opts: IArray[OptSpec],
     positionals: IArray[PosSpec],
@@ -177,7 +179,7 @@ final case class Command(
             case err => err
     loop(0)
 
-object Command:
+private[flagged] object Command:
   // shared empties for option-less commands; the map is never mutated after construction
   private[internal] val noLookup     = new java.util.HashMap[String, OptSpec]
   private[internal] val noShortChars = Array.empty[Char]

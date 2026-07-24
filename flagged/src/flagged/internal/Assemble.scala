@@ -2,11 +2,12 @@ package flagged.internal
 
 import flagged.Parser
 import flagged.meta.Defaults
+import scala.annotation.publicInBinary
 import steps.result.Result
 import scala.collection.mutable
 
 /** One case of a derived sum: either a singleton value or a nested command. */
-enum SubEntry:
+private[flagged] enum SubEntry:
   case Leaf(value: Any)
   case Node(parser: Parser[?])
 
@@ -20,7 +21,7 @@ enum SubEntry:
   * inherently value-level residue: name uniqueness (kebab-derived names), positional ordering
   * (optionality depends on defaults, a term-level fact), and splice storage layout.
   */
-object Assemble:
+@publicInBinary private[flagged] object Assemble:
 
   def kebab(s: String): String =
     // fast path: a label that is already kebab (all lower, no digit runs) is its own name

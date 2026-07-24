@@ -10,7 +10,8 @@ object AblationProbe:
     (1 to n).map(i => s"    f$i: Int = $i").mkString(",\n")
 
   def src(n: Int, use: String): String =
-    s"""import flagged.*
+    s"""package flagged.probe // subpackage of `flagged`: the probes exercise private[flagged] internals
+       |import flagged.*
        |import flagged.internal.{Derive, Annots}
        |import flagged.meta.{AnnotMirror, Defaults}
        |import scala.deriving.Mirror
@@ -32,7 +33,7 @@ object AblationProbe:
     "field walk" ->
       """  inline def p[A](using m: Mirror.ProductOf[A]): Any = summonFrom {
         |    case am: AnnotMirror.Product[A] =>
-        |      Derive.fieldsOf[m.MirroredElemTypes, am.MirroredAnnotations]
+        |      Derive.fieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, am.MirroredAnnotations](Defaults.derived[A])
         |  }
         |  val x = p[Wide]""".stripMargin,
     "full derivation" -> "  val x = Parser.Command.derived[Wide]",

@@ -1,6 +1,7 @@
 package flagged.internal
 
 import scala.compiletime.*
+import scala.annotation.publicInBinary
 import scala.compiletime.ops.int./
 import scala.compiletime.ops.int.{BitwiseOr, BitwiseAnd}
 import scala.compiletime.ops.any.{==, !=}
@@ -21,9 +22,15 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
   * [[flagged.meta.MethodsMirror]] (the method-command analogue of `Mirror`, consumed by
   * [[DeriveMethods]]).
   */
-object Derive:
+@publicInBinary private[flagged] object Derive:
 
   // ---- parsers ----------------------------------------------------------------
+
+  /** [[ArrayProduct]] behind a term: inline expansions can reference this method but not the
+    * private class itself.
+    */
+  @publicInBinary private[flagged] def arrayProduct(arr: Array[Any], n: Int): Product =
+    ArrayProduct(arr, n)
 
   inline def product[A](using m: Mirror.ProductOf[A]): Parser.Command[A] =
     summonFrom:
@@ -33,7 +40,7 @@ object Derive:
           Defaults.derived[A]
         ).result(
           onType,
-          (arr, k) => steps.result.Result.Ok(m.fromProduct(ArrayProduct(arr, k))),
+          (arr, k) => steps.result.Result.Ok(m.fromProduct(arrayProduct(arr, k))),
           versionOf[A, am.MirroredSelfAnnotations]
         )
         Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], onType))
@@ -52,7 +59,7 @@ object Derive:
             Defaults.derived[A]
           ).result(
             onType,
-            (arr, k) => steps.result.Result.Ok(m.fromProduct(ArrayProduct(arr, k))),
+            (arr, k) => steps.result.Result.Ok(m.fromProduct(arrayProduct(arr, k))),
             versionOf[A, am.MirroredSelfAnnotations]
           )
         Parser.makeShared[A](cmd, Assemble.progName(constValue[m.MirroredLabel], onType))
@@ -101,7 +108,7 @@ object Derive:
         Parser.productOf[A](
           valuesOfAll[m.MirroredElemTypes],
           IArray.from(labelsOf[m.MirroredElemLabels].map(Assemble.kebab)),
-          arr => m.fromProduct(ArrayProduct(arr, arr.length))
+          arr => m.fromProduct(arrayProduct(arr, arr.length))
         )
 
   /** The `Value` parser of every element type. */

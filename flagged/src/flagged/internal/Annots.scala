@@ -3,11 +3,12 @@ package flagged.internal
 import compiletime.{summonFrom, summonInline, erasedValue, constValue}
 import compiletime.ops.int./
 import flagged.meta.{Ann, AnnotMirror, Defaults}
+import scala.annotation.publicInBinary
 
 /** flagged's annotations on a type or an enum case, extracted at compile time from an
   * [[AnnotMirror]] — fully typed, no `Any` and no runtime type tests.
   */
-final case class TargetAnnots(
+private[flagged] final case class TargetAnnots @publicInBinary() (
     name: Option[String],
     help: Option[String],
     hidden: Boolean = false,
@@ -15,11 +16,11 @@ final case class TargetAnnots(
     default: Boolean = false
 )
 
-object TargetAnnots:
+@publicInBinary private[flagged] object TargetAnnots:
   val empty: TargetAnnots = TargetAnnots(None, None, false)
 
 /** flagged's annotations on one constructor field, extracted at compile time. */
-final case class FieldAnnots(
+private[flagged] final case class FieldAnnots @publicInBinary() (
     name: Option[String],
     short: Option[Char],
     help: Option[String],
@@ -31,13 +32,13 @@ final case class FieldAnnots(
     greedy: Boolean = false
 )
 
-object FieldAnnots:
+@publicInBinary private[flagged] object FieldAnnots:
   val empty: FieldAnnots = FieldAnnots(None, None, None, false, false)
 
 /** Runtime carrier for extracted annotations, built by `Derive.productAnnots` / `Derive.sumAnnots`.
   * Shaped like the type they describe: products carry per-field slots, sums per-case slots.
   */
-enum Annots[A]:
+private[flagged] enum Annots[A]:
   /** Annotations of a case class: on the type itself and per constructor field. An empty `perField`
     * on a class with fields means no field carries one (the extraction shares `Vector.empty`) —
     * index through [[fieldAnnots]], never `perField` directly.
@@ -51,7 +52,7 @@ enum Annots[A]:
 
   def onType: TargetAnnots
 
-object Annots:
+@publicInBinary private[flagged] object Annots:
 
   extension (p: Annots.Product[?])
     def fieldAnnots(i: Int): FieldAnnots =

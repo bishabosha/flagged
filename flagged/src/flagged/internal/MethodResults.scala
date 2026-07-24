@@ -12,6 +12,9 @@ import flagged.meta.MethodsMirror.Entry
   * `Out` is computed by match types ([[MethodResults.MethodContrib]], via the alias-pattern
   * extractors on [[MethodMirror]]); instances are typed by their singleton types so no refinement
   * is lost. Non-`@run` members contribute `Nothing` — the parser never invokes them.
+  *
+  * Deliberately public, unlike the rest of `internal`: it appears in the `using` clauses of the
+  * `Parser.method`/`Parser.methods`/`Flagged.Entry` entry points, so user code summons it.
   */
 sealed trait MethodResults[T]:
   type Out

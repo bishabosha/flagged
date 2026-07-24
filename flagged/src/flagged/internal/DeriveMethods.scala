@@ -1,6 +1,7 @@
 package flagged.internal
 
 import scala.compiletime.*
+import scala.annotation.publicInBinary
 import flagged.Parser
 import flagged.meta.{Ann, MethodMirror, MethodsMirror}
 import flagged.internal.MethodResults.EntriesResults
@@ -16,7 +17,7 @@ import steps.result.Result
   * become commands; other [[flagged.meta.Reflectable]] markers are visible to the mirror but
   * skipped here.
   */
-object DeriveMethods:
+@publicInBinary private[flagged] object DeriveMethods:
 
   /** The group of `T`'s `@run` members as a subcommand sum. */
   inline def group[T, R <: MethodResults[T]](o: T, r: R): Command =
