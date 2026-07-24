@@ -88,7 +88,7 @@ object Derive:
     Parser.productOf[T](
       elems,
       elems.map(_.typeName),
-      arr => steps.result.Result.Ok(Tuple.fromArray(arr).asInstanceOf[T])
+      arr => Tuple.fromArray(arr).asInstanceOf[T]
     )
 
   /** Product parser for a case class, for `derives Parser.Product`: the fields parse from
@@ -101,7 +101,7 @@ object Derive:
         Parser.productOf[A](
           valuesOfAll[m.MirroredElemTypes],
           IArray.from(labelsOf[m.MirroredElemLabels].map(Assemble.kebab)),
-          arr => steps.result.Result.Ok(m.fromProduct(ArrayProduct(arr)))
+          arr => m.fromProduct(ArrayProduct(arr))
         )
 
   /** The `Value` parser of every element type. */

@@ -275,7 +275,16 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     self =>
     private[flagged] def elements: IArray[Value[?]]
     private[flagged] def metavars: IArray[String]
-    private[flagged] def buildFrom(elems: Array[Any]): Result[A, String]
+
+    /** Engine protocol: combine the parsed elements into `out(i)`; the shared [[Result.done]] on
+      * success — like every shape, a successful build allocates nothing beyond the value itself.
+      * Failure enters only through `emap`, as with the other shapes' combinators.
+      */
+    private[flagged] def buildInto(
+        elems: Array[Any],
+        out: Array[Any],
+        i: Int
+    ): Result[Unit, String]
 
     final def arity: Int       = elements.length
     final def typeName: String = metavars.mkString(" ")
@@ -283,22 +292,18 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     /** The pre-bracketed help metavar: `<x> <y>`. */
     private[flagged] final def helpMetavar: String = metavars.map(m => s"<$m>").mkString(" ")
 
-    private[flagged] final def buildInto(
-        elems: Array[Any],
-        out: Array[Any],
-        i: Int
-    ): Result[Unit, String] =
-      intoSlot(buildFrom(elems), out, i)
-
     /** A product spans several tokens; a single-token read is an error. */
     private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
       Result.task:
         eval.raise(s"'$s': expected $arity values")
 
     def emap[B](f: A => Result[B, String]): Product[B] = new Product[B]:
-      private[flagged] def elements                     = self.elements
-      private[flagged] def metavars                     = self.metavars
-      private[flagged] def buildFrom(elems: Array[Any]) = self.buildFrom(elems).flatMap(f)
+      private[flagged] def elements                                              = self.elements
+      private[flagged] def metavars                                              = self.metavars
+      private[flagged] def buildInto(elems: Array[Any], out: Array[Any], i: Int) =
+        Result.task:
+          self.buildInto(elems, out, i).check
+          out(i) = f(out(i).asInstanceOf[A]).ok
 
   object Product:
     /** Derivation: `case class Point(x: Int, y: Int) derives Parser.Product` — the fields parse
@@ -313,11 +318,13 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
   @publicInBinary private[flagged] def productOf[A](
       elems: IArray[Value[?]],
       metas: IArray[String],
-      build: Array[Any] => Result[A, String]
+      build: Array[Any] => A // total: derivation-built products cannot fail, only `emap` can
   ): Product[A] = new Product[A]:
-    private[flagged] def elements                     = elems
-    private[flagged] def metavars                     = metas
-    private[flagged] def buildFrom(elems: Array[Any]) = build(elems)
+    private[flagged] def elements                                              = elems
+    private[flagged] def metavars                                              = metas
+    private[flagged] def buildInto(elems: Array[Any], out: Array[Any], i: Int) =
+      Result.task:
+        out(i) = build(elems)
 
   /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with `Nil`
     * when no `--` is given — return `Err` to require one).
