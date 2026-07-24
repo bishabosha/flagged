@@ -21,7 +21,8 @@ object RuleCostProbe:
     val vals = (1 to n).map(i => s"  val v$i = compiletime.constValue[$expr]").mkString("\n")
     s"""import flagged.internal.Derive.*
        |import scala.compiletime
-       |import scala.compiletime.ops.any.==
+       |import scala.compiletime.ops.any.{==, !=}
+       |import scala.compiletime.ops.int.{BitwiseAnd, BitwiseOr}
        |object Use:
        |$vals
        |""".stripMargin
@@ -29,7 +30,9 @@ object RuleCostProbe:
   val variants: List[(String, String)] = List(
     "floor (constValue[1])" -> "1",
     "HasAnnT empty"         -> "HasAnnT[flagged.version, EmptyTuple]",
-    "FieldErr full query"   -> "FieldErr[1, EmptyTuple, false] == \"\""
+    "FieldErr full query"   -> "FieldErr[1, EmptyTuple, false] == \"\"",
+    "merge gate (ops, lit)" -> "BitwiseOr[0, 0] == 0",
+    "hasBit (ops, lit)"     -> "BitwiseAnd[5, 1] != 0"
   )
 
   def main(args: Array[String]): Unit =
