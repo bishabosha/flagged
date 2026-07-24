@@ -88,7 +88,8 @@ object Derive:
     Parser.productOf[T](
       elems,
       elems.map(_.typeName),
-      arr => Tuple.fromArray(arr).asInstanceOf[T]
+      // unsafeFromArray: the scratch array is per-occurrence and never written after the build
+      arr => Tuple.fromIArray(IArray.unsafeFromArray(arr)).asInstanceOf[T]
     )
 
   /** Product parser for a case class, for `derives Parser.Product`: the fields parse from

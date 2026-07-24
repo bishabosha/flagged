@@ -70,6 +70,13 @@ cannot pose as a fast one.
 Definitions per library live in `src/defs/`; scenarios use the closest idiomatic encoding for
 each (e.g. `Flag` for mainargs booleans, `@ExtraName` for case-app short names).
 
+**`ConstructBench`** — runtime construction cost of the parser value itself, which
+`RuntimeBench` amortizes into setup: a CLI process builds its parser once and parses once, so
+the honest per-run cost is construction + parse. Measured for the three derivation libraries
+on the `simple` and `realistic` grammars — flagged's inline derivation body (field walk +
+`Assemble`), mainargs' `ParserForClass`/`ParserForMethods`, case-app's `Parser[T]`. Shared
+value-level givens (element readers) are singletons for every library and are not rebuilt.
+
 **`MethodBench`** — the method-based counterpart to `RuntimeBench`: parse-and-invoke latency for
 command methods, flagged's `@run` derivation against mainargs' `ParserForMethods` (the two
 libraries with a method parser). Both sides select a method, parse its parameters, and invoke
