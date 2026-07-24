@@ -35,10 +35,19 @@ object RuleCostProbe:
     "hasBit (ops, lit)"     -> "BitwiseAnd[5, 1] != 0"
   )
 
+  /** A nested BitwiseOr tree of the given leaf count, as merge would build it. */
+  def orTree(n: Int): String =
+    if n == 1 then "0" else s"BitwiseOr[${orTree(n / 2)}, ${orTree(n - n / 2)}]"
+
   def main(args: Array[String]): Unit =
     val n = args.headOption.map(_.toInt).getOrElse(200)
     (1 to 3).foreach(_ => ScalingProbe.compileOnce(src(n, "1")))
     println(f"${"variant"}%-24s ms (n=$n%d sites, best of 5)")
+    for d <- List(8, 32, 128) do
+      try
+        val t = (1 to 5).map(_ => ScalingProbe.compileOnce(src(1, s"${orTree(d)} == 0"))).min
+        println(f"or-tree depth $d%-3d (n=1)   $t%8.1f")
+      catch case _: Throwable => println(f"or-tree depth $d%-3d      n/a")
     for (name, e) <- variants do
       try
         val t = (1 to 5).map(_ => ScalingProbe.compileOnce(src(n, e))).min
