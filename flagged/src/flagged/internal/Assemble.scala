@@ -88,10 +88,10 @@ object Assemble:
       typeLabel: String,
       caseLabels: IndexedSeq[String],
       values: IndexedSeq[Any],
-      perCase: IndexedSeq[TargetAnnots]
+      annots: Annots.Sum[?]
   ): Parser.Enumerated[Any] =
     val names = caseLabels.zipWithIndex.map { (l, i) =>
-      perCase(i).name.getOrElse(kebab(l))
+      annots.caseAnnots(i).name.getOrElse(kebab(l))
     }
     val joined   = names.mkString("|")
     val typeName = if joined.length <= 40 then joined else kebab(typeLabel)
@@ -140,7 +140,7 @@ object Assemble:
       version: Option[() => String]
   ): Command =
     val cases = entries.zipWithIndex.map { (e, i) =>
-      val anns = annots.perCase(i)
+      val anns = annots.caseAnnots(i)
       val help = anns.help.getOrElse("")
       val cmd  = e match
         case SubEntry.Leaf(v) => Command.leaf(v, help)

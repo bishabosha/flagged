@@ -38,21 +38,34 @@ object FieldAnnots:
   * Shaped like the type they describe: products carry per-field slots, sums per-case slots.
   */
 enum Annots[A]:
-  /** Annotations of a case class: on the type itself and per constructor field. */
+  /** Annotations of a case class: on the type itself and per constructor field. An empty `perField`
+    * on a class with fields means no field carries one (the extraction shares `Vector.empty`) —
+    * index through [[fieldAnnots]], never `perField` directly.
+    */
   case Product(onType: TargetAnnots, perField: IndexedSeq[FieldAnnots])
 
-  /** Annotations of an enum / sealed trait: on the type itself and per case. */
+  /** Annotations of an enum / sealed trait: on the type itself and per case; `perCase` empty on an
+    * inhabited sum means no case carries one — index through [[caseAnnots]].
+    */
   case Sum(onType: TargetAnnots, perCase: IndexedSeq[TargetAnnots])
 
   def onType: TargetAnnots
 
 object Annots:
 
-  def makeProduct[A](onType: TargetAnnots, perField: Seq[FieldAnnots]): Annots.Product[A] =
-    Annots.Product(onType, perField.toIndexedSeq)
+  extension (p: Annots.Product[?])
+    def fieldAnnots(i: Int): FieldAnnots =
+      if p.perField.isEmpty then FieldAnnots.empty else p.perField(i)
 
-  def makeSum[A](onType: TargetAnnots, perCase: Seq[TargetAnnots]): Annots.Sum[A] =
-    Annots.Sum(onType, perCase.toIndexedSeq)
+  extension (s: Annots.Sum[?])
+    def caseAnnots(i: Int): TargetAnnots =
+      if s.perCase.isEmpty then TargetAnnots.empty else s.perCase(i)
+
+  def makeProduct[A](onType: TargetAnnots, perField: IndexedSeq[FieldAnnots]): Annots.Product[A] =
+    Annots.Product(onType, perField)
+
+  def makeSum[A](onType: TargetAnnots, perCase: IndexedSeq[TargetAnnots]): Annots.Sum[A] =
+    Annots.Sum(onType, perCase)
 
   /** Extract flagged's annotations for a product into typed records. */
   inline def productAnnots[A]: Annots.Product[A] =
@@ -219,13 +232,22 @@ object Annots:
 
   type Half[T <: Tuple] = Tuple.Size[T] / 2
 
-  inline def fieldAnnotsEach[Slots]: IndexedSeq[FieldAnnots] =
+  /** Do none of the annotation slots hold anything? Then the walks share `Vector.empty` instead of
+    * building an all-default vector. An inline match, not a match type: the slots arrive as an
+    * abstract mirror path that only inline-match reduction resolves.
+    */
+  private transparent inline def allEmpty[Slots]: Boolean =
     inline erasedValue[Slots] match
-      case _: EmptyTuple => Vector.empty
-      case _             =>
-        val b = Vector.newBuilder[FieldAnnots]
-        fieldAnnotsInto[Slots](b)
-        b.result()
+      case _: EmptyTuple        => true
+      case _: (EmptyTuple *: t) => allEmpty[t]
+      case _: (_ *: _)          => false
+
+  inline def fieldAnnotsEach[Slots]: IndexedSeq[FieldAnnots] =
+    inline if allEmpty[Slots] then Vector.empty
+    else
+      val b = Vector.newBuilder[FieldAnnots]
+      fieldAnnotsInto[Slots](b)
+      b.result()
 
   inline def fieldAnnotsInto[Slots](b: scala.collection.mutable.Growable[FieldAnnots]): Unit =
     inline erasedValue[Slots] match
@@ -241,12 +263,11 @@ object Annots:
         fieldAnnotsInto[Tuple.Drop[h *: t, Half[h *: t]]](b)
 
   inline def targetAnnotsEach[Slots]: IndexedSeq[TargetAnnots] =
-    inline erasedValue[Slots] match
-      case _: EmptyTuple => Vector.empty
-      case _             =>
-        val b = Vector.newBuilder[TargetAnnots]
-        targetAnnotsInto[Slots](b)
-        b.result()
+    inline if allEmpty[Slots] then Vector.empty
+    else
+      val b = Vector.newBuilder[TargetAnnots]
+      targetAnnotsInto[Slots](b)
+      b.result()
 
   inline def targetAnnotsInto[Slots](b: scala.collection.mutable.Growable[TargetAnnots]): Unit =
     inline erasedValue[Slots] match

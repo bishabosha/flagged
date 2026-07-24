@@ -93,6 +93,13 @@ class MetaSuite extends munit.FunSuite:
     )
   }
 
+  test("all-unannotated slots share Vector.empty, read back as all-defaults") {
+    case class P(a: Int = 0, b: String = "")
+    val a = Annots.productAnnots[P]
+    assert(a.perField.isEmpty)
+    assertEquals(a.fieldAnnots(1), FieldAnnots.empty)
+  }
+
   test("annotation extraction for an enum captures per-case annotations") {
     val a = Annots.sumAnnots[Git]
     assertEquals(a.onType, TargetAnnots(None, Some("A tiny git-like tool")))

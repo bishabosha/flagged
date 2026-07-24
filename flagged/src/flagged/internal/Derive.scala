@@ -115,7 +115,7 @@ object Derive:
         constValue[m.MirroredLabel],
         labelsOf[m.MirroredElemLabels],
         singletonValues[m.MirroredElemTypes],
-        Annots.sumAnnots[A].perCase
+        Annots.sumAnnots[A]
       )
       .asInstanceOf[Parser.Enumerated[A]]
 
