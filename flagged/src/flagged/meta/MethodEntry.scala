@@ -1,29 +1,28 @@
-package flagged.internal
+package flagged.meta
 
-import flagged.meta.{Ann, MethodMirror, MethodsMirror}
 import flagged.meta.MethodsMirror.Entry
 
 /** `T`'s `@run` command tower in one bundle: the object's [[MethodsMirror]], the union of the
-  * reachable method result types as `Out`, and one [[MethodResults.EntriesResults]] node per entry,
-  * where a scope node holds the nested object's own `MethodResults`. Everything is summoned once,
+  * reachable method result types as `Out`, and one [[MethodEntry.EntriesResults]] node per entry,
+  * where a scope node holds the nested object's own `MethodEntry`. Everything is summoned once,
   * here — consumers take the bundle instead of zipping a mirror with its results at every level.
   *
   * Assembled by ordinary implicit derivation — no macros, no inline. A method's contribution to
-  * `Out` is computed by match types ([[MethodResults.MethodContrib]], via the alias-pattern
+  * `Out` is computed by match types ([[MethodEntry.MethodContrib]], via the alias-pattern
   * extractors on [[MethodMirror]]); instances are typed by their singleton types so no refinement
   * is lost. Non-`@run` members contribute `Nothing` — the parser never invokes them.
   *
-  * Deliberately public, unlike the rest of `internal`: it appears in the `using` clauses of the
+  * Part of the public `meta` layer: it appears in the `using` clauses of the
   * `Parser.method`/`Parser.methods`/`Flagged.Entry` entry points, so user code summons it.
   */
-sealed trait MethodResults[T]:
+sealed trait MethodEntry[T]:
   type Out
 
   /** The precise type of [[mirror]]. */
   type Mirror <: MethodsMirror[T]
 
   /** The precise node type of [[entries]]: consumers keep every refinement without re-summoning. */
-  type Entries <: MethodResults.EntriesResults[?]
+  type Entries <: MethodEntry.EntriesResults[?]
 
   /** The object's mirror, summoned once during derivation. */
   val mirror: Mirror
@@ -31,11 +30,11 @@ sealed trait MethodResults[T]:
   /** The derivation tower behind `Out`. */
   val entries: Entries
 
-object MethodResults:
+object MethodEntry:
   final class Impl[T, O, M <: MethodsMirror[T], E <: EntriesResults[?]](
       val mirror: M,
       val entries: E
-  ) extends MethodResults[T]:
+  ) extends MethodEntry[T]:
     type Out     = O
     type Mirror  = M
     type Entries = E
@@ -80,7 +79,7 @@ object MethodResults:
       * singleton type, so the walk in [[DeriveMethods]] recovers the full refinements from the node
       * type alone.
       */
-    final class ScopeNode[S, Ts <: Tuple, SR <: MethodResults[S], RE <: EntriesResults[Ts], O](
+    final class ScopeNode[S, Ts <: Tuple, SR <: MethodEntry[S], RE <: EntriesResults[Ts], O](
         val results: SR,
         val rest: RE
     ) extends EntriesResults[Entry.Scope[S] *: Ts]:
@@ -94,7 +93,7 @@ object MethodResults:
       ) =
       MethodNode(rest)
 
-    given scope: [S, Ts <: Tuple] => (sr: MethodResults[S], rest: EntriesResults[Ts])
+    given scope: [S, Ts <: Tuple] => (sr: MethodEntry[S], rest: EntriesResults[Ts])
       => (
         ScopeNode[
           S,

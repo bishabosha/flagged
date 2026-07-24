@@ -448,14 +448,14 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     * options and positionals (same annotations and rules as case-class fields), and a successful
     * parse invokes it.
     */
-  inline def method[T](o: T)(using r: internal.MethodResults[T]): Command[r.Out] =
+  inline def method[T](o: T)(using r: meta.MethodEntry[T]): Command[r.Out] =
     val (cmd, prog) = internal.DeriveMethods.single[T, r.type](o, r)
     make[r.Out](cmd, prog)
 
   /** Derive subcommands from the `@run` methods and nested `@run` objects of `o`; parsing selects
     * and invokes one, producing its result.
     */
-  inline def methods[T](o: T)(using r: internal.MethodResults[T]): CommandGroup[r.Out] =
+  inline def methods[T](o: T)(using r: meta.MethodEntry[T]): CommandGroup[r.Out] =
     makeGroup[r.Out](
       internal.DeriveMethods.group[T, r.type](o, r),
       internal.Assemble.progName(

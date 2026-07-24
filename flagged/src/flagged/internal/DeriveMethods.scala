@@ -3,24 +3,23 @@ package flagged.internal
 import scala.compiletime.*
 import scala.annotation.publicInBinary
 import flagged.Parser
-import flagged.meta.{Ann, MethodMirror, MethodsMirror}
-import flagged.internal.MethodResults.EntriesResults
+import flagged.meta.{Ann, MethodEntry, MethodMirror, MethodsMirror}
+import flagged.meta.MethodEntry.EntriesResults
 import steps.result.Result
 
-/** Inline layer over [[MethodResults]]: a method is a product whose construction is invocation, a
+/** Inline layer over [[MethodEntry]]: a method is a product whose construction is invocation, a
   * nested `@run` object is a sum — everything else is the class-derivation pipeline unchanged
   * ([[Derive.fieldsOf]] with its compile-time checks, [[Annots]], [[Assemble]]).
   *
-  * Every entry point takes the single [[MethodResults]] bundle: the walks run over its
-  * [[MethodResults.EntriesResults]] tower, and descending into a scope reuses the nested tower
-  * stored in the node rather than repeating any implicit search. Only members marked `@run` exactly
-  * become commands; other [[flagged.meta.Reflectable]] markers are visible to the mirror but
-  * skipped here.
+  * Every entry point takes the single [[MethodEntry]] bundle: the walks run over its
+  * [[MethodEntry.EntriesResults]] tower, and descending into a scope reuses the nested tower stored
+  * in the node rather than repeating any implicit search. Only members marked `@run` exactly become
+  * commands; other [[flagged.meta.Reflectable]] markers are visible to the mirror but skipped here.
   */
 @publicInBinary private[flagged] object DeriveMethods:
 
   /** The group of `T`'s `@run` members as a subcommand sum. */
-  inline def group[T, R <: MethodResults[T]](o: T, r: R): Command =
+  inline def group[T, R <: MethodEntry[T]](o: T, r: R): Command =
     inline if runMethodCount[r.Entries] + runObjectCount[r.Entries] == 0 then
       error("no @run methods or nested @run objects found in " + constValue[r.mirror.MirroredLabel])
     else
@@ -38,7 +37,7 @@ import steps.result.Result
     * top-level options — anything else is a subcommand group. Backs [[flagged.Flagged.Entry]],
     * whose call sites stay unchanged when a second command is added.
     */
-  inline def parser[T, R <: MethodResults[T], Out](o: T, r: R): Parser[Out] =
+  inline def parser[T, R <: MethodEntry[T], Out](o: T, r: R): Parser[Out] =
     inline if runMethodCount[r.Entries] == 1 && runObjectCount[r.Entries] == 0 then
       val (cmd, prog) = pickSingle[T, r.Entries](o, r.mirror, 0)
       Parser.make[Out](cmd, prog)
@@ -52,7 +51,7 @@ import steps.result.Result
       )
 
   /** The single `@run` method of `T` as a whole command: `(command, prog name)`. */
-  inline def single[T, R <: MethodResults[T]](o: T, r: R): (Command, String) =
+  inline def single[T, R <: MethodEntry[T]](o: T, r: R): (Command, String) =
     inline if runMethodCount[r.Entries] == 1 && runObjectCount[r.Entries] == 0 then
       pickSingle[T, r.Entries](o, r.mirror, 0)
     else inline if runMethodCount[r.Entries] == 0 && runObjectCount[r.Entries] == 1 then
@@ -78,7 +77,7 @@ import steps.result.Result
   /** Is the tower stored in an [[EntriesResults.ScopeNode]] for an `@run` object? */
   private transparent inline def resultsAreRun[SR]: Boolean =
     inline erasedValue[SR] match
-      case sr: MethodResults[?] => mirrorIsRun[sr.Mirror]
+      case sr: MethodEntry[?] => mirrorIsRun[sr.Mirror]
 
   private transparent inline def mirrorIsRun[SM]: Boolean =
     inline erasedValue[SM] match
@@ -134,19 +133,19 @@ import steps.result.Result
           EntriesResults.ScopeNode[
             s,
             t & Tuple,
-            sr & MethodResults[s],
+            sr & MethodEntry[s],
             EntriesResults[t & Tuple],
             oo
           ]
         ]
-        scopeEntryInto[s, sr & MethodResults[s]](node.results, b)
+        scopeEntryInto[s, sr & MethodEntry[s]](node.results, b)
         entriesInto[T, re](o, g, node.rest.asInstanceOf[re], i + 1, b)
 
   /** Descend into a nested command object: its whole tower was summoned once, during
-    * [[MethodResults]] derivation, and rides in the node — only the object instance itself is
+    * [[MethodEntry]] derivation, and rides in the node — only the object instance itself is
     * recovered here, via `ValueOf`.
     */
-  private inline def scopeEntryInto[S, SR <: MethodResults[S]](
+  private inline def scopeEntryInto[S, SR <: MethodEntry[S]](
       sr: SR,
       b: scala.collection.mutable.Growable[(String, TargetAnnots, SubEntry)]
   ): Unit =
