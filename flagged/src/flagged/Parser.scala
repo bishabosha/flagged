@@ -14,8 +14,7 @@ final case class Count(value: Int)
 
 object Count:
   given Parser.Flag[Count]:
-    def fromCount(n: Int)                                                    = Ok(Count(n))
-    override private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
+    private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
       Result.task:
         out(i) = Count(n)
 
@@ -26,8 +25,7 @@ final case class Trailing(args: IndexedSeq[String] = Vector.empty)
 
 object Trailing:
   given Parser.Trailing[Trailing]:
-    def build(l: IndexedSeq[String]) = Ok(Trailing(l))
-    override private[flagged] def buildInto(l: IndexedSeq[String], out: Array[Any], i: Int) =
+    private[flagged] def buildInto(l: IndexedSeq[String], out: Array[Any], i: Int) =
       Result.task:
         out(i) = Trailing(l)
 
@@ -196,9 +194,14 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     * → 0).
     */
   sealed trait Flag[A] extends Parser[A]:
-    def fromCount(n: Int): Result[A, String]
-    final def typeName: String                      = "flag"
-    def emap[B](f: A => Result[B, String]): Flag[B] = flag(n => fromCount(n).flatMap(f))
+    self =>
+    final def typeName: String = "flag"
+
+    def emap[B](f: A => Result[B, String]): Flag[B] = new Flag[B]:
+      private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
+        Result.task:
+          self.countInto(n, out, i).check
+          out(i) = f(out(i).asInstanceOf[A]).ok
 
     /** Whether this flag accepts the explicit `--flag=value` form ([[ValuedFlag]] does). */
     private[flagged] def takesValue: Boolean = false
@@ -208,22 +211,31 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
       Result.task:
         eval.raise(s"'$s': this flag does not take a value")
 
-    /** Engine protocol: build from the mention count into `out(i)`. */
-    private[flagged] def countInto(n: Int, out: Array[Any], i: Int): Result[Unit, String] =
-      intoSlot(fromCount(n), out, i)
+    /** Engine protocol: build from the mention count into `out(i)`; the shared [[Result.done]] on
+      * success. Built-in instances write the slot directly — an `Ok` appears only behind
+      * [[Parser.flag]]-supplied functions.
+      */
+    private[flagged] def countInto(n: Int, out: Array[Any], i: Int): Result[Unit, String]
 
   /** A flag that additionally accepts the explicit `--flag=value` form (and is therefore usable
     * positionally and inside `Option`).
     */
   sealed trait ValuedFlag[A] extends Flag[A]:
-    def fromValue(s: String): Result[A, String]
+    self =>
     override private[flagged] def takesValue: Boolean = true
 
     /** Engine protocol: parse the explicit `--flag=value` form into `out(i)`. */
-    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
-      intoSlot(fromValue(s), out, i)
-    override def emap[B](f: A => Result[B, String]): ValuedFlag[B] =
-      flag(n => fromCount(n).flatMap(f), s => fromValue(s).flatMap(f))
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String]
+
+    override def emap[B](f: A => Result[B, String]): ValuedFlag[B] = new ValuedFlag[B]:
+      private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
+        Result.task:
+          self.countInto(n, out, i).check
+          out(i) = f(out(i).asInstanceOf[A]).ok
+      override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
+        Result.task:
+          self.readInto(s, out, i).check
+          out(i) = f(out(i).asInstanceOf[A]).ok
 
   /** Any number of occurrences, each parsed by a `Value` element (so repeats cannot nest, by
     * construction) and accumulated by a per-parse [[Collector]]. The collector is also finished
@@ -322,19 +334,25 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     * empty sequence when no `--` is given — return `Err` to require one).
     */
   sealed trait Trailing[A] extends Parser[A]:
-    def build(l: IndexedSeq[String]): Result[A, String]
-    final def typeName: String                          = "args"
-    def emap[B](f: A => Result[B, String]): Trailing[B] = trailing(l => build(l).flatMap(f))
+    self =>
+    final def typeName: String = "args"
 
-    /** Engine protocol: combine the raw arguments into `out(i)`; the shared [[Result.done]] on
-      * success (the built-in instance overrides — only user-supplied `build`s allocate an `Ok`).
+    def emap[B](f: A => Result[B, String]): Trailing[B] = new Trailing[B]:
+      private[flagged] def buildInto(l: IndexedSeq[String], out: Array[Any], i: Int) =
+        Result.task:
+          self.buildInto(l, out, i).check
+          out(i) = f(out(i).asInstanceOf[A]).ok
+
+    /** Engine protocol: combine the raw arguments into `out(i)` (also invoked with an empty
+      * sequence when no `--` is given — fail to require one); the shared [[Result.done]] on
+      * success. The built-in instance writes the slot directly — an `Ok` appears only behind
+      * [[Parser.trailing]]-supplied functions.
       */
     private[flagged] def buildInto(
         l: IndexedSeq[String],
         out: Array[Any],
         i: Int
-    ): Result[Unit, String] =
-      intoSlot(build(l), out, i)
+    ): Result[Unit, String]
 
     /** One token builds as a single trailing argument. */
     private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
@@ -416,13 +434,14 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     * on the command line.
     */
   def flag[A](count: Int => Result[A, String]): Flag[A] = new Flag[A]:
-    def fromCount(n: Int) = count(n)
+    private[flagged] def countInto(n: Int, out: Array[Any], i: Int) = intoSlot(count(n), out, i)
 
   /** A flag that additionally accepts the explicit `--flag=value` form. */
   def flag[A](count: Int => Result[A, String], value: String => Result[A, String]): ValuedFlag[A] =
     new ValuedFlag[A]:
-      def fromCount(n: Int)    = count(n)
-      def fromValue(s: String) = value(s)
+      private[flagged] def countInto(n: Int, out: Array[Any], i: Int) = intoSlot(count(n), out, i)
+      override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
+        intoSlot(value(s), out, i)
 
   /** Opt `A` into repeated shape: each occurrence is parsed with the element's (single-value)
     * parser, and the collected elements are combined with `combine` (also invoked empty when the
@@ -443,7 +462,8 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
 
   /** Opt `A` into trailing shape: it is built from the raw arguments after `--`. */
   def trailing[A](combine: IndexedSeq[String] => Result[A, String]): Trailing[A] = new Trailing[A]:
-    def build(l: IndexedSeq[String]) = combine(l)
+    private[flagged] def buildInto(l: IndexedSeq[String], out: Array[Any], i: Int) =
+      intoSlot(combine(l), out, i)
 
   /** Derive a command from the single `@run` method of object `o`: its parameters become the
     * options and positionals (same annotations and rules as case-class fields), and a successful
@@ -590,9 +610,7 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
   // repetition policy belongs to the flag's count parser: repeating a Boolean flag replaces the
   // previous value (the last mention wins, like value options); counting is opt-in via Count
   given ValuedFlag[Boolean]:
-    def fromCount(n: Int)    = Ok(n > 0)
-    def fromValue(s: String) = internal.Runtime.parseBool(s)
-    override private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
+    private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
       Result.task:
         out(i) = n > 0
     override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =

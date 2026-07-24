@@ -363,7 +363,7 @@ private[flagged] object Engine:
         case Err(msg) => report(s"invalid value for '$display': $msg")
         case _        => ()
 
-      def fromCount(parser: flagged.Parser.Flag[?], index: Int, display: String): Unit =
+      def finishFlag(parser: flagged.Parser.Flag[?], index: Int, display: String): Unit =
         parser.countInto(counts(index), values, index) match
           case Err(msg) => report(s"flag '$display': $msg")
           case _        => ()
@@ -381,7 +381,7 @@ private[flagged] object Engine:
               parser match
                 case vf: flagged.Parser.ValuedFlag[?] if staged(index) != null =>
                   reportInvalid(vf.readInto(lastRaw(index), values, index), lastDisp(index))
-                case _ => fromCount(parser, index, display)
+                case _ => finishFlag(parser, index, display)
               if optional then values(index) = Some(values(index))
             true
           case Mode.Single(parser, optional) =>

@@ -117,10 +117,14 @@ private[flagged] object HelpFmt:
 
   private def optExtras(o: OptSpec, showHidden: Boolean): IndexedSeq[String] =
     val default = o.default.map(d => d()).filterNot { v =>
-      // a flag default equal to the absent-value (fromCount(0)) conveys nothing
+      // a flag default equal to the absent-value (count 0) conveys nothing
       o.mode match
-        case Mode.Flag(parser, _) => parser.fromCount(0).toOption.contains(v)
-        case _                    => false
+        case Mode.Flag(parser, _) =>
+          val scratch = new Array[Any](1)
+          parser.countInto(0, scratch, 0) match
+            case steps.result.Result.Err(_) => false
+            case _                          => scratch(0) == v
+        case _ => false
     }
     val dflt = default match
       case Some(v) => fmtDefault(v).map(s => s"default: $s")
