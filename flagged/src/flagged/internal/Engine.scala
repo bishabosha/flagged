@@ -218,8 +218,14 @@ private[flagged] object Engine:
           if sc != null then runSub(sc, idx)
           else if defaultSubCase != null then runSub(defaultSubCase, idx - 1)
           else
+            val cand = Vector.newBuilder[String]
+            subGroup.cases.foreach { c =>
+              if !c.hidden then
+                cand += c.name
+                cand ++= c.aliases
+            }
             val sug = Runtime
-              .suggest(tok, subGroup.cases.filterNot(_.hidden).flatMap(c => c.name +: c.aliases))
+              .suggest(tok, cand.result())
               .map(s => s" (did you mean '$s'?)")
               .getOrElse("")
             report(s"unknown command '$tok'$sug")
@@ -295,12 +301,16 @@ private[flagged] object Engine:
             else if key == "--help-all" then helpNow(all = true)
             else if defaultSubCase != null then runSub(defaultSubCase, idx - 1)
             else
+              val cand = Vector.newBuilder[String]
+              cmd.opts.foreach { o =>
+                if !o.hidden then
+                  cand += o.long
+                  cand ++= o.aliases
+              }
+              cand += "help" += "help-all"
+              if cmd.version.nonEmpty then cand += "version"
               val sug = Runtime
-                .suggest(
-                  key.drop(2),
-                  cmd.opts.filterNot(_.hidden).flatMap(o => o.long +: o.aliases)
-                    :+ "help" :+ "help-all" :++ cmd.version.map(_ => "version")
-                )
+                .suggest(key.drop(2), cand.result())
                 .map(s => s" (did you mean '--$s'?)")
                 .getOrElse("")
               report(s"unknown option '$key'$sug")
@@ -482,7 +492,7 @@ private[flagged] object Engine:
                       else
                         if !subErrored then
                           report(
-                            s"missing command (expected one of: ${g.cases.map(_.name).mkString(", ")})"
+                            s"missing command (expected one of: ${g.cases.iterator.map(_.name).mkString(", ")})"
                           )
                         null
         case None => ()

@@ -90,12 +90,12 @@ object Assemble:
       values: IndexedSeq[Any],
       annots: Annots.Sum[?]
   ): Parser.Enumerated[Any] =
-    val names = caseLabels.zipWithIndex.map { (l, i) =>
-      annots.caseAnnots(i).name.getOrElse(kebab(l))
+    val pairs = Vector.tabulate(caseLabels.length) { i =>
+      (annots.caseAnnots(i).name.getOrElse(kebab(caseLabels(i))), values(i))
     }
-    val joined   = names.mkString("|")
+    val joined   = pairs.iterator.map(_(0)).mkString("|")
     val typeName = if joined.length <= 40 then joined else kebab(typeLabel)
-    Runtime.enumParser(typeName, names.zip(values).toVector)
+    Runtime.enumParser(typeName, pairs)
 
   /** The command view of a value-shaped parser: one positional argument. */
   def singleValueCommand(p: Parser[?]): Command =
@@ -139,22 +139,23 @@ object Assemble:
       entries: IndexedSeq[SubEntry],
       version: Option[() => String]
   ): Command =
-    val cases = entries.zipWithIndex.map { (e, i) =>
+    val cases = Vector.tabulate(entries.length) { i =>
       val anns = annots.caseAnnots(i)
       val help = anns.help.getOrElse("")
-      val cmd  = e match
+      val cmd  = entries(i) match
         case SubEntry.Leaf(v) => Command.leaf(v, help)
         case SubEntry.Node(p) => p().command
       SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden, anns.aliases)
-    }.toVector
+    }
     // kebab-derived command names can collide only at the value level (constant @name/alias
     // duplicates are compile errors); a silent collision would shadow the later command
     val caseNames = mutable.Set.empty[String]
-    for c <- cases; n <- c.name +: c.aliases do
-      if !caseNames.add(n) then invalid(s"duplicate command name '$n'")
-    val defaultCase = annots.perCase.zipWithIndex.collectFirst {
-      case (a, i) if a.default => cases(i)
-    }
+    for c <- cases do
+      if !caseNames.add(c.name) then invalid(s"duplicate command name '${c.name}'")
+      for n <- c.aliases do if !caseNames.add(n) then invalid(s"duplicate command name '$n'")
+    val defaultCase =
+      val i = annots.perCase.indexWhere(_.default)
+      if i < 0 then None else Some(cases(i))
     Command(
       annots.onType.help.getOrElse(""),
       Vector.empty,
@@ -362,7 +363,10 @@ object Assemble:
     * term-level fact. (Repeated-must-be-last is compile-checked and needs no re-check.)
     */
   private def checkPositionalOrder(kinds: IndexedSeq[(String, PosKind)]): Unit =
-    kinds.zipWithIndex.foreach { case ((nm, kind), idx) =>
-      if kind == PosKind.Required && kinds.take(idx).exists(_(1) != PosKind.Required) then
-        invalid(s"positional '$nm': required positionals must come before optional ones")
+    var optionalSeen = false
+    kinds.foreach { (nm, kind) =>
+      if kind == PosKind.Required then
+        if optionalSeen then
+          invalid(s"positional '$nm': required positionals must come before optional ones")
+      else optionalSeen = true
     }
