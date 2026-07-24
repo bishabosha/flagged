@@ -166,21 +166,24 @@ object Derive:
   /** The invariants read the marks through a type parameter, like [[merge]] — a val binding would
     * widen the transparent walk's refinement.
     */
+  type SharedErr[M <: Int] <: String = BitwiseAnd[M, PosBit] match
+    case 0 =>
+      BitwiseAnd[M, TrailBit] match
+        case 0 =>
+          BitwiseAnd[M, GroupBit] match
+            case 0 =>
+              BitwiseAnd[M, GreedyBit] match
+                case 0 => ""
+                case _ => "a shared options group cannot contain a @greedy option"
+            case _ => "a shared options group cannot contain a subcommand field"
+        case _ => "a shared options group cannot contain a trailing field"
+    case _ => "a shared options group cannot contain positional fields"
+
   private transparent inline def sharedChecked[R <: FieldsRes](
       r: R
   ): List[(Parser[?], Boolean, FieldAnnots)] =
-    inline if hasBit[r.Marks, PosBit] then
-      error("a shared options group cannot contain positional fields")
-    else ()
-    inline if hasBit[r.Marks, TrailBit] then
-      error("a shared options group cannot contain a trailing field")
-    else ()
-    inline if hasBit[r.Marks, GroupBit] then
-      error("a shared options group cannot contain a subcommand field")
-    else ()
-    inline if hasBit[r.Marks, GreedyBit] then
-      error("a shared options group cannot contain a @greedy option")
-    else ()
+    inline if constValue[SharedErr[r.Marks] == ""] then ()
+    else error(constValue[SharedErr[r.Marks]])
     r.fields
 
   /** Per-subtree summary of the field walk — a single marks bitmask, carried in the *type* of a
@@ -223,9 +226,7 @@ object Derive:
   inline def plainRes(fields: List[(Parser[?], Boolean, FieldAnnots)]) =
     resOf[NoMarks](fields)
 
-  inline def isZero[M <: Int]: Boolean           = constValue[M == 0]
-  inline def hasBit[M <: Int, B <: Int]: Boolean =
-    constValue[BitwiseAnd[M, B] != 0]
+  inline def isZero[M <: Int]: Boolean = constValue[M == 0]
 
   type HalfN[T <: Tuple] = Tuple.Size[T] / 2
 
@@ -259,8 +260,8 @@ object Derive:
     * rule involves two fields, one in each half at exactly one merge).
     */
   private transparent inline def merge[L <: FieldsRes, R <: FieldsRes](l: L, r: R): FieldsRes =
-    inline if isZero[BitwiseOr[l.Marks, r.Marks]] then () // one gate: reduction is reused below
-    else crossChecks(l, r)
+    inline if constValue[CrossErr[l.Marks, r.Marks] == ""] then ()
+    else error(constValue[CrossErr[l.Marks, r.Marks]])
     resOf[BitwiseOr[l.Marks, r.Marks]](l.fields ++ r.fields)
 
   /** Four-way merge for unrolled leaf groups: the all-plain fast path is a single gate; anything
@@ -279,46 +280,63 @@ object Derive:
     then plainRes(a.fields ++ b.fields ++ c.fields ++ d.fields)
     else merge(merge(a, b), merge(c, d))
 
-  /** Only expanded when both sides contain a special shape (a dropped inline-if branch never
-    * expands): each cross-field rule involves two fields, one in each half at exactly one merge.
-    */
-  private transparent inline def crossChecks[L <: FieldsRes, R <: FieldsRes](l: L, r: R): Unit =
-    inline if hasBit[l.Marks, TrailBit] then
-      inline if hasBit[r.Marks, TrailBit] then
-        error("only one trailing field is supported per command")
-      else ()
-    else ()
-    inline if hasBit[l.Marks, GroupBit] then
-      inline if hasBit[r.Marks, GroupBit] then
-        error("only one subcommand field is supported per command")
-      else inline if hasBit[r.Marks, PosBit] then
-        error("mixing positional fields with a subcommand field is ambiguous and not supported")
-      else ()
-    else ()
-    inline if hasBit[r.Marks, GroupBit] then
-      inline if hasBit[l.Marks, PosBit] then
-        error("mixing positional fields with a subcommand field is ambiguous and not supported")
-      else ()
-    else ()
-    inline if hasBit[l.Marks, RepBit] then
-      inline if hasBit[r.Marks, PosBit] then
-        error("a repeated positional must be the last positional field")
-      else ()
-    else ()
-    inline if hasBit[l.Marks, GreedyBit] then
-      inline if hasBit[r.Marks, PosBit] then
-        error("a command with a @greedy option cannot have positional fields")
-      else inline if hasBit[r.Marks, GroupBit] then
-        error("a command with a @greedy option cannot have a subcommand field")
-      else ()
-    else ()
-    inline if hasBit[r.Marks, GreedyBit] then
-      inline if hasBit[l.Marks, PosBit] then
-        error("a command with a @greedy option cannot have positional fields")
-      else inline if hasBit[l.Marks, GroupBit] then
-        error("a command with a @greedy option cannot have a subcommand field")
-      else ()
-    else ()
+  // The cross-field rules where two subtree summaries meet, in the same check-and-report style
+  // as [[FieldErr]] and [[DupNameErr]]: message-returning match types over the two marks words.
+  // The marks are literals by the time these reduce, so the `BitwiseAnd` scrutinees fold on
+  // constants (the cheap regime measured in `bench.RuleCostProbe`); each rule involves two
+  // fields, one in each half, at exactly one merge.
+
+  type CrossErr[LM <: Int, RM <: Int] <: String = BitwiseAnd[LM, TrailBit] match
+    case 0 => CrossGroupL[LM, RM]
+    case _ =>
+      BitwiseAnd[RM, TrailBit] match
+        case 0 => CrossGroupL[LM, RM]
+        case _ => "only one trailing field is supported per command"
+
+  type CrossGroupL[LM <: Int, RM <: Int] <: String = BitwiseAnd[LM, GroupBit] match
+    case 0 => CrossGroupR[LM, RM]
+    case _ =>
+      BitwiseAnd[RM, GroupBit] match
+        case 0 =>
+          BitwiseAnd[RM, PosBit] match
+            case 0 => CrossGroupR[LM, RM]
+            case _ =>
+              "mixing positional fields with a subcommand field is ambiguous and not supported"
+        case _ => "only one subcommand field is supported per command"
+
+  type CrossGroupR[LM <: Int, RM <: Int] <: String = BitwiseAnd[RM, GroupBit] match
+    case 0 => CrossRep[LM, RM]
+    case _ =>
+      BitwiseAnd[LM, PosBit] match
+        case 0 => CrossRep[LM, RM]
+        case _ => "mixing positional fields with a subcommand field is ambiguous and not supported"
+
+  type CrossRep[LM <: Int, RM <: Int] <: String = BitwiseAnd[LM, RepBit] match
+    case 0 => CrossGreedyL[LM, RM]
+    case _ =>
+      BitwiseAnd[RM, PosBit] match
+        case 0 => CrossGreedyL[LM, RM]
+        case _ => "a repeated positional must be the last positional field"
+
+  type CrossGreedyL[LM <: Int, RM <: Int] <: String = BitwiseAnd[LM, GreedyBit] match
+    case 0 => CrossGreedyR[LM, RM]
+    case _ =>
+      BitwiseAnd[RM, PosBit] match
+        case 0 =>
+          BitwiseAnd[RM, GroupBit] match
+            case 0 => CrossGreedyR[LM, RM]
+            case _ => "a command with a @greedy option cannot have a subcommand field"
+        case _ => "a command with a @greedy option cannot have positional fields"
+
+  type CrossGreedyR[LM <: Int, RM <: Int] <: String = BitwiseAnd[RM, GreedyBit] match
+    case 0 => ""
+    case _ =>
+      BitwiseAnd[LM, PosBit] match
+        case 0 =>
+          BitwiseAnd[LM, GroupBit] match
+            case 0 => ""
+            case _ => "a command with a @greedy option cannot have a subcommand field"
+        case _ => "a command with a @greedy option cannot have positional fields"
 
   /** `Option[_]` unwrapping at the type level, so one transparent expansion handles a field. */
   type Unwrap[F] = F match
