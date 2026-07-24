@@ -672,13 +672,14 @@ object Derive:
 
   /** Whether `E`'s instance is a full command — not a subcommand group, not a shared group. */
   private transparent inline def isEmbeddableCommand[E]: Boolean =
+    // searching Parser.Command[E] (not Parser[E]) lets implicit search discard every value-shaped
+    // candidate on the result-type head alone, with no per-candidate trial
     summonFrom:
-      case p: Parser[E] =>
+      case p: Parser.Command[E] =>
         inline p match
           case _: Parser.CommandGroup[?] => false
           case _: Parser.Shared[?]       => false
-          case _: Parser.Command[?]      => true
-          case _                         => false
+          case _                         => true
       case _ => false
 
   /** The substitution itself: the embedded command's grammar with the build composed with the case
@@ -694,7 +695,7 @@ object Derive:
             error(
               "annotations have no effect on an embedded command field (put @name/@help/@hidden on the enum case)"
             )
-        val c = summonInline[Parser[E]].asInstanceOf[Parser.Command[E]]
+        val c = summonInline[Parser.Command[E]]
         Parser.make[H](
           c.emapImpl(a => steps.result.Result.Ok(m.fromProduct(Tuple1(a)))),
           c.prog
