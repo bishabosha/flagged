@@ -5,7 +5,7 @@ Command-line argument parsing and schema validation for Scala 3. Supports deriva
 ## Why a new library?
 
 I created Flagged to be a candidate library for the [Scala Toolkit](https://github.com/scala/toolkit).
-The initial motivation was a lack of momentum on issue [scala/toolkit#65](https://github.com/scala/toolkit/issues/65), on which discussion paused (since July 2025) after a request to compare [com-lihaoyi/mainargs](https://github.com/com-lihaoyi/mainargs) and [alexarchambault/case-app](https://github.com/alexarchambault/case-app). This library aims to provide the best aspects of both libraries with as little manual setup as possible.
+The initial motivation was a lack of momentum on issue [scala/toolkit#65](https://github.com/scala/toolkit/issues/65), on which discussion paused (since July 2025) after a request to compare [com-lihaoyi/mainargs](https://github.com/com-lihaoyi/mainargs) and [alexarchambault/case-app](https://github.com/alexarchambault/case-app). This library aims to provide the best aspects of both libraries (in particular arbitrary nested-subcommands) with as little manual setup as possible.
 
 So my personal goals with introducing Flagged was to combine the feature set of both libraries but with a Scala-3-first design:
 - 100% declarative setup, with a single entry point to "run or exit".
