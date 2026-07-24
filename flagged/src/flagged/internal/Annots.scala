@@ -87,13 +87,13 @@ object Annots:
   inline def targetAnnotsOfSome[Anns]: TargetAnnots =
     collectTarget[Anns](Nil, None, false, false)
 
-  // the folds thread each extracted value as a parameter and call the constructor once at the
-  // end — no intermediate copies
+  // the folds thread each extracted value as an inline parameter and call the constructor once
+  // at the end — no intermediate copies, and superseded values are dropped unmaterialised
   inline def collectTarget[Anns](
-      revNames: List[String],
-      help: Option[String],
-      hidden: Boolean,
-      default: Boolean
+      inline revNames: List[String],
+      inline help: Option[String],
+      inline hidden: Boolean,
+      inline default: Boolean
   ): TargetAnnots =
     inline erasedValue[Anns] match
       case _: EmptyTuple =>
@@ -118,15 +118,17 @@ object Annots:
   inline def fieldAnnotsOfSome[Anns]: FieldAnnots =
     collectField[Anns](Nil, None, None, None, false, false, None, false)
 
+  // inline parameters: arguments substitute as expressions, so pass-through values bind
+  // nothing per step and a value replaced later in the walk is never constructed at all
   inline def collectField[Anns](
-      revNames: List[String],
-      short: Option[Char],
-      help: Option[String],
-      group: Option[String],
-      positional: Boolean,
-      hidden: Boolean,
-      split: Option[Char],
-      greedy: Boolean
+      inline revNames: List[String],
+      inline short: Option[Char],
+      inline help: Option[String],
+      inline group: Option[String],
+      inline positional: Boolean,
+      inline hidden: Boolean,
+      inline split: Option[Char],
+      inline greedy: Boolean
   ): FieldAnnots =
     inline erasedValue[Anns] match
       case _: EmptyTuple =>
