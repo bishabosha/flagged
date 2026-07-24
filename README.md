@@ -294,8 +294,8 @@ more than once. Spliced groups cannot contain positional fields.
 
 ### Forward arguments to another program
 
-Declare a `Trailing` field: everything after `--` lands in it verbatim, unparsed —
-the delegation idiom of `docker run img -- cmd args...`:
+Declare a `Trailing` field: everything after `--` will be accumulated there (useful
+for wrapper programs like in `docker run img -- cmd args...`):
 
 ```scala
 case class Run(@short('i') image: String = "alpine", cmd: Trailing = Trailing()) derives Parser.Command
@@ -308,10 +308,9 @@ help it appears as `[-- <args>]` in the usage line.
 
 ### Take several values for one option
 
-Three shapes, each compile-checked. A tuple (or `derives Parser.Product` case class)
-field consumes a fixed number of consecutive tokens; `@split` divides one value into
-collection elements; `@greedy` lets a repeated option consume the following free
-tokens:
+- product types like Tuple with multiple arguments to one option (one parser per field)
+- use `@split` to build a collection from a single argument (all elements share the same parser)
+- use `@greedy` for a collection of arbitrary length (all elements share the same parser)
 
 ```scala
 case class Render(
@@ -320,12 +319,6 @@ case class Render(
     @greedy nums: List[Int] = Nil                // --nums 10 20 99 7
 ) derives Parser.Command
 ```
-
-Products are fixed-arity by design — the arity is the tuple's size, shown in help as
-one metavar per element — and repetition is last-wins, like single values. `@greedy`
-consumption stops at the next option-like token or `--`, and the command may not
-declare positional or subcommand fields (a compile error: those would compete for
-the same free tokens); pair it with `Trailing` when arguments must be forwarded.
 
 ### Constrain repetition or flag occurrences
 
@@ -387,7 +380,7 @@ on parse results.
 from; pass `prog` to set the program name when there is no `@name` annotation:
 
 ```scala
-// backup.sc — run with scala-cli
+// backup.sc — run with scala CLI
 import flagged.*
 
 case class Backup(
