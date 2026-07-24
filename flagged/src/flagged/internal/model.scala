@@ -1,19 +1,23 @@
 package flagged.internal
 
 import steps.result.Result
+import scala.annotation.publicInBinary
 
-/** Internal runtime model of a derived command. Public because macro-generated code at user call
-  * sites must reference these types; not intended for direct use.
+/** Internal runtime model of a derived command — `private[flagged]` like the rest of `internal`;
+  * inline expansions reach the pieces they need through `@publicInBinary` terms.
   */
 
 /** Exposes the engine's value array as the `Product` a `Mirror#fromProduct` consumes — the
-  * generated constructor call reads `productElement(n)` only, so no tuple is built or copied.
+  * generated constructor call reads `productElement(n)` only, so no tuple is built or copied. The
+  * arity is explicit: under splices the array is the whole storage (the spliced children's slots
+  * sit past the parent's own fields) and is passed without trimming.
   */
-final class ArrayProduct(arr: Array[Any]) extends Product:
+private[flagged] final class ArrayProduct @publicInBinary() (arr: Array[Any], n: Int)
+    extends Product:
   def canEqual(that: Any): Boolean = false
-  def productArity: Int            = arr.length
-  def productElement(n: Int): Any  = arr(n)
-enum Mode:
+  def productArity: Int            = n
+  def productElement(i: Int): Any  = arr(i)
+private[flagged] enum Mode:
   /** Flag: takes no token; built from the occurrence count (a [[flagged.Parser.ValuedFlag]]
     * additionally handles the explicit `--flag=value` form). If `optional` the field is an
     * `Option[_]`: absent means `None`, any presence wraps the built value in `Some`.
@@ -25,13 +29,21 @@ enum Mode:
     */
   case Single(parser: flagged.Parser[?], optional: Boolean)
 
+  /** Option spanning a fixed number of consecutive tokens, one per product element; parsed eagerly
+    * at the occurrence, so repetition is last-wins by overwrite. If `optional` the field is an
+    * `Option[_]` and the built value is wrapped in `Some`.
+    */
+  case Product(parser: flagged.Parser.Product[?], optional: Boolean)
+
   /** Option that may appear multiple times; elements are parsed with the parser's element and
     * combined with its build from an indexed view (also invoked empty when absent; may fail, e.g.
-    * to require at least one occurrence).
+    * to require at least one occurrence). `split` (0 = none) divides each occurrence's value into
+    * segments, each parsed as an element; `greedy` lets an occurrence consume the following free
+    * tokens as further elements.
     */
-  case Repeated(parser: flagged.Parser.Repeated[?])
+  case Repeated(parser: flagged.Parser.Repeated[?], split: Char = 0, greedy: Boolean = false)
 
-final case class OptSpec(
+private[flagged] final case class OptSpec(
     long: String,
     short: Option[Char],
     help: String,
@@ -41,12 +53,12 @@ final case class OptSpec(
     default: Option[() => Any],
     hidden: Boolean = false,
     group: Option[String] = None,
-    aliases: List[String] = Nil
+    aliases: IndexedSeq[String] = Vector.empty
 ):
   lazy val longDisplay: String  = "--" + long
   lazy val shortDisplay: String = short.fold(longDisplay)("-" + _)
 
-final case class PosSpec(
+private[flagged] final case class PosSpec(
     name: String,
     help: String,
     metavar: String,
@@ -56,15 +68,15 @@ final case class PosSpec(
 ):
   lazy val display: String = "<" + name + ">"
 
-final case class SubCase(
+private[flagged] final case class SubCase(
     name: String,
     help: String,
     command: Command,
     hidden: Boolean = false,
-    aliases: List[String] = Nil
+    aliases: IndexedSeq[String] = Vector.empty
 )
 
-final case class SubGroup(
+private[flagged] final case class SubGroup(
     index: Int,
     optional: Boolean,
     default: Option[() => Any],
@@ -79,7 +91,7 @@ final case class SubGroup(
   * plays the same role for a non-`Option` group: it is used, and the group is not built, when none
   * of its options occur.
   */
-final case class Splice(
+private[flagged] final case class Splice(
     slot: Int,
     offset: Int,
     command: Command,
@@ -103,43 +115,34 @@ final case class Splice(
     (optional || default.nonEmpty) && !mentioned(counts, base)
 
 /** A field collecting the raw arguments after `--`, verbatim. */
-final case class TrailingSpec(
+private[flagged] final case class TrailingSpec(
     index: Int,
     help: String,
     parser: flagged.Parser.Trailing[?],
     optional: Boolean,
     default: Option[() => Any]
 ):
-  def build(l: List[String]): Result[Any, String] = parser.build(l)
+  def buildInto(l: IndexedSeq[String], out: Array[Any], i: Int): Result[Unit, String] =
+    parser.buildInto(l, out, i)
 
-final case class Command(
+private[flagged] final case class Command(
     description: String,
-    opts: Vector[OptSpec],
-    positionals: Vector[PosSpec],
+    opts: IArray[OptSpec],
+    positionals: IArray[PosSpec],
     sub: Option[SubGroup],
     trailing: Option[TrailingSpec],
-    splices: List[Splice],
+    splices: IndexedSeq[Splice],
     build: Array[Any] => Result[Any, String], // fallible: `emap` validation composes here
     arity: Int, // value-storage size: own fields plus spliced children's storage
-    version: Option[() => String] = None // from Versioned[A]; called by --version and help
+    version: Option[() => String] = None, // from Versioned[A]; called by --version and help
+    // per-token lookups, built during assembly (duplicate-name detection rides on the map
+    // inserts): java.util maps return null instead of allocating an Option, and the long keys
+    // carry their `--` prefix so a plain long token needs no substring at all (the key doubles
+    // as the option's display spelling)
+    longLookup: java.util.HashMap[String, OptSpec] = Command.noLookup,
+    shortChars: Array[Char] = Command.noShortChars,
+    shortSpecs: Array[OptSpec] = Command.noShortSpecs
 ):
-  // per-token lookups: java.util maps return null instead of allocating an Option, and the
-  // long keys carry their `--` prefix so a plain long token needs no substring at all (and the
-  // key doubles as the option's display spelling)
-  lazy val longLookup: java.util.HashMap[String, OptSpec] =
-    val m = new java.util.HashMap[String, OptSpec]
-    opts.foreach { o =>
-      m.put(o.longDisplay, o)
-      o.aliases.foreach(a => m.put("--" + a, o))
-    }
-    m
-  private lazy val shorts: Vector[OptSpec] = opts.filter(_.short.isDefined)
-  lazy val shortChars: Array[Char]         = shorts.map(_.short.get).toArray
-  lazy val shortSpecs: Array[OptSpec]      = shorts.toArray
-
-  // hot-loop views: Vector.apply walks a tree per element; the engine indexes these instead
-  lazy val optSpecs: Array[OptSpec] = opts.toArray
-  lazy val posSpecs: Array[PosSpec] = positionals.toArray
 
   /** Build spliced children from their storage slices, then build this command's value; the first
     * failing build (e.g. an `emap` validation) short-circuits. `counts` holds per-slot mention
@@ -156,14 +159,15 @@ final case class Command(
       counts: Array[Int],
       base: Int
   ): Result[Any, String] =
-    def loop(remaining: List[Splice]): Result[Any, String] = remaining match
-      case Nil       => build(values)
-      case s :: rest =>
+    def loop(i: Int): Result[Any, String] =
+      if i == splices.length then build(values)
+      else
+        val s = splices(i)
         if s.skipped(counts, base) then
           values(s.slot) = s.default match
             case Some(d) => d()
             case None    => None
-          loop(rest)
+          loop(i + 1)
         else
           s.command.finish(
             values.slice(s.offset, s.offset + s.command.arity),
@@ -172,13 +176,27 @@ final case class Command(
           ) match
             case Result.Ok(v) =>
               values(s.slot) = if s.optional then Some(v) else v
-              loop(rest)
+              loop(i + 1)
             case err => err
-    loop(splices)
+    loop(0)
 
-object Command:
+private[flagged] object Command:
+  // shared empties for option-less commands; the map is never mutated after construction
+  private[internal] val noLookup     = new java.util.HashMap[String, OptSpec]
+  private[internal] val noShortChars = Array.empty[Char]
+  private[internal] val noShortSpecs = Array.empty[OptSpec]
+
   /** A command with no parameters that always produces `value` (parameterless enum case / case
     * object).
     */
   def leaf(value: Any, description: String): Command =
-    Command(description, Vector.empty, Vector.empty, None, None, Nil, _ => Result.Ok(value), 0)
+    Command(
+      description,
+      IArray.empty,
+      IArray.empty,
+      None,
+      None,
+      Vector.empty,
+      _ => Result.Ok(value),
+      0
+    )

@@ -285,10 +285,10 @@ class OptionsSuite extends munit.FunSuite:
     val e1 = compileErrors("case class C(x: Option[List[Int]]) derives Parser.Command")
     assert(e1.contains("Option of a repeated Parser"), e1)
     val e2 =
-      compileErrors("case class C(@positional t: Trailing = Trailing(Nil)) derives Parser.Command")
+      compileErrors("case class C(@positional t: Trailing = Trailing()) derives Parser.Command")
     assert(e2.contains("@positional cannot be combined with a trailing field"), e2)
     val e3 =
-      compileErrors("case class C(@short('t') t: Trailing = Trailing(Nil)) derives Parser.Command")
+      compileErrors("case class C(@short('t') t: Trailing = Trailing()) derives Parser.Command")
     assert(e3.contains("@short cannot be combined with a trailing field"), e3)
     // the Parser.Command witness keeps derived instances shape-refined, so this is
     // static too — a derives clause no longer erases the shape
@@ -344,7 +344,7 @@ class OptionsSuite extends munit.FunSuite:
 
   test("cross-field rules with static shapes are compile errors") {
     val e1 = compileErrors(
-      "case class C(a: Trailing = Trailing(Nil), b: Trailing = Trailing(Nil)) derives Parser.Command"
+      "case class C(a: Trailing = Trailing(), b: Trailing = Trailing()) derives Parser.Command"
     )
     assert(e1.contains("only one trailing field is supported per command"), e1)
     val e2 = compileErrors(
@@ -369,11 +369,11 @@ class OptionsSuite extends munit.FunSuite:
   }
 
   test("a Trailing field collects the raw arguments after --") {
-    case class Exec(@short('v') verbose: Boolean = false, rest: Trailing = Trailing(Nil))
+    case class Exec(@short('v') verbose: Boolean = false, rest: Trailing = Trailing())
         derives Parser.Command
     assertEquals(
       ok(Flagged.parse[Exec](Seq("-v", "--", "-x", "--weird", "--"))),
-      Exec(verbose = true, rest = Trailing(List("-x", "--weird", "--")))
+      Exec(verbose = true, rest = Trailing(Vector("-x", "--weird", "--")))
     )
     assertEquals(ok(Flagged.parse[Exec](Seq("-v"))), Exec(verbose = true))
   }
@@ -381,17 +381,17 @@ class OptionsSuite extends munit.FunSuite:
   test("Option[Trailing] distinguishes absent -- from present-but-empty") {
     case class Exec(cmd: String = "sh", rest: Option[Trailing] = None) derives Parser.Command
     assertEquals(ok(Flagged.parse[Exec](Nil)).rest, None)
-    assertEquals(ok(Flagged.parse[Exec](Seq("--"))).rest, Some(Trailing(Nil)))
-    assertEquals(ok(Flagged.parse[Exec](Seq("--", "a"))).rest, Some(Trailing(List("a"))))
+    assertEquals(ok(Flagged.parse[Exec](Seq("--"))).rest, Some(Trailing()))
+    assertEquals(ok(Flagged.parse[Exec](Seq("--", "a"))).rest, Some(Trailing(Vector("a"))))
   }
 
   test("custom trailing parsers can require arguments") {
-    case class Cmdline(parts: List[String])
+    case class Cmdline(parts: IndexedSeq[String])
     given Parser.Trailing[Cmdline] = Parser.trailing(l =>
       if l.isEmpty then Err("expected a command after '--'") else Ok(Cmdline(l))
     )
     case class Run(image: String = "img", cmd: Cmdline) derives Parser.Command
-    assertEquals(ok(Flagged.parse[Run](Seq("--", "echo", "hi"))).cmd, Cmdline(List("echo", "hi")))
+    assertEquals(ok(Flagged.parse[Run](Seq("--", "echo", "hi"))).cmd, Cmdline(Vector("echo", "hi")))
     val m = err(Flagged.parse[Run](Nil))
     assert(m.contains("expected a command after '--'"), m)
   }
@@ -405,7 +405,7 @@ class OptionsSuite extends munit.FunSuite:
   }
 
   test("trailing fields appear in usage and help") {
-    case class Exec(@help("Command to run in the container") rest: Trailing = Trailing(Nil))
+    case class Exec(@help("Command to run in the container") rest: Trailing = Trailing())
         derives Parser.Command
     Flagged.parse[Exec](Seq("--help")) match
       case Err(ParseError.Help(t)) =>

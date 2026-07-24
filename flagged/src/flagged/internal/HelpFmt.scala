@@ -3,8 +3,13 @@ package flagged.internal
 /** Renders `--help` screens and usage lines. */
 private[flagged] object HelpFmt:
 
-  def render(cmd: Command, prog: String, path: List[String], showHidden: Boolean = false): String =
-    val full = (prog :: path).mkString(" ")
+  def render(
+      cmd: Command,
+      prog: String,
+      path: IndexedSeq[String],
+      showHidden: Boolean = false
+  ): String =
+    val full = (prog +: path).mkString(" ")
     val b    = new StringBuilder
 
     cmd.version.foreach { v =>
@@ -33,7 +38,9 @@ private[flagged] object HelpFmt:
 
     if cmd.positionals.nonEmpty then
       b ++= "\nArguments:\n"
-      b ++= table(cmd.positionals.map(p => s"<${p.name}>" -> withExtras(p.help, posExtras(p))))
+      b ++= table(
+        cmd.positionals.toSeq.map(p => s"<${p.name}>" -> withExtras(p.help, posExtras(p)))
+      )
       b += '\n'
 
     cmd.trailing.filter(_.help.nonEmpty).foreach { t =>
@@ -42,7 +49,8 @@ private[flagged] object HelpFmt:
       b += '\n'
     }
 
-    val visible                 = if showHidden then cmd.opts else cmd.opts.filterNot(_.hidden)
+    val allOpts                 = cmd.opts.toSeq
+    val visible                 = if showHidden then allOpts else allOpts.filterNot(_.hidden)
     val (ungrouped, inSections) = visible.partition(_.group.isEmpty)
     val hasHidden          = cmd.opts.exists(_.hidden) || cmd.sub.exists(_.cases.exists(_.hidden))
     def optRow(o: OptSpec) = optLeft(o) -> withExtras(o.help, optExtras(o, showHidden))
@@ -52,7 +60,7 @@ private[flagged] object HelpFmt:
       ungrouped.map(optRow) ++
         Seq("-h, --help" -> "Show this message and exit") ++
         (if hasHidden then Seq("    --help-all" -> "Show this message with hidden options and exit")
-         else Nil) ++
+         else Seq.empty) ++
         cmd.version.map(_ => "    --version" -> "Show version and exit")
     b ++= table(optRows)
     b += '\n'
@@ -71,12 +79,15 @@ private[flagged] object HelpFmt:
     b.result().stripSuffix("\n")
 
   def usageLine(cmd: Command, full: String): String =
-    val parts = List.newBuilder[String]
+    val parts = Vector.newBuilder[String]
     parts += full
     parts += "[options]"
     cmd.positionals.foreach { p =>
       p.mode match
-        case Mode.Repeated(_)      => parts += s"[<${p.name}>...]"
+        case Mode.Repeated(_, _, _) => parts += s"[<${p.name}>...]"
+        // a positional product's metavar is pre-bracketed (`<x> <y>`)
+        case Mode.Product(_, _) =>
+          parts += (if isRequiredPos(p) then p.metavar else s"[${p.metavar}]")
         case _ if isRequiredPos(p) => parts += s"<${p.name}>"
         case _                     => parts += s"[<${p.name}>]"
     }
@@ -91,37 +102,44 @@ private[flagged] object HelpFmt:
 
   private def isRequiredPos(p: PosSpec): Boolean =
     p.default.isEmpty && (p.mode match
-      case Mode.Single(_, optional) => !optional
-      case _                        => false)
+      case Mode.Single(_, optional)  => !optional
+      case Mode.Product(_, optional) => !optional
+      case _                         => false)
 
   private def optLeft(o: OptSpec): String =
     val short = o.short.map(c => s"-$c, ").getOrElse("    ")
     val value = o.mode match
-      case Mode.Flag(_, _)   => ""
-      case Mode.Single(_, _) => s" <${o.metavar}>"
-      case Mode.Repeated(_)  => s" <${o.metavar}>"
+      case Mode.Flag(_, _)        => ""
+      case Mode.Single(_, _)      => s" <${o.metavar}>"
+      case Mode.Product(_, _)     => s" ${o.metavar}" // pre-bracketed: `<x> <y>`
+      case Mode.Repeated(_, _, _) => s" <${o.metavar}>"
     s"$short--${o.long}$value"
 
-  private def optExtras(o: OptSpec, showHidden: Boolean): List[String] =
+  private def optExtras(o: OptSpec, showHidden: Boolean): IndexedSeq[String] =
     val default = o.default.map(d => d()).filterNot { v =>
-      // a flag default equal to the absent-value (fromCount(0)) conveys nothing
+      // a flag default equal to the absent-value (count 0) conveys nothing
       o.mode match
-        case Mode.Flag(parser, _) => parser.fromCount(0).toOption.contains(v)
-        case _                    => false
+        case Mode.Flag(parser, _) =>
+          val scratch = new Array[Any](1)
+          parser.countInto(0, scratch, 0) match
+            case steps.result.Result.Err(_) => false
+            case _                          => scratch(0) == v
+        case _ => false
     }
     val dflt = default match
       case Some(v) => fmtDefault(v).map(s => s"default: $s")
       case None    => None
     val required = o.mode match
-      case Mode.Single(_, optional) => o.default.isEmpty && !optional
-      case _                        => false
+      case Mode.Single(_, optional)  => o.default.isEmpty && !optional
+      case Mode.Product(_, optional) => o.default.isEmpty && !optional
+      case _                         => false
     val repeatable = o.mode match
-      case Mode.Repeated(_) => true
-      case _                => false
+      case Mode.Repeated(_, _, _) => true
+      case _                      => false
     val alias = Option.when(o.aliases.nonEmpty)(
       s"alias: ${o.aliases.map("--" + _).mkString(", ")}"
     )
-    List(
+    Vector(
       dflt,
       Option.when(required)("required"),
       Option.when(repeatable)("repeatable"),
@@ -129,8 +147,8 @@ private[flagged] object HelpFmt:
       Option.when(showHidden && o.hidden)("hidden")
     ).flatten
 
-  private def posExtras(p: PosSpec): List[String] =
-    p.default.map(d => d()).flatMap(fmtDefault).map(s => s"default: $s").toList
+  private def posExtras(p: PosSpec): IndexedSeq[String] =
+    Vector.from(p.default.map(d => d()).flatMap(fmtDefault).map(s => s"default: $s"))
 
   /** Human-friendly rendering of a default value; `None` means "don't show". */
   private def fmtDefault(v: Any): Option[String] = v match
@@ -141,7 +159,7 @@ private[flagged] object HelpFmt:
     case s: Seq[?]              => Some(s.mkString(","))
     case other                  => Some(other.toString)
 
-  private def withExtras(help: String, extras: List[String]): String =
+  private def withExtras(help: String, extras: IndexedSeq[String]): String =
     if extras.isEmpty then help
     else if help.isEmpty then extras.mkString("(", ", ", ")")
     else s"$help ${extras.mkString("(", ", ", ")")}"

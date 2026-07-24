@@ -5,7 +5,7 @@ import steps.result.Result
 import steps.result.Result.eval
 
 /** Runtime helpers referenced by derivation. Not intended for direct use. */
-object Runtime:
+private[flagged] object Runtime:
 
   /** 1 = true, 0 = false, -1 = not a recognized spelling. */
   private def boolOf(s: String): Int =

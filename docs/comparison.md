@@ -9,8 +9,8 @@ and overlapping behaviors are pinned down in `flagged/test/src/flagged/ParitySui
 each test names the library whose documented behavior it was checked against. The scopt,
 scallop, and picocli entries are based on their documentation plus empirical spot-checks of
 the syntax behaviors (the same probes that back the `realistic` benchmark encodings); they are
-not pinned as tests. JMH benchmarks comparing derivation compile time and parse
-latency/allocation live in `bench/` (see `bench/README.md`); all six libraries meet in the
+not pinned as tests. JMH benchmarks comparing derivation compile time, runtime parser
+construction, the one-shot construct-and-parse cost, and parse latency/allocation live in `bench/` (see `bench/README.md`, current numbers in `bench/results.md`); all six libraries meet in the
 `realistic` runtime scenario.
 
 ## The libraries
@@ -40,8 +40,8 @@ a library not named does not have it.
 | Counting flags (`-vvv`) | `Count` | case-app `Int @@ Counter`; scallop `tally()`; picocli `boolean[]` length |
 | Repeated scalar options | last wins (values and flags) | error in all five (opt-outs: mainargs `allowRepeats`, case-app `Last[T]`, picocli `overwrittenOptionsAllowed`) |
 | Repeatable → collections | any collection with a `Factory`; any type via `Parser.repeated` | mainargs `Seq`/`Iterable`/`Map`; case-app `List`/`Vector`; scallop `opt[List[T]]`; picocli arrays/collections/`Map`; scopt: one comma-separated token |
-| Multi-value arity (`--point 1 2 3`) | no — one value per occurrence | scallop multi-value options; picocli `arity = "2..3"` |
-| Value splitting (`--env A,B,C` → elements) | via custom value parser only | scopt (its native collection format); picocli `split` regex |
+| Multi-value arity (`--point 1 2 3`) | fixed arity: tuple or `derives Parser.Product` fields; `1..*` via `@greedy` on repeated fields (compile error alongside positionals/subcommands — the ambiguity other libraries document away) | scallop multi-value options; picocli `arity = "2..3"` |
+| Value splitting (`--env A,B,C` → elements) | `@split` on repeated fields (separator char, default `,`) | scopt (its native collection format); picocli `split` regex |
 | `Map[K,V]` (`--x k=v`) | yes | mainargs; scopt (comma-separated pairs); scallop `props` (`-Dk=v`); picocli |
 | `Option[T]` | yes | mainargs, case-app; scallop `ScallopOption[T]`; picocli (incl. `Optional<T>`); scopt: config fields, options optional by default |
 | Defaults from field defaults | yes (lazy) | mainargs, case-app (lazy); scopt initial config instance; scallop `default =` parameter; picocli field initializers |
@@ -50,7 +50,8 @@ a library not named does not have it.
 | Variadic positionals, typed | repeated `@positional` field | mainargs `Leftover[T]`; scopt `.unbounded()`; scallop `trailArg[List[T]]`; picocli `index = "1..*"`; case-app `RemainingArgs` (untyped) |
 | Number-only options (`-5`, as `tail -5`) | no — `-<digits>` is a value, by design | scallop `number()` |
 | Subcommands | enums or `@run` objects, arbitrarily nested | scallop, picocli: arbitrarily nested; case-app: nested via multi-word names; scopt `cmd().children`, nestable into one flat config; mainargs: one level |
-| Shared option groups (splicing) | yes, nested, spliced into the command | mainargs `TokensReader.Class`; case-app `@Recurse`; picocli `@Mixin`; scopt: builder fragments (values stay flat) |
+| Shared option groups (splicing) | `derives Parser.Shared`, nested; splice-safety invariants checked at the group's derivation | mainargs `TokensReader.Class`; case-app `@Recurse`; picocli `@Mixin`; scopt: builder fragments (values stay flat) |
+| Embedding a foreign command as a subcommand | sole-field group case substitutes the full command | picocli: subcommand classes from any source; case-app: `Command` objects |
 | Optional group | `Option[Group]` | case-app; picocli `@ArgGroup` multiplicity `0..1` |
 | Prefixed group names | `@name` on the group field | case-app `@Recurse("prefix")` |
 | Declarative cross-option constraints | no — `emap` checks after parse | scallop `conflicts`/`codependent`/`requireOne`; picocli `@ArgGroup` exclusive / co-occurring |
@@ -114,11 +115,7 @@ derivation libraries — are matched in the wider field by scallop and picocli.
    (picocli `ArgGroup`, scallop `conflicts`/`codependent`/`requireOne`). `emap` expresses the
    check but runs after parse — schema-level constraints could be reflected in usage output
    and completions.
-5. **Multi-value arity and value splitting.** One occurrence consuming several values
-   (`--point 1 2 3`; picocli `arity`, scallop multi-value options) and splitting one token into
-   elements (`--env A,B,C`; picocli `split`, scopt's collection format). flagged parses exactly
-   one value per occurrence; splitting is expressible only inside a custom value parser.
-6. **Low priority.** `--usage` (condensed help), alphabetical help sorting toggle, pluggable name
+5. **Low priority.** `--usage` (condensed help), alphabetical help sorting toggle, pluggable name
    mapper (snake_case), argument index tracking (`Indexed`), number-only options (scallop's
    `tail -5` style — flagged reserves `-<digits>` as values by design), abbreviated long-option
    matching (picocli, opt-in), environment-variable defaults surfaced in help (the lazy field

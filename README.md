@@ -122,16 +122,21 @@ The field's `Parser` instance decides its shape:
 | `x: Option[A]` | optional, `None` when absent |
 | `x: List[A]` (any collection with a `Factory`) | repeatable |
 | `x: Map[K, V]` | repeatable `--x key=value` entries |
+| `x: (A, B)` (any tuple of `Value` types, or a case class deriving `Parser.Product`) | fixed multi-token value: `--x 1 2` |
 | `x: E` (enum deriving `Parser.CommandGroup`) | nested subcommands |
 | `x: E` (enum deriving `Parser.Enumerated`) | value matched by case name (`--color red`) |
-| `x: P` (case class deriving `Parser.Command`) | options group spliced into this command |
+| `x: P` (case class deriving `Parser.Shared`) | options group spliced into this command |
 | `x: Trailing` | the raw arguments after `--`, verbatim |
 | `@positional x: A` | positional argument (same rules) |
 
 Annotations fine-tune the rest: `@name` (long-name override and aliases), `@short`,
 `@help`, `@positional`, `@hidden` (omitted from help, shown by `--help-all`),
-`@group` (titled help sections), `@version` (adds `--version` via a `Versioned`
-instance), and `@default` (the command run when no command token is given).
+`@group` (titled help sections), `@split` (divide a repeated option's value at a
+separator, `,` by default: `--env A,B,C`), `@greedy` (a repeated option consumes the
+following free tokens: `--nums 10 20 99`; compile error if the command also declares
+positional or subcommand fields, which would make the grammar ambiguous), `@version`
+(adds `--version` via a `Versioned` instance), and `@default` (the command run when
+no command token is given).
 
 ### Subcommands
 
@@ -194,7 +199,7 @@ A single `@run` method will become the name of the root program, otherwise a gro
   `map`/`emap` — including whole commands, which gives cross-field validation before
   your code runs. Flag and repeated shapes are pluggable too (`Parser.flag`,
   `Parser.repeated`), so occurrence bounds and non-empty constraints are expressible.
-- **Option groups:** a case-class-typed field splices that group's options into the
+- **Option groups:** a `derives Parser.Shared` case-class field splices that group's options into the
   surrounding command and reconstructs the group as a value. Groups nest, work inside
   subcommand cases, can be optional (`Option[Group]`), and can be prefixed (`@name`
   on the field) to be spliced more than once.
@@ -250,14 +255,39 @@ enum LogLevel derives Parser.Enumerated:
 gives you `--level warn` (kebab-cased, matched exactly) and the metavar
 `<debug|info|warn|error>`.
 
-### Share options between commands
+### Embed a command defined elsewhere
 
-A field whose type is a case class with its own `Parser` splices that group's
-options into the surrounding command — they parse as if declared inline, and the
-group is reconstructed as a value:
+A command-group case whose sole field carries a full `Parser.Command` embeds that
+command wholesale — options, positionals, trailing and all. The case's grammar *is*
+the embedded command's (safe, because subcommand dispatch hands the remaining tokens
+to it rather than merging grammars), and the parse result is wrapped in the case:
 
 ```scala
-case class LogOpts(@short('q') quiet: Boolean = false, logLevel: String = "info") derives Parser.Command
+// from another module or classpath
+case class ExternalTool(@short('f') force: Boolean = false, @positional target: String)
+    derives Parser.Command
+
+enum Cli derives Parser.CommandGroup:
+  case Build(release: Boolean = false)
+  @name("ext") @help("Run the external tool")
+  case External(tool: ExternalTool)
+// cli ext -f thing   →   Cli.External(ExternalTool(force = true, target = "thing"))
+```
+
+`@name`/`@help`/`@hidden` on the *case* rename and document the embedded command
+locally; annotations on the field itself are a compile error (they could not take
+effect).
+
+### Share options between commands
+
+A field whose type derives `Parser.Shared` splices that group's options into the
+surrounding command — they parse as if declared inline, and the group is
+reconstructed as a value. `Shared` derivation enforces the invariants that make
+splicing always safe (no positional, trailing, subcommand, or `@greedy` fields), at
+compile time:
+
+```scala
+case class LogOpts(@short('q') quiet: Boolean = false, logLevel: String = "info") derives Parser.Shared
 
 case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser.Command
 // serve --port 9000 -q --log-level debug
@@ -274,13 +304,34 @@ Declare a `Trailing` field: everything after `--` lands in it verbatim, unparsed
 the delegation idiom of `docker run img -- cmd args...`:
 
 ```scala
-case class Run(@short('i') image: String = "alpine", cmd: Trailing = Trailing(Nil)) derives Parser.Command
-// run -i ubuntu -- echo --not-an-option   →   Run("ubuntu", Trailing(List("echo", "--not-an-option")))
+case class Run(@short('i') image: String = "alpine", cmd: Trailing = Trailing()) derives Parser.Command
+// run -i ubuntu -- echo --not-an-option   →   Run("ubuntu", Trailing(Vector("echo", "--not-an-option")))
 ```
 
 An `Option[Trailing]` field distinguishes an absent `--` (`None`) from a
-present-but-empty one (`Some(Trailing(Nil))`). One trailing field per command; in
+present-but-empty one (`Some(Trailing())`). One trailing field per command; in
 help it appears as `[-- <args>]` in the usage line.
+
+### Take several values for one option
+
+Three shapes, each compile-checked. A tuple (or `derives Parser.Product` case class)
+field consumes a fixed number of consecutive tokens; `@split` divides one value into
+collection elements; `@greedy` lets a repeated option consume the following free
+tokens:
+
+```scala
+case class Render(
+    @short('p') point: (Int, Int) = (0, 0),      // --point 3 4
+    @split env: List[String] = Nil,              // --env A=1,B=2   (also -e X --env Y,Z)
+    @greedy nums: List[Int] = Nil                // --nums 10 20 99 7
+) derives Parser.Command
+```
+
+Products are fixed-arity by design — the arity is the tuple's size, shown in help as
+one metavar per element — and repetition is last-wins, like single values. `@greedy`
+consumption stops at the next option-like token or `--`, and the command may not
+declare positional or subcommand fields (a compile error: those would compete for
+the same free tokens); pair it with `Trailing` when arguments must be forwarded.
 
 ### Constrain repetition or flag occurrences
 
@@ -360,20 +411,29 @@ Full methodology and tables are in [`bench/`](bench/results.md); the comparison
 below is against mainargs 0.7.8 and case-app 2.1.0 on the same inputs (Apple M3 Max,
 Temurin JDK 25, Scala 3.8.3).
 
-**Compile time** is probably what people care most about for a derivation-heavy library. Derivation adds ~56–123 ms per file over a plain-data baseline across the
-benchmark scenarios, against ~149–214 ms for mainargs and ~396–439 ms for case-app.
-Cost grows linearly with field count, at under 2 ms per field.
+**Compile time** is probably what people care most about for a derivation-heavy library. Derivation adds ~39–90 ms per file over a plain-data baseline across the
+benchmark scenarios, against ~166–243 ms for mainargs and ~435–520 ms for case-app.
+Cost grows linearly with field count, at ~1.1 ms per field, and stays below mainargs
+at every measured size up to 128 fields.
 
-**Parse latency:** on non-trivial argument lists Flagged parses in 0.08–0.75 µs,
-1.8–88× faster than mainargs and case-app on the same scenarios, allocating 3.7–182×
+**The one-shot cost** — a CLI process constructs its parser once and parses once, and
+Flagged is measured on both halves: construction plus parse comes to 0.34 µs on a small
+command and 2.7 µs on a docker-style subcommand CLI, fastest of the six measured
+libraries end to end (4.6× ahead of mainargs, 19–95× ahead of case-app, scopt, scallop,
+and picocli on the realistic scenario). Construction alone is the one place Flagged is
+not the quickest — it builds the complete parse-ready model up front, lookup tables
+included — which the parse numbers repay within the first parse.
+
+**Parse latency:** on non-trivial argument lists Flagged parses in 0.08–0.78 µs,
+1.6–85× faster than mainargs and case-app on the same scenarios, allocating 4.0–173×
 less — the widest gap on the `realistic` scenario, a docker-style subcommand CLI
-(13× vs mainargs, 88× vs case-app; scopt, scallop, and picocli, measured on the same
-scenario at runtime only, come out 78–217× slower than Flagged); the hot path aims to allocate only what is necessary to build the target data (further improvements could be made to avoid boxing). The same holds on non-JVM platforms: Flagged
+(13× vs mainargs, 85× vs case-app; scopt, scallop, and picocli, measured on the same
+scenario, come out 69–202× slower than Flagged); the hot path aims to allocate only what is necessary to build the target data (further improvements could be made to avoid boxing). The same holds on non-JVM platforms: Flagged
 is the fastest of the three on every scenario on Scala.js, WebAssembly, and Scala
 Native.
 
 **Comparison to hand-written:**
-- A hand-written parser at feature-parity with Flagged is still 1.7–4.4× faster than the
+- A hand-written parser at feature-parity with Flagged is still 2.5–6.1× faster than the
 derived one
 - The typical quick hand-rolled parser (case class of defaults, pattern match for known tokens on a `List[String]`, copying per parsed option) is faster on small grammars but 2.6× slower at 25 options,
 since its cost grows with options × tokens where the engine's grows with tokens.

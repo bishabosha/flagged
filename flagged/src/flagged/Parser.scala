@@ -6,7 +6,7 @@ import scala.collection.Factory
 import scala.collection.immutable.ArraySeq
 import scala.deriving.Mirror
 import flagged.internal.{Assemble, Engine, HelpFmt}
-import scala.annotation.nowarn
+import scala.annotation.{nowarn, publicInBinary}
 import Result.eval, eval.{check, ok}
 
 /** A counting flag: `-vvv` parses as `Count(3)`, absent as `Count(0)`. */
@@ -14,34 +14,41 @@ final case class Count(value: Int)
 
 object Count:
   given Parser.Flag[Count]:
-    def fromCount(n: Int) = Ok(Count(n))
+    private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
+      Result.task:
+        out(i) = Count(n)
 
 /** The raw arguments after `--`, collected verbatim (no option parsing). Empty when no `--` is
   * given; use `Option[Trailing]` to distinguish an absent `--` from a present-but-empty one.
   */
-final case class Trailing(args: List[String])
+final case class Trailing(args: IndexedSeq[String] = Vector.empty)
 
 object Trailing:
   given Parser.Trailing[Trailing]:
-    def build(l: List[String]) = Ok(Trailing(l))
+    private[flagged] def buildInto(l: IndexedSeq[String], out: Array[Any], i: Int) =
+      Result.task:
+        out(i) = Trailing(l)
 
 /** Describes how command-line input becomes an `A`. The *shape* is the subtype:
   *
   *   - [[Parser.Value]] — one token per occurrence (numbers, paths, enum values, ...)
   *   - [[Parser.Flag]] — no token; built from the occurrence count ([[Parser.ValuedFlag]]
   *     additionally accepts the explicit `--flag=value` form)
+  *   - [[Parser.Product]] — a fixed number of consecutive tokens, one per element (`--point 3 4`)
   *   - [[Parser.Repeated]] — any number of occurrences of a `Value` element, combined
   *   - [[Parser.Trailing]] — the raw arguments after `--`, taken verbatim
-  *   - [[Parser.Command]] — a single command's grammar; as a field, a spliced options group
-  *     ([[Parser.CommandGroup]] is a sum: nested subcommands)
+  *   - [[Parser.Command]] — a single command's grammar ([[Parser.CommandGroup]] is a sum: nested
+  *     subcommands; [[Parser.Shared]] is a spliceable options group). A full command cannot be a
+  *     field — a group-case with it as sole field embeds it as a subcommand instead
   *
   * The same type is used at every level, and field semantics follow the instance's subtype, which
-  * derivation requires to be statically known. Every parser is also runnable: `parse`/`parseOrExit`
-  * interpret value shapes as a single-argument command line.
+  * derivation requires to be statically known. Every parser is also runnable: `parse` interprets
+  * value shapes as a single-argument command line ([[Flagged.parseOrExit]] is the exit-on-error
+  * helper for `@main` methods).
   */
 @scala.annotation.implicitNotFound(
   "No given Parser[${A}] found.\n" +
-    "For a subcommand enum add `derives Parser.CommandGroup`; for a spliceable options group add `derives Parser.Command`;\n" +
+    "For a subcommand enum add `derives Parser.CommandGroup`; for a spliceable options group add `derives Parser.Shared`;\n" +
     "for an enum parsed by case name, add `derives Parser.Enumerated`;\n" +
     "for other value types provide one with Parser.of / Parser.flag / Parser.repeated / Parser.trailing."
 )
@@ -75,33 +82,18 @@ sealed trait Parser[A]:
   final def parse(args: Seq[String]): ParseResult[A] = parse(args, typeName)
 
   final def parse(args: Seq[String], prog: String): ParseResult[A] =
-    Engine.run(command, prog, Nil, args.toIndexedSeq, 0).asInstanceOf[ParseResult[A]]
-
-  /** Parse `args`; on `--help` print the help screen and exit 0, on error print a message to stderr
-    * and exit 2. Intended for `@main` methods and scripts.
-    */
-  final def parseOrExit(args: Seq[String]): A = parseOrExit(args, typeName)
-
-  final def parseOrExit(args: Seq[String], prog: String): A =
-    parse(args, prog) match
-      case Ok(a)                      => a
-      case Err(ParseError.Help(text)) =>
-        println(text)
-        internal.PlatformExit.exit(0)
-      case Err(ParseError.Failure(message, hint)) =>
-        System.err.println(s"$prog: $message")
-        if hint.nonEmpty then System.err.println(hint)
-        internal.PlatformExit.exit(2)
+    Engine.run(command, prog, Vector.empty, args.toIndexedSeq, 0).asInstanceOf[ParseResult[A]]
 
   /** The rendered top-level help screen. */
   final def help: String = help(typeName)
 
-  final def help(prog: String): String = HelpFmt.render(command, prog, Nil)
+  final def help(prog: String): String = HelpFmt.render(command, prog, Vector.empty)
 
   /** [[help]] including `@hidden` options and subcommands — what `--help-all` prints. */
   final def helpAll: String = helpAll(typeName)
 
-  final def helpAll(prog: String): String = HelpFmt.render(command, prog, Nil, showHidden = true)
+  final def helpAll(prog: String): String =
+    HelpFmt.render(command, prog, Vector.empty, showHidden = true)
 
 object Parser extends ParserLowPriority, internal.PlatformValues:
   def apply[A](using p: Parser[A]): Parser[A] = p
@@ -114,14 +106,18 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     * pair slots).
     */
   private[flagged] abstract class Collector:
-    private var n = 0
+    private var n         = 0
+    private var hasFailed = false
 
     final def size: Int = n
+
+    /** Whether any offered element failed to parse (the failure was reported when offered). */
+    final def failed: Boolean = hasFailed
 
     final def offer(s: String, out: Array[Any], i: Int): Result[Unit, String] =
       val r = read(s, out, i)
       r match
-        case _: Err[?] => ()
+        case _: Err[?] => hasFailed = true
         case _         =>
           append(out(i))
           n += 1
@@ -198,9 +194,14 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     * → 0).
     */
   sealed trait Flag[A] extends Parser[A]:
-    def fromCount(n: Int): Result[A, String]
-    final def typeName: String                      = "flag"
-    def emap[B](f: A => Result[B, String]): Flag[B] = flag(n => fromCount(n).flatMap(f))
+    self =>
+    final def typeName: String = "flag"
+
+    def emap[B](f: A => Result[B, String]): Flag[B] = new Flag[B]:
+      private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
+        Result.task:
+          self.countInto(n, out, i).check
+          out(i) = f(out(i).asInstanceOf[A]).ok
 
     /** Whether this flag accepts the explicit `--flag=value` form ([[ValuedFlag]] does). */
     private[flagged] def takesValue: Boolean = false
@@ -210,22 +211,31 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
       Result.task:
         eval.raise(s"'$s': this flag does not take a value")
 
-    /** Engine protocol: build from the mention count into `out(i)`. */
-    private[flagged] def countInto(n: Int, out: Array[Any], i: Int): Result[Unit, String] =
-      intoSlot(fromCount(n), out, i)
+    /** Engine protocol: build from the mention count into `out(i)`; the shared [[Result.done]] on
+      * success. Built-in instances write the slot directly — an `Ok` appears only behind
+      * [[Parser.flag]]-supplied functions.
+      */
+    private[flagged] def countInto(n: Int, out: Array[Any], i: Int): Result[Unit, String]
 
   /** A flag that additionally accepts the explicit `--flag=value` form (and is therefore usable
     * positionally and inside `Option`).
     */
   sealed trait ValuedFlag[A] extends Flag[A]:
-    def fromValue(s: String): Result[A, String]
+    self =>
     override private[flagged] def takesValue: Boolean = true
 
     /** Engine protocol: parse the explicit `--flag=value` form into `out(i)`. */
-    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
-      intoSlot(fromValue(s), out, i)
-    override def emap[B](f: A => Result[B, String]): ValuedFlag[B] =
-      flag(n => fromCount(n).flatMap(f), s => fromValue(s).flatMap(f))
+    override private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String]
+
+    override def emap[B](f: A => Result[B, String]): ValuedFlag[B] = new ValuedFlag[B]:
+      private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
+        Result.task:
+          self.countInto(n, out, i).check
+          out(i) = f(out(i).asInstanceOf[A]).ok
+      override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
+        Result.task:
+          self.readInto(s, out, i).check
+          out(i) = f(out(i).asInstanceOf[A]).ok
 
   /** Any number of occurrences, each parsed by a `Value` element (so repeats cannot nest, by
     * construction) and accumulated by a per-parse [[Collector]]. The collector is also finished
@@ -256,17 +266,97 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
       def element                      = self.element
       private[flagged] def collector() = new Collector.WrapperCollector(self.collector(), f)
 
-  /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with `Nil`
-    * when no `--` is given — return `Err` to require one).
+  /** A value spanning a fixed number of consecutive tokens, one per element: `point: (Int, Int)`
+    * parses `--point 3 4`. The arity is the product's size, statically known; each token is parsed
+    * by the element's [[Value]] parser and the elements are combined into the product. Instances
+    * exist for any tuple of `Value`-parseable types, and a case class opts in with
+    * `derives Parser.Product`. Deliberately not a [[Value]]: it cannot appear where single tokens
+    * are consumed (repeated elements, `Map` keys/values), which keeps those grammars unambiguous.
+    * Repetition is last-wins, like single-value options; the `--opt=v` and attached short forms are
+    * rejected (each element is its own token).
+    */
+  sealed trait Product[A] extends Parser[A]:
+    self =>
+    private[flagged] def elements: IArray[Value[?]]
+    private[flagged] def metavars: IArray[String]
+
+    /** Engine protocol: combine the parsed elements into `out(i)`; the shared [[Result.done]] on
+      * success — like every shape, a successful build allocates nothing beyond the value itself.
+      * Failure enters only through `emap`, as with the other shapes' combinators.
+      */
+    private[flagged] def buildInto(
+        elems: Array[Any],
+        out: Array[Any],
+        i: Int
+    ): Result[Unit, String]
+
+    final def arity: Int       = elements.length
+    final def typeName: String = metavars.mkString(" ")
+
+    /** The pre-bracketed help metavar: `<x> <y>`. */
+    private[flagged] final def helpMetavar: String = metavars.map(m => s"<$m>").mkString(" ")
+
+    /** A product spans several tokens; a single-token read is an error. */
+    private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
+      Result.task:
+        eval.raise(s"'$s': expected $arity values")
+
+    def emap[B](f: A => Result[B, String]): Product[B] = new Product[B]:
+      private[flagged] def elements                                              = self.elements
+      private[flagged] def metavars                                              = self.metavars
+      private[flagged] def buildInto(elems: Array[Any], out: Array[Any], i: Int) =
+        Result.task:
+          self.buildInto(elems, out, i).check
+          out(i) = f(out(i).asInstanceOf[A]).ok
+
+  object Product:
+    /** Derivation: `case class Point(x: Int, y: Int) derives Parser.Product` — the fields parse
+      * from consecutive tokens and their (kebab-cased) names become the help metavars.
+      */
+    inline def derived[A](using m: Mirror.ProductOf[A]): Product[A] =
+      internal.Derive.productValue[A]
+
+  /** Called by derivation (`@publicInBinary`: referenced from inline expansions at user call sites,
+    * but not part of the source API).
+    */
+  @publicInBinary private[flagged] def productOf[A](
+      elems: IArray[Value[?]],
+      metas: IArray[String],
+      build: Array[Any] => A // total: derivation-built products cannot fail, only `emap` can
+  ): Product[A] = new Product[A]:
+    private[flagged] def elements                                              = elems
+    private[flagged] def metavars                                              = metas
+    private[flagged] def buildInto(elems: Array[Any], out: Array[Any], i: Int) =
+      Result.task:
+        out(i) = build(elems)
+
+  /** The raw arguments after `--`, taken verbatim; `build` combines them (also invoked with an
+    * empty sequence when no `--` is given — return `Err` to require one).
     */
   sealed trait Trailing[A] extends Parser[A]:
-    def build(l: List[String]): Result[A, String]
-    final def typeName: String                          = "args"
-    def emap[B](f: A => Result[B, String]): Trailing[B] = trailing(l => build(l).flatMap(f))
+    self =>
+    final def typeName: String = "args"
+
+    def emap[B](f: A => Result[B, String]): Trailing[B] = new Trailing[B]:
+      private[flagged] def buildInto(l: IndexedSeq[String], out: Array[Any], i: Int) =
+        Result.task:
+          self.buildInto(l, out, i).check
+          out(i) = f(out(i).asInstanceOf[A]).ok
+
+    /** Engine protocol: combine the raw arguments into `out(i)` (also invoked with an empty
+      * sequence when no `--` is given — fail to require one); the shared [[Result.done]] on
+      * success. The built-in instance writes the slot directly — an `Ok` appears only behind
+      * [[Parser.trailing]]-supplied functions.
+      */
+    private[flagged] def buildInto(
+        l: IndexedSeq[String],
+        out: Array[Any],
+        i: Int
+    ): Result[Unit, String]
 
     /** One token builds as a single trailing argument. */
     private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-      intoSlot(build(List(s)), out, i)
+      buildInto(Vector(s), out, i)
 
   /** A single command's grammar: named options, positionals, trailing, splices. As a field of
     * another command, its options are spliced in.
@@ -296,6 +386,21 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
   object CommandGroup:
     /** Derivation for subcommands: `enum Cmd derives Parser.CommandGroup`. */
     inline def derived[A](using m: Mirror.SumOf[A]): CommandGroup[A] = internal.Derive.sum[A]
+
+  /** A spliceable options group: as a field of another command, its options parse as if declared
+    * inline and the group is rebuilt as a value. Derivation enforces the invariants that make
+    * splicing always safe — no positional, trailing, subcommand, or `@greedy` fields — so a command
+    * embedding a `Shared` group needs no knowledge of its contents. A `Shared` is still a
+    * [[Command]]: it parses standalone, renders help, and `emap`/`withProg` keep the shape (and its
+    * invariants — they never change the option specs).
+    */
+  sealed trait Shared[A] extends Command[A]:
+    override def emap[B](f: A => Result[B, String]): Shared[B] = makeShared(emapImpl(f), prog)
+    override def withProg(name: String): Shared[A]             = makeShared(impl, name)
+  object Shared:
+    /** Derivation for a spliceable options group: `case class LogOpts(...) derives Parser.Shared`.
+      */
+    inline def derived[A](using m: Mirror.ProductOf[A]): Shared[A] = internal.Derive.shared[A]
 
   // ---- constructors ----------------------------------------------------------
 
@@ -329,13 +434,14 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     * on the command line.
     */
   def flag[A](count: Int => Result[A, String]): Flag[A] = new Flag[A]:
-    def fromCount(n: Int) = count(n)
+    private[flagged] def countInto(n: Int, out: Array[Any], i: Int) = intoSlot(count(n), out, i)
 
   /** A flag that additionally accepts the explicit `--flag=value` form. */
   def flag[A](count: Int => Result[A, String], value: String => Result[A, String]): ValuedFlag[A] =
     new ValuedFlag[A]:
-      def fromCount(n: Int)    = count(n)
-      def fromValue(s: String) = value(s)
+      private[flagged] def countInto(n: Int, out: Array[Any], i: Int) = intoSlot(count(n), out, i)
+      override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
+        intoSlot(value(s), out, i)
 
   /** Opt `A` into repeated shape: each occurrence is parsed with the element's (single-value)
     * parser, and the collected elements are combined with `combine` (also invoked empty when the
@@ -355,21 +461,22 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
           intoSlot(combine(b.result().asInstanceOf[IndexedSeq[E]]), out, i)
 
   /** Opt `A` into trailing shape: it is built from the raw arguments after `--`. */
-  def trailing[A](combine: List[String] => Result[A, String]): Trailing[A] = new Trailing[A]:
-    def build(l: List[String]) = combine(l)
+  def trailing[A](combine: IndexedSeq[String] => Result[A, String]): Trailing[A] = new Trailing[A]:
+    private[flagged] def buildInto(l: IndexedSeq[String], out: Array[Any], i: Int) =
+      intoSlot(combine(l), out, i)
 
   /** Derive a command from the single `@run` method of object `o`: its parameters become the
     * options and positionals (same annotations and rules as case-class fields), and a successful
     * parse invokes it.
     */
-  inline def method[T](o: T)(using r: internal.MethodResults[T]): Command[r.Out] =
+  inline def method[T](o: T)(using r: runner.MethodEntry[T]): Command[r.Out] =
     val (cmd, prog) = internal.DeriveMethods.single[T, r.type](o, r)
     make[r.Out](cmd, prog)
 
   /** Derive subcommands from the `@run` methods and nested `@run` objects of `o`; parsing selects
     * and invokes one, producing its result.
     */
-  inline def methods[T](o: T)(using r: internal.MethodResults[T]): CommandGroup[r.Out] =
+  inline def methods[T](o: T)(using r: runner.MethodEntry[T]): CommandGroup[r.Out] =
     makeGroup[r.Out](
       internal.DeriveMethods.group[T, r.type](o, r),
       internal.Assemble.progName(
@@ -378,18 +485,46 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
       )
     )
 
-  /** Called by derivation. Not intended for direct use. */
-  def make[A](cmd: flagged.internal.Command, name: String): Command[A] = new Command[A]:
+  /** Called by derivation (`@publicInBinary`: referenced from inline expansions at user call sites,
+    * but not part of the source API — command parsers exist only through checked derivation and
+    * shape-preserving transforms).
+    */
+  @publicInBinary private[flagged] def make[A](
+      cmd: flagged.internal.Command,
+      name: String
+  ): Command[A] = new Command[A]:
     private[flagged] def impl = cmd
     def prog                  = name
 
-  /** Called by derivation for sums. Not intended for direct use. */
-  def makeGroup[A](cmd: flagged.internal.Command, name: String): CommandGroup[A] =
+  /** Called by derivation for sums (`@publicInBinary`: see [[make]]). */
+  @publicInBinary private[flagged] def makeGroup[A](
+      cmd: flagged.internal.Command,
+      name: String
+  ): CommandGroup[A] =
     new CommandGroup[A]:
       private[flagged] def impl = cmd
       def prog                  = name
 
+  /** Called by derivation for shared groups (`@publicInBinary`: see [[make]]). Privacy is what
+    * makes [[Shared]]'s splice invariants airtight: every instance descends from checked
+    * derivation.
+    */
+  @publicInBinary private[flagged] def makeShared[A](
+      cmd: flagged.internal.Command,
+      name: String
+  ): Shared[A] =
+    new Shared[A]:
+      private[flagged] def impl = cmd
+      def prog                  = name
+
   // ---- instances --------------------------------------------------------------
+
+  /** Any tuple whose element types all have `Value` parsers spans that many consecutive tokens:
+    * `point: (Int, Int)` parses `--point 3 4`. The `H *: T` shape (rather than a
+    * `T <: NonEmptyTuple` bound) lets implicit search disqualify the candidate for non-tuple types
+    * on the type constructor alone — the bound check measurably taxes every field summon.
+    */
+  inline given [H, T <: Tuple] => Product[H *: T] = internal.Derive.tupleProduct[H *: T]
 
   given [A] => (elem: Value[A]) => Repeated[List[A]]:
     type Elem = A
@@ -475,9 +610,7 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
   // repetition policy belongs to the flag's count parser: repeating a Boolean flag replaces the
   // previous value (the last mention wins, like value options); counting is opt-in via Count
   given ValuedFlag[Boolean]:
-    def fromCount(n: Int)    = Ok(n > 0)
-    def fromValue(s: String) = internal.Runtime.parseBool(s)
-    override private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
+    private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
       Result.task:
         out(i) = n > 0
     override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =

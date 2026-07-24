@@ -70,6 +70,21 @@ cannot pose as a fast one.
 Definitions per library live in `src/defs/`; scenarios use the closest idiomatic encoding for
 each (e.g. `Flag` for mainargs booleans, `@ExtraName` for case-app short names).
 
+**`ConstructBench`** — runtime construction cost of the parser value itself, which
+`RuntimeBench` amortizes into setup: a CLI process builds its parser once and parses once, so
+the honest per-run cost is construction + parse. Measured for the three derivation libraries
+on the `simple` and `realistic` grammars — flagged's inline derivation body (field walk +
+`Assemble`), mainargs' `ParserForClass`/`ParserForMethods`, case-app's `Parser[T]`. Shared
+value-level givens (element readers) are singletons for every library and are not rebuilt.
+
+**`OneshotBench`** — the whole per-process cost in one measurement: construct the parser and
+parse one command line per invocation, on the `simple` and `realistic` grammars (all six
+libraries meet in `realistic`). Each library constructs what its idiom needs for the
+invocation: flagged and mainargs build the whole command group, case-app's first-token
+dispatch constructs only the invoked command's parser, scopt rebuilds its `OParser` chain,
+scallop's `ScallopConf` is construct-and-parse by design, and picocli rebuilds its reflective
+model. `ConstructBench` and `RuntimeBench` are the two halves measured separately.
+
 **`MethodBench`** — the method-based counterpart to `RuntimeBench`: parse-and-invoke latency for
 command methods, flagged's `@run` derivation against mainargs' `ParserForMethods` (the two
 libraries with a method parser). Both sides select a method, parse its parameters, and invoke
@@ -79,6 +94,20 @@ it; setup asserts both succeed and agree on the invoked result.
 |---|---|
 | `method` | `--foo hello --bar 42 --baz` against a lone command method (the `simple` grammar) |
 | `commands` | `add core --url https://x.git` against a three-command interface, dispatching on the first token |
+
+## Probes
+
+Non-JMH instruments, each a `runMain` with a warm in-process `dotty` driver:
+
+- `bench.ScalingProbe` — derivation compile time by field count (the scaling table).
+- `bench.AblationProbe` — derivation cost by component at a fixed field count (interpret with
+  care: variants exercise different compiler subsystems with different JIT warmth).
+- `bench.RuleCostProbe` — the cost model of type-level validation encodings: verdicts cache per
+  compilation unit, one reduction's cost is set by what sits in match-type scrutinee position
+  (data ≈ free, ops-on-literals cheap, unreduced computations expensive and re-reduced without
+  memoization when nested). These measurements shaped `Derive`'s single-pass rules encoding.
+- `bench.KebabProbe` — feasibility and cost of a type-level kebab-case transform over
+  `scala.compiletime.ops` (works; ~0.4 ms per identifier; ops fold only plain constant types).
 
 ## Caveats
 

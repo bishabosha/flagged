@@ -179,3 +179,31 @@ class SubcommandSuite extends munit.FunSuite:
     val e = intercept[IllegalArgumentException](Parser.Command.derived[Dup])
     assert(e.getMessage.contains("duplicate option name '--max-retries'"), e.getMessage)
   }
+
+  test("duplicate constant command names are compile errors") {
+    val e = compileErrors(
+      "enum E derives Parser.CommandGroup:\n  @name(\"x\") case A\n  @name(\"x\") case B(f: Int)"
+    )
+    assert(e.contains("duplicate command name"), e)
+    // an alias colliding with another case's primary name is also constant
+    val e2 = compileErrors(
+      "enum E derives Parser.CommandGroup:\n  @name(\"a\") @name(\"b\") case A\n  @name(\"b\") case B(f: Int)"
+    )
+    assert(e2.contains("duplicate command name"), e2)
+  }
+
+  test("a kebab-derived command-name collision is a construction error") {
+    // FooBar's derived name only becomes "foo-bar" after kebab-casing: value-level
+    enum Clash:
+      case FooBar
+      @name("foo-bar") case Other(f: Int)
+    val e = intercept[IllegalArgumentException](Parser.CommandGroup.derived[Clash])
+    assert(e.getMessage.contains("duplicate command name 'foo-bar'"), e.getMessage)
+  }
+
+  test("more than one @default command is a compile error") {
+    val e = compileErrors(
+      "enum E derives Parser.CommandGroup:\n  @default case A\n  @default case B(f: Int)"
+    )
+    assert(e.contains("only one @default command is supported"), e)
+  }

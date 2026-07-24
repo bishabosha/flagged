@@ -5,9 +5,9 @@ import org.openjdk.jmh.annotations.*
 import bench.defs.{FlaggedDefs, MainargsDefs, CaseappDefs, RealisticDefs, RealisticJvmDefs}
 
 /** Parse latency for identical command lines across the three libraries, against parsers built once
-  * in setup (derivation cost is the compile-time benchmark's subject, construction cost is excluded
-  * for all three alike). Add `-prof gc` to also measure allocation per parse
-  * (`gc.alloc.rate.norm`).
+  * in setup (derivation cost is the compile-time benchmark's subject; the runtime cost of
+  * *constructing* the parser value is excluded for all three alike and measured separately by
+  * [[ConstructBench]]). Add `-prof gc` to also measure allocation per parse (`gc.alloc.rate.norm`).
   *
   * Scenario groups:
   *   - `empty` / `simple` / `repeated` — expressible in all three libraries

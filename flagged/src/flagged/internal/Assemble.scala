@@ -2,64 +2,32 @@ package flagged.internal
 
 import flagged.Parser
 import flagged.meta.Defaults
+import scala.annotation.publicInBinary
 import steps.result.Result
 import scala.collection.mutable
 
 /** One case of a derived sum: either a singleton value or a nested command. */
-enum SubEntry:
+private[flagged] enum SubEntry:
   case Leaf(value: Any)
-  case Node(parser: () => Parser[?])
+  case Node(parser: Parser[?])
 
-/** The resolved role of one product field: the complete shape × `@positional` × `Option[_]` matrix
-  * lives in [[Assemble.resolveField]], which produces exactly one of these. Aggregation into a
-  * `Command` then needs only cross-field rules.
-  */
-private enum Plan:
-  case Named(spec: OptSpec)
-  case Positional(spec: PosSpec, kind: PosKind)
-  case Commands(index: Int, optional: Boolean, default: Option[() => Any], inner: Command)
-  case Grouped(
-      index: Int,
-      label: String,
-      prefix: Option[String],
-      group: Option[String],
-      optional: Boolean,
-      default: Option[() => Any],
-      inner: Command
-  )
-  case Rest(spec: TrailingSpec)
-
-private enum PosKind:
-  case Required, Optional, Repeated
-
-/** Everything known about one field before shape resolution. */
-private final case class Field(
-    index: Int,
-    label: String,
-    long: String,
-    nameAnn: Option[String],
-    short: Option[Char],
-    help: String,
-    positional: Boolean,
-    hidden: Boolean,
-    group: Option[String],
-    aliases: List[String],
-    optional: Boolean,
-    default: Option[() => Any],
-    parser: Parser[?]
-)
-
-/** Builds the runtime `Command` model from what inline derivation collected — one
-  * `(Parser, optional)` pair per field, dispatched on the parser's schema.
+/** Builds the runtime `Command` model as inline derivation walks the fields: the walk feeds a
+  * [[Assemble.FieldsBuilder]] one `addField` call per field, which dispatches on the parser's
+  * schema and writes the finished spec directly — no intermediate per-field representation.
   *
   * Combination rules that are visible in types (annotations, `Option` wrapping, and the shapes of
-  * shape-refined instances) are rejected at compile time in `Derive`; the checks here are the
-  * runtime backstop for shape-erased instances, plus the inherently value-level rules (name
-  * uniqueness, positional ordering).
+  * shape-refined instances) are rejected at compile time in `Derive`, and the command factories are
+  * private, so every command descends from a checked derivation. What remains here is the
+  * inherently value-level residue: name uniqueness (kebab-derived names), positional ordering
+  * (optionality depends on defaults, a term-level fact), and splice storage layout.
   */
-object Assemble:
+@publicInBinary private[flagged] object Assemble:
 
   def kebab(s: String): String =
+    // fast path: a label that is already kebab (all lower, no digit runs) is its own name
+    var j = 0
+    while j < s.length && (s(j).isLower || s(j) == '-') do j += 1
+    if j == s.length then return s
     val b = new StringBuilder
     var i = 0
     while i < s.length do
@@ -83,22 +51,23 @@ object Assemble:
   /** By-name parser for an all-singleton enum, honoring `@name` on cases. */
   def enumValueParser(
       typeLabel: String,
-      caseLabels: List[String],
-      values: List[Any],
-      perCase: IndexedSeq[TargetAnnots]
+      caseLabels: IndexedSeq[String],
+      values: IndexedSeq[Any],
+      annots: Annots.Sum[?]
   ): Parser.Enumerated[Any] =
-    val names = caseLabels.zipWithIndex.map { (l, i) =>
-      perCase(i).name.getOrElse(kebab(l))
+    val pairs = Vector.tabulate(caseLabels.length) { i =>
+      (annots.caseAnnots(i).name.getOrElse(kebab(caseLabels(i))), values(i))
     }
-    val joined   = names.mkString("|")
+    val joined   = pairs.iterator.map(_(0)).mkString("|")
     val typeName = if joined.length <= 40 then joined else kebab(typeLabel)
-    Runtime.enumParser(typeName, names.zip(values).toVector)
+    Runtime.enumParser(typeName, pairs)
 
   /** The command view of a value-shaped parser: one positional argument. */
   def singleValueCommand(p: Parser[?]): Command =
     val mode = p match
       case _: Parser.Value[?]      => Mode.Single(p, false)
       case _: Parser.ValuedFlag[?] => Mode.Single(p, false)
+      case pr: Parser.Product[?]   => Mode.Product(pr, false)
       case _: Parser.Flag[?]       =>
         invalid("a flag parser without a value parser cannot be run standalone")
       case r: Parser.Repeated[?] =>
@@ -108,11 +77,11 @@ object Assemble:
           TrailingSpec(0, "", t, false, None)
         return Command(
           "",
-          Vector.empty,
-          Vector.empty,
+          IArray.empty,
+          IArray.empty,
           None,
           Some(spec),
-          Nil,
+          Vector.empty,
           arr => Result.Ok(arr(0)),
           1
         )
@@ -120,39 +89,45 @@ object Assemble:
         return c.impl
     Command(
       "",
+      IArray.empty,
+      IArray(PosSpec("value", "", p.typeName, 0, mode, None)),
+      None,
+      None,
       Vector.empty,
-      Vector(PosSpec("value", "", p.typeName, 0, mode, None)),
-      None,
-      None,
-      Nil,
       arr => Result.Ok(arr(0)),
       1
     )
 
   def sum(
-      caseLabels: List[String],
+      caseLabels: IndexedSeq[String],
       annots: Annots.Sum[?],
-      entries: List[SubEntry],
+      entries: IndexedSeq[SubEntry],
       version: Option[() => String]
   ): Command =
-    val cases = entries.zipWithIndex.map { (e, i) =>
-      val anns = annots.perCase(i)
+    val cases = Vector.tabulate(entries.length) { i =>
+      val anns = annots.caseAnnots(i)
       val help = anns.help.getOrElse("")
-      val cmd  = e match
+      val cmd  = entries(i) match
         case SubEntry.Leaf(v) => Command.leaf(v, help)
-        case SubEntry.Node(p) => p().command
+        case SubEntry.Node(p) => p.command
       SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden, anns.aliases)
-    }.toVector
-    val defaultIdxs = annots.perCase.zipWithIndex.collect { case (a, i) if a.default => i }
-    if defaultIdxs.sizeIs > 1 then invalid("only one @default command is supported")
-    val defaultCase = defaultIdxs.headOption.map(cases(_))
+    }
+    // kebab-derived command names can collide only at the value level (constant @name/alias
+    // duplicates are compile errors); a silent collision would shadow the later command
+    val caseNames = mutable.Set.empty[String]
+    for c <- cases do
+      if !caseNames.add(c.name) then invalid(s"duplicate command name '${c.name}'")
+      for n <- c.aliases do if !caseNames.add(n) then invalid(s"duplicate command name '$n'")
+    val defaultCase =
+      val i = annots.perCase.indexWhere(_.default)
+      if i < 0 then None else Some(cases(i))
     Command(
       annots.onType.help.getOrElse(""),
-      Vector.empty,
-      Vector.empty,
+      IArray.empty,
+      IArray.empty,
       Some(SubGroup(0, false, None, cases, defaultCase)),
       None,
-      Nil,
+      Vector.empty,
       arr => Result.Ok(arr(0)),
       1,
       version
@@ -160,189 +135,184 @@ object Assemble:
 
   // ---- product assembly -------------------------------------------------------
 
-  def product(
-      labels: List[String],
-      fields: List[(Parser[?], Boolean, FieldAnnots)],
-      defaults: Defaults[?],
-      onType: TargetAnnots,
-      build: Array[Any] => Result[Any, String],
-      version: Option[() => String]
-  ): Command =
-    val n     = labels.length
-    val plans = labels.lazyZip(fields).lazyZip(labels.indices).map { (label, triple, i) =>
-      val (parser, opt, anns) = triple
-      resolveField(
-        Field(
-          index = i,
-          label = label,
-          long = anns.name.getOrElse(kebab(label)),
-          nameAnn = anns.name,
-          short = anns.short,
-          help = anns.help.getOrElse(""),
-          positional = anns.positional,
-          hidden = anns.hidden,
-          group = anns.group,
-          aliases = anns.aliases,
-          optional = opt,
-          default =
-            if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None,
-          parser = parser
-        )
-      )
-    }
-    combine(n, plans, onType, build, version)
+  def fieldsBuilder(n: Int, defaults: Defaults[?]): FieldsBuilder = FieldsBuilder(n, defaults)
 
-  /** Translate one field into its [[Plan]]. Shape x annotation combinations are guaranteed by the
-    * compile-time layer in `Derive`; only value-level rules (reserved/duplicate names via
-    * kebab-cased labels, splice contents) are checked here.
+  /** The runtime half of product derivation, fused: the inline field walk calls [[addField]] once
+    * per field in declaration order, and each call resolves the field's role from its parser's
+    * shape and writes the finished spec straight into the command being assembled — no intermediate
+    * per-field records. Shape × annotation combinations are guaranteed by the compile-time layer in
+    * `Derive`; only value-level rules (reserved/duplicate names via kebab-cased labels, positional
+    * ordering) are checked here. [[result]] closes the command.
     */
-  private def resolveField(f: Field): Plan =
-    def bad(msg: String): Nothing = invalid(s"field '${f.label}': $msg")
-    def posKind                   =
-      if f.optional || f.default.nonEmpty then PosKind.Optional else PosKind.Required
-    def named(metavar: String, mode: Mode): Plan =
-      if f.long == "help" then bad("option name 'help' is reserved")
-      Plan.Named(
-        OptSpec(
-          f.long,
-          f.short,
-          f.help,
-          metavar,
-          f.index,
-          mode,
-          f.default,
-          f.hidden,
-          f.group,
-          f.aliases
-        )
-      )
-    def positional(metavar: String, mode: Mode, kind: PosKind): Plan =
-      Plan.Positional(PosSpec(f.long, f.help, metavar, f.index, mode, f.default), kind)
+  final class FieldsBuilder private[Assemble] (n: Int, defaults: Defaults[?]):
+    // the long lookup the finished Command parses with, built as fields arrive — duplicate
+    // detection is the map insert itself
+    private var lookup: java.util.HashMap[String, OptSpec]    = null
+    private var opts: mutable.ArrayBuffer[OptSpec]            = null
+    private var shorts: mutable.ArrayBuffer[OptSpec]          = null
+    private var poss: mutable.ArrayBuffer[PosSpec]            = null
+    private var spls: mutable.Builder[Splice, Vector[Splice]] = null
+    private var sub: SubGroup                                 = null
+    private var trailing: TrailingSpec                        = null
+    private var storage         = n // spliced children's specs live past the parent's own slots
+    private var index           = 0
+    private var optionalPosSeen = false
 
-    f.parser match
-      case cg: Parser.CommandGroup[?] =>
-        Plan.Commands(f.index, f.optional, f.default, cg.impl)
+    private def origin(from: String): String =
+      if from == null then "" else s" (from options group '$from')"
 
-      case c: Parser.Command[?] =>
-        val inner = c.impl
-        if inner.positionals.nonEmpty then
-          bad("a spliced options group cannot contain positional fields")
-        if inner.trailing.nonEmpty then
-          bad("a spliced options group cannot contain a trailing field")
-        Plan.Grouped(f.index, f.label, f.nameAnn, f.group, f.optional, f.default, inner)
+    /** Register `spec` under `key` (`--`-prefixed); the insert doubles as duplicate detection. */
+    private def putName(key: String, spec: OptSpec, from: String): Unit =
+      if lookup == null then lookup = new java.util.HashMap
+      if lookup.put(key, spec) != null then invalid(s"duplicate option name '$key'${origin(from)}")
 
-      case vf: Parser.ValuedFlag[?] =>
-        if f.positional then positional("value", Mode.Single(vf, f.optional), posKind)
-        else named("", Mode.Flag(vf, f.optional))
-
-      case fl: Parser.Flag[?] =>
-        named("", Mode.Flag(fl, false))
-
-      case v: Parser.Value[?] =>
-        val mode = Mode.Single(v, f.optional)
-        if f.positional then positional(v.typeName, mode, posKind) else named(v.typeName, mode)
-
-      case r: Parser.Repeated[?] =>
-        val mode = Mode.Repeated(r)
-        if f.positional then positional(r.typeName, mode, PosKind.Repeated)
-        else named(r.typeName, mode)
-
-      case t: Parser.Trailing[?] =>
-        Plan.Rest(TrailingSpec(f.index, f.help, t, f.optional, f.default))
-
-  /** Cross-field aggregation: name uniqueness, at-most-one subcommand/trailing field, positional
-    * ordering, splice storage layout.
-    */
-  private def combine(
-      n: Int,
-      plans: List[Plan],
-      onType: TargetAnnots,
-      build: Array[Any] => Result[Any, String],
-      version: Option[() => String]
-  ): Command =
-    val names = NameRegistry()
-
-    val opts     = Vector.newBuilder[OptSpec]
-    val poss     = Vector.newBuilder[PosSpec]
-    val posKinds = List.newBuilder[(String, PosKind)]
-    val splices  = List.newBuilder[Splice]
-    var sub      = Option.empty[SubGroup]
-    var trailing = Option.empty[TrailingSpec]
-    var storage  = n // spliced children's specs live past the parent's own slots
-
-    plans.foreach {
-      case Plan.Named(spec) =>
-        names.register(spec.long, spec.short, from = None)
-        spec.aliases.foreach(a => names.register(a, None, from = None))
-        opts += spec
-      case Plan.Positional(spec, kind) =>
-        posKinds += ((spec.name, kind))
-        poss += spec
-      case Plan.Commands(index, optional, default, inner) =>
-        if sub.nonEmpty then invalid("only one subcommand field is supported per command")
-        val g = inner.sub.get
-        sub = Some(SubGroup(index, optional, default, g.cases, g.defaultCase))
-      case Plan.Grouped(index, label, prefix, group, optional, default, inner) =>
-        inner.opts.foreach { o =>
-          // a prefixed splice renames its options (--net-host) and drops their short aliases,
-          // so the same group can be spliced more than once
-          val long    = prefix.fold(o.long)(pre => s"$pre-${o.long}")
-          val short   = if prefix.isEmpty then o.short else None
-          val aliases = o.aliases.map(a => prefix.fold(a)(pre => s"$pre-$a"))
-          names.register(long, short, from = Some(label))
-          aliases.foreach(a => names.register(a, None, from = Some(label)))
-          opts += o.copy(
-            long = long,
-            short = short,
-            index = storage + o.index,
-            group = o.group.orElse(group),
-            aliases = aliases
-          )
-        }
-        splices += Splice(index, storage, inner, optional, default)
-        storage += inner.arity
-      case Plan.Rest(spec) =>
-        if trailing.nonEmpty then invalid("only one trailing field is supported per command")
-        trailing = Some(spec)
-    }
-
-    val positionals = poss.result()
-    checkPositionalOrder(posKinds.result())
-    if sub.nonEmpty && positionals.nonEmpty then
-      invalid("mixing positional fields with a subcommand field is ambiguous and not supported")
-
-    val allSplices = splices.result()
-    // `build` expects exactly the parent's own field slots
-    val fullBuild: Array[Any] => Result[Any, String] =
-      if allSplices.isEmpty then build else arr => build(arr.take(n))
-    Command(
-      onType.help.getOrElse(""),
-      opts.result(),
-      positionals,
-      sub,
-      trailing,
-      allSplices,
-      fullBuild,
-      storage,
-      version
-    )
-
-  /** Long / short option names claimed so far; duplicates are construction errors. */
-  private final class NameRegistry:
-    private val longs  = mutable.Set.empty[String]
-    private val shorts = mutable.Set.empty[Char]
-
-    def register(long: String, short: Option[Char], from: Option[String]): Unit =
-      val origin = from.fold("")(l => s" (from options group '$l')")
-      if !longs.add(long) then invalid(s"duplicate option name '--$long'$origin")
-      short.foreach { c =>
-        if !shorts.add(c) then invalid(s"duplicate short option '-$c'$origin")
+    private def addOpt(spec: OptSpec, from: String): Unit =
+      if opts == null then opts = mutable.ArrayBuffer.empty
+      opts += spec
+      putName(spec.longDisplay, spec, from)
+      spec.aliases.foreach(a => putName("--" + a, spec, from))
+      spec.short.foreach { c =>
+        if shorts == null then shorts = mutable.ArrayBuffer.empty
+        else if shorts.exists(_.short.contains(c)) then
+          invalid(s"duplicate short option '-$c'${origin(from)}")
+        shorts += spec
       }
 
-  private def checkPositionalOrder(kinds: List[(String, PosKind)]): Unit =
-    kinds.zipWithIndex.foreach { case ((nm, kind), idx) =>
-      if kind == PosKind.Repeated && idx != kinds.length - 1 then
-        invalid(s"positional '$nm': a repeated positional must be the last positional field")
-      if kind == PosKind.Required && kinds.take(idx).exists(_(1) != PosKind.Required) then
-        invalid(s"positional '$nm': required positionals must come before optional ones")
-    }
+    def addField(label: String, parser: Parser[?], optional: Boolean, anns: FieldAnnots): Unit =
+      val i = index
+      index += 1
+      val default =
+        if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None
+      def bad(msg: String): Nothing                = invalid(s"field '$label': $msg")
+      def named(metavar: String, mode: Mode): Unit =
+        val long = anns.name.getOrElse(kebab(label))
+        if long == "help" then bad("option name 'help' is reserved")
+        addOpt(
+          OptSpec(
+            long,
+            anns.short,
+            anns.help.getOrElse(""),
+            metavar,
+            i,
+            mode,
+            default,
+            anns.hidden,
+            anns.group,
+            anns.aliases
+          ),
+          from = null
+        )
+      def positional(metavar: String, mode: Mode, required: Boolean): Unit =
+        // required-before-optional is inherently value-level: optionality depends on a field
+        // default, a term-level fact (repeated-must-be-last is compile-checked)
+        if required then
+          if optionalPosSeen then
+            invalid(
+              s"positional '${anns.name.getOrElse(kebab(label))}': required positionals must come before optional ones"
+            )
+        else optionalPosSeen = true
+        if poss == null then poss = mutable.ArrayBuffer.empty
+        poss += PosSpec(
+          anns.name.getOrElse(kebab(label)),
+          anns.help.getOrElse(""),
+          metavar,
+          i,
+          mode,
+          default
+        )
+      def requiredPos = !(optional || default.nonEmpty)
+
+      parser match
+        case cg: Parser.CommandGroup[?] =>
+          // at most one: derivation checks GroupBit x GroupBit at compile time
+          val g = cg.impl.sub.get
+          sub = SubGroup(i, optional, default, g.cases, g.defaultCase)
+
+        case sh: Parser.Shared[?] =>
+          // splice-content invariants need no check here: every Shared instance descends from
+          // checked derivation (the factory is private), which rejects positionals, trailing,
+          // subcommands, and @greedy at compile time
+          val inner  = sh.impl
+          val prefix = anns.name
+          inner.opts.foreach { o =>
+            // a prefixed splice renames its options (--net-host) and drops their short aliases,
+            // so the same group can be spliced more than once
+            val long    = prefix.fold(o.long)(pre => s"$pre-${o.long}")
+            val short   = if prefix.isEmpty then o.short else None
+            val aliases = o.aliases.map(a => prefix.fold(a)(pre => s"$pre-$a"))
+            addOpt(
+              o.copy(
+                long = long,
+                short = short,
+                index = storage + o.index,
+                group = o.group.orElse(anns.group),
+                aliases = aliases
+              ),
+              from = label
+            )
+          }
+          if spls == null then spls = Vector.newBuilder
+          spls += Splice(i, storage, inner, optional, default)
+          storage += inner.arity
+
+        case c: Parser.Command[?] =>
+          bad(
+            "a command-shaped Parser cannot be a field: derive Parser.Shared for a spliceable options group (a full command can be embedded as the sole field of a command-group case)"
+          )
+
+        case vf: Parser.ValuedFlag[?] =>
+          if anns.positional then positional("value", Mode.Single(vf, optional), requiredPos)
+          else named("", Mode.Flag(vf, optional))
+
+        case fl: Parser.Flag[?] =>
+          named("", Mode.Flag(fl, false))
+
+        case v: Parser.Value[?] =>
+          val mode = Mode.Single(v, optional)
+          if anns.positional then positional(v.typeName, mode, requiredPos)
+          else named(v.typeName, mode)
+
+        case pr: Parser.Product[?] =>
+          // the metavar arrives pre-bracketed (`<x> <y>`); help renders it verbatim
+          val mode = Mode.Product(pr, optional)
+          if anns.positional then positional(pr.helpMetavar, mode, requiredPos)
+          else named(pr.helpMetavar, mode)
+
+        case r: Parser.Repeated[?] =>
+          val mode = Mode.Repeated(r, anns.split.getOrElse(0), anns.greedy)
+          if anns.positional then positional(r.typeName, mode, required = false)
+          else named(r.typeName, mode)
+
+        case t: Parser.Trailing[?] =>
+          // at most one, and never next to positionals or subcommands: compile-checked
+          trailing = TrailingSpec(i, anns.help.getOrElse(""), t, optional, default)
+
+    def result(
+        onType: TargetAnnots,
+        build: (Array[Any], Int) => Result[Any, String],
+        version: Option[() => String]
+    ): Command =
+      val allSplices = if spls == null then Vector.empty[Splice] else spls.result()
+      // `build` receives the whole storage plus the parent's own field count — no trimming
+      Command(
+        onType.help.getOrElse(""),
+        if opts == null then IArray.empty else IArray.unsafeFromArray(opts.toArray),
+        if poss == null then IArray.empty else IArray.unsafeFromArray(poss.toArray),
+        if sub == null then None else Some(sub),
+        if trailing == null then None else Some(trailing),
+        allSplices,
+        arr => build(arr, n),
+        storage,
+        version,
+        if lookup == null then Command.noLookup else lookup,
+        if shorts == null then Command.noShortChars
+        else
+          val cs = new Array[Char](shorts.length)
+          var k  = 0
+          while k < cs.length do
+            cs(k) = shorts(k).short.get
+            k += 1
+          cs
+        ,
+        if shorts == null then Command.noShortSpecs else shorts.toArray
+      )

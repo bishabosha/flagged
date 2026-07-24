@@ -4,7 +4,7 @@ package flagged
 case class LogOpts(
     @short('q') @help("Operate quietly") quiet: Boolean = false,
     @help("Log level") logLevel: String = "info"
-) derives Parser.Command
+) derives Parser.Shared
 
 case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser.Command
 
@@ -40,7 +40,7 @@ class SpliceSuite extends munit.FunSuite:
   }
 
   test("required options of a spliced group are enforced") {
-    case class Auth(@help("API token") token: String) derives Parser.Command
+    case class Auth(@help("API token") token: String) derives Parser.Shared
     case class App(url: String = "http://localhost", auth: Auth) derives Parser.Command
     val m = err(Flagged.parse[App](Nil))
     assert(m.contains("--token"), m)
@@ -51,8 +51,8 @@ class SpliceSuite extends munit.FunSuite:
   }
 
   test("splices nest") {
-    case class Inner(a: Int = 1) derives Parser.Command
-    case class Mid(b: Int = 2, inner: Inner = Inner()) derives Parser.Command
+    case class Inner(a: Int = 1) derives Parser.Shared
+    case class Mid(b: Int = 2, inner: Inner = Inner()) derives Parser.Shared
     case class Outer(c: Int = 3, mid: Mid = Mid()) derives Parser.Command
     assertEquals(
       ok(Flagged.parse[Outer](Seq("--a", "10", "--b", "20", "--c", "30"))),
@@ -81,7 +81,7 @@ class SpliceSuite extends munit.FunSuite:
 
   test("a validated options group keeps its validation when spliced") {
     case class Window(min: Int = 0, max: Int = 100)
-    given Parser.Command[Window] = Parser.Command
+    given Parser.Shared[Window] = Parser.Shared
       .derived[Window]
       .emap(w => if w.min <= w.max then Ok(w) else Err("min must not exceed max"))
     case class App(label: String = "", window: Window = Window()) derives Parser.Command
@@ -107,7 +107,7 @@ class SpliceSuite extends munit.FunSuite:
   }
 
   test("a field default on a spliced group applies when none of its options occur") {
-    case class Auth(user: String, token: String = "-") derives Parser.Command
+    case class Auth(user: String, token: String = "-") derives Parser.Shared
     case class Push(repo: String = ".", auth: Auth = Auth("anon")) derives Parser.Command
     assertEquals(ok(Flagged.parse[Push](Nil)), Push(".", Auth("anon")))
     assertEquals(ok(Flagged.parse[Push](Seq("--user", "u"))), Push(".", Auth("u")))
@@ -117,7 +117,7 @@ class SpliceSuite extends munit.FunSuite:
   }
 
   test("an absent optional group skips its required options; a present one enforces them") {
-    case class Auth(user: String, token: String) derives Parser.Command
+    case class Auth(user: String, token: String) derives Parser.Shared
     case class Pull(repo: String = ".", auth: Option[Auth] = None) derives Parser.Command
     assertEquals(ok(Flagged.parse[Pull](Nil)), Pull(".", None))
     assertEquals(
@@ -130,7 +130,7 @@ class SpliceSuite extends munit.FunSuite:
   }
 
   test("@name on a spliced group prefixes its options, allowing repeat splices") {
-    case class Endpoint(host: String = "localhost", port: Int = 80) derives Parser.Command
+    case class Endpoint(host: String = "localhost", port: Int = 80) derives Parser.Shared
     case class Proxy(
         @name("from") src: Endpoint = Endpoint(),
         @name("to") dst: Endpoint = Endpoint()
@@ -144,29 +144,85 @@ class SpliceSuite extends munit.FunSuite:
   }
 
   test("a prefixed splice drops the group's short aliases") {
-    case class Verbosity(@short('v') level: Int = 0) derives Parser.Command
+    case class Verbosity(@short('v') level: Int = 0) derives Parser.Shared
     case class App2(@name("log") log: Verbosity = Verbosity()) derives Parser.Command
     assertEquals(ok(Flagged.parse[App2](Seq("--log-level", "3"))), App2(Verbosity(3)))
     val msg = err(Flagged.parse[App2](Seq("-v", "3")))
     assert(msg.contains("unknown option '-v'"), msg)
   }
 
-  test("a spliced group with a trailing field is rejected") {
-    // previously produced a silent null: the splice copies only the child's options,
-    // so the child's trailing slot could never be filled
-    case class WithTrailing(x: Int = 1, rest: Trailing = Trailing(Nil)) derives Parser.Command
-    case class Bad(g: WithTrailing = WithTrailing())
-    val e = intercept[IllegalArgumentException](Parser.Command.derived[Bad])
-    assert(e.getMessage.contains("cannot contain a trailing field"), e.getMessage)
+  test("a shared group cannot contain a trailing field (compile time)") {
+    val e = compileErrors(
+      "case class WithTrailing(x: Int = 1, rest: Trailing = Trailing()) derives Parser.Shared"
+    )
+    assert(e.contains("cannot contain a trailing field"), e)
   }
 
-  test("a spliced group with positionals is rejected") {
-    case class WithPos(@positional input: String = "-") derives Parser.Command
-    case class Bad(files: WithPos = WithPos())
-    val e = intercept[IllegalArgumentException](Parser.Command.derived[Bad])
-    assert(e.getMessage.contains("cannot contain positional fields"), e.getMessage)
+  test("a shared group cannot contain positionals (compile time)") {
+    val e =
+      compileErrors("case class WithPos(@positional input: String = \"-\") derives Parser.Shared")
+    assert(e.contains("cannot contain positional fields"), e)
+  }
+
+  test("a shared group cannot contain a @greedy option or a subcommand field (compile time)") {
+    val e1 = compileErrors("case class G(@greedy xs: List[Int] = Nil) derives Parser.Shared")
+    assert(e1.contains("cannot contain a @greedy option"), e1)
+    val e2 = compileErrors("case class G(action: SimpleCmd) derives Parser.Shared")
+    assert(e2.contains("cannot contain a subcommand field"), e2)
+  }
+
+  test("a full command cannot be a field (compile time)") {
+    val e = compileErrors("case class Bad(x: Int = 0, tool: EmbeddedTool) derives Parser.Command")
+    assert(e.contains("derive Parser.Shared"), e)
+  }
+
+  // ---- embedding a full command as a subcommand case -----------------------------
+
+  test("a sole-field command-group case embeds a full command by substitution") {
+    assertEquals(
+      ok(Flagged.parse[Workbench](Seq("ext", "-f", "thing", "--", "a", "-b"))),
+      Workbench.External(EmbeddedTool(force = true, target = "thing", Trailing(Vector("a", "-b"))))
+    )
+  }
+
+  test("an embedded command keeps its own grammar and help") {
+    Flagged.parse[Workbench](Seq("ext", "--help")) match
+      case Err(ParseError.Help(t)) =>
+        assert(t.contains("-f, --force"), t)
+        assert(t.contains("<target>"), t)
+      case other => fail(s"expected help, got $other")
+    Flagged.parse[Workbench](Seq("--help")) match
+      case Err(ParseError.Help(t)) =>
+        assert(t.contains("ext"), t)
+        assert(t.contains("An embedded external command"), t)
+      case other => fail(s"expected help, got $other")
+  }
+
+  test("an embedded command reports its own errors under the case's name") {
+    val m = err(Flagged.parse[Workbench](Seq("ext")))
+    assert(m.contains("target"), m)
+  }
+
+  test("annotations on the embedded field are rejected (compile time)") {
+    val e = compileErrors(
+      "enum T derives Parser.CommandGroup:\n  case A(@name(\"x\") tool: EmbeddedTool)\n  case B"
+    )
+    assert(e.contains("annotations have no effect on an embedded command field"), e)
   }
 
 enum Deploy derives Parser.CommandGroup:
   case Run(logging: LogOpts = LogOpts())
+  case Stop
+
+/** A full command "defined elsewhere", embedded wholesale as a subcommand case of [[Workbench]]. */
+case class EmbeddedTool(
+    @short('f') force: Boolean = false,
+    @positional target: String,
+    rest: Trailing = Trailing()
+) derives Parser.Command
+
+enum Workbench derives Parser.CommandGroup:
+  case Run(logging: LogOpts = LogOpts())
+  @name("ext") @help("An embedded external command")
+  case External(tool: EmbeddedTool)
   case Stop
