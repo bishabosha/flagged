@@ -3,8 +3,9 @@ package flagged.internal
 import scala.compiletime.*
 import scala.annotation.publicInBinary
 import flagged.Parser
-import flagged.meta.{Ann, MethodEntry, MethodMirror, MethodsMirror}
-import flagged.meta.MethodEntry.EntriesResults
+import flagged.meta.{Ann, MethodMirror, MethodsMirror}
+import flagged.runner.MethodEntry
+import flagged.runner.MethodEntry.EntriesResults
 import steps.result.Result
 
 /** Inline layer over [[MethodEntry]]: a method is a product whose construction is invocation, a

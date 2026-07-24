@@ -1,5 +1,6 @@
-package flagged.meta
+package flagged.runner
 
+import flagged.meta.{Ann, MethodMirror, MethodsMirror}
 import flagged.meta.MethodsMirror.Entry
 
 /** `T`'s `@run` command tower in one bundle: the object's [[MethodsMirror]], the union of the
@@ -12,8 +13,9 @@ import flagged.meta.MethodsMirror.Entry
   * extractors on [[MethodMirror]]); instances are typed by their singleton types so no refinement
   * is lost. Non-`@run` members contribute `Nothing` — the parser never invokes them.
   *
-  * Part of the public `meta` layer: it appears in the `using` clauses of the
-  * `Parser.method`/`Parser.methods`/`Flagged.Entry` entry points, so user code summons it.
+  * Public, in its own `runner` package rather than `meta`: the generic mirrors know nothing of
+  * flagged's annotations, while this bundle is defined by `@run`. It appears in the `using` clauses
+  * of the `Parser.method`/`Parser.methods`/`Flagged.Entry` entry points, so user code summons it.
   */
 sealed trait MethodEntry[T]:
   type Out

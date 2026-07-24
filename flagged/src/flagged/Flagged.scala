@@ -63,10 +63,10 @@ object Flagged:
       type Out = O
       def parser: Parser[O] = p()
 
-    /** `@run` methods: the result union comes from the recursively summoned [[meta.MethodEntry]]
+    /** `@run` methods: the result union comes from the recursively summoned [[runner.MethodEntry]]
       * tower; the mirror pins down the module instance, so `ValueOf` recovers it.
       */
-    inline given [T] => (v: ValueOf[T]) => (r: meta.MethodEntry[T])
+    inline given [T] => (v: ValueOf[T]) => (r: runner.MethodEntry[T])
       => (Entry[T] { type Out = r.Out }) =
       MethodsEntry[T, r.Out](() =>
         internal.DeriveMethods.parser[T, r.type, r.Out](
