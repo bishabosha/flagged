@@ -415,15 +415,22 @@ private[flagged] object Engine:
 
       // slots of skipped splices (optional or defaulted, none of their options occurring): the
       // group falls back to None or its field default, so its required options are not enforced
-      // (nested splices recurse)
-      def absentRanges(splices: IndexedSeq[Splice], base: Int): IndexedSeq[Range] =
-        splices.flatMap { s =>
+      // (nested splices recurse). Accumulated directly — the common no-skip parse allocates
+      // nothing and shares Set.empty
+      def markAbsent(splices: IndexedSeq[Splice], base: Int, acc0: mutable.BitSet): mutable.BitSet =
+        var acc = acc0
+        var i   = 0
+        while i < splices.length do
+          val s = splices(i)
           if s.skipped(counts, base) then
-            Vector((base + s.offset) until (base + s.offset + s.command.arity))
-          else absentRanges(s.command.splices, base + s.offset)
-        }
-      val skipIdx: Set[Int] =
-        if cmd.splices.isEmpty then Set.empty else absentRanges(cmd.splices, 0).flatten.toSet
+            if acc == null then acc = mutable.BitSet.empty
+            acc.addAll((base + s.offset) until (base + s.offset + s.command.arity))
+          else acc = markAbsent(s.command.splices, base + s.offset, acc)
+          i += 1
+        acc
+      val skipIdx: collection.Set[Int] =
+        val absent = if cmd.splices.isEmpty then null else markAbsent(cmd.splices, 0, null)
+        if absent == null then Set.empty else absent
 
       val optSpecs = cmd.optSpecs
       var oi       = 0
