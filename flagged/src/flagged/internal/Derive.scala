@@ -335,137 +335,134 @@ object Derive:
     * `(code, annotations, optionality)`, so fields with the same combination share one cached
     * reduction.
     */
-  /** `@split` / `@greedy` validity: both require a repeated shape, cannot combine, and `@greedy` is
-    * meaningless on a positional (a repeated positional is already greedy). One walk over the
-    * annotation slot: the detailed rules only reduce when one of the two annotations is present, so
-    * the common all-other-annotations field costs a single pass.
+  /** The field rules as one pass over the annotation slot. Every scrutinee is *data* — the slot
+    * tuple, a destructured element, or a literal parameter — never an unreduced computation: a
+    * match type reduces its scrutinee strictly and, when nested inside an outer reduction, without
+    * memoization, so computation belongs in the arms (measured in [[bench.RuleCostProbe]]; a
+    * presence-query scrutinee costs ~7-13 ms per file, an ops-based one far more). Pairwise rules
+    * thread seen-flags as literal parameters and fire on the second sighting in either order;
+    * `@name("help")` defers to the end because its rule only applies to non-positional fields, and
+    * `@positional` may appear later.
     */
-  type SplitGreedyErr[S <: Int, Anns] = SplitGreedyScan[S, Anns, Anns]
+  type FieldErr[S <: Int, Anns, Opt <: Boolean] <: String = Opt match
+    case true =>
+      S match
+        case FlagShape     => "a flag Parser without a value parser cannot be used inside Option"
+        case RepeatedShape =>
+          "Option of a repeated Parser is not supported: the plain type is empty when absent"
+        case _ => Rules[S, Anns, false, false, false, false, false, false, false]
+    case false => Rules[S, Anns, false, false, false, false, false, false, false]
 
-  /** `Rest` is the scan cursor; the detailed rules consult `All`, the full slot, since the other
-    * annotation may sit before the found one.
+  /** One rule pass; `P`/`Sh`/`H`/`G`/`Sp`/`Gr`/`NH` are the seen-flags for `@positional`, `@short`,
+    * `@hidden`, `@group`, `@split`, `@greedy`, and `@name("help")`.
     */
-  type SplitGreedyScan[S <: Int, Rest, All] <: String = Rest match
-    case EmptyTuple                    => ""
-    case Ann[flagged.split, ?, ?] *: _ =>
-      HasAnnT[flagged.greedy, All] match
+  type Rules[
+      S <: Int,
+      Anns,
+      P <: Boolean,
+      Sh <: Boolean,
+      H <: Boolean,
+      G <: Boolean,
+      Sp <: Boolean,
+      Gr <: Boolean,
+      NH <: Boolean
+  ] <: String = Anns match
+    case EmptyTuple =>
+      NH match
+        case true =>
+          P match
+            case true  => ""
+            case false => "option name 'help' is reserved"
+        case false => ""
+    case Ann[flagged.short, args, ?] *: t =>
+      args match
+        case 'h' *: EmptyTuple => "short option 'h' is reserved for help"
+        case _                 =>
+          P match
+            case true  => "@short cannot be combined with @positional"
+            case false =>
+              S match
+                case TrailingShape => "@short cannot be combined with a trailing field"
+                case GroupShape    => "@short has no effect on a subcommand field"
+                case SharedShape   => "@short has no effect on a spliced options group"
+                case _             => Rules[S, t, P, true, H, G, Sp, Gr, NH]
+    case Ann[flagged.name, args, ?] *: t =>
+      S match
+        case TrailingShape => "@name has no effect on a trailing field"
+        case GroupShape    =>
+          "@name has no effect on a subcommand field (command names come from the cases)"
+        case _ =>
+          args match
+            case "help" *: EmptyTuple => Rules[S, t, P, Sh, H, G, Sp, Gr, true]
+            case _                    => Rules[S, t, P, Sh, H, G, Sp, Gr, NH]
+    case Ann[flagged.help, ?, ?] *: t =>
+      S match
+        case GroupShape =>
+          "@help has no effect on a subcommand field (put it on the enum or its cases)"
+        case SharedShape => "@help has no effect on a spliced options group"
+        case _           => Rules[S, t, P, Sh, H, G, Sp, Gr, NH]
+    case Ann[flagged.positional, ?, ?] *: t =>
+      S match
+        case TrailingShape => "@positional cannot be combined with a trailing field"
+        case GroupShape    => "@positional cannot be combined with a subcommand field"
+        case SharedShape   => "@positional cannot be combined with a command-shaped Parser"
+        case FlagShape     => "a flag Parser without a value parser cannot be used positionally"
+        case _             =>
+          H match
+            case true  => "@hidden cannot be combined with @positional"
+            case false =>
+              G match
+                case true  => "@group cannot be combined with @positional"
+                case false =>
+                  Sh match
+                    case true  => "@short cannot be combined with @positional"
+                    case false =>
+                      Gr match
+                        case true =>
+                          "@greedy has no effect on a positional field (a repeated positional is already greedy)"
+                        case false => Rules[S, t, true, Sh, H, G, Sp, Gr, NH]
+    case Ann[flagged.hidden, ?, ?] *: t =>
+      S match
+        case TrailingShape => "@hidden has no effect on a trailing field"
+        case GroupShape    =>
+          "@hidden has no effect on a subcommand field (put it on the enum cases)"
+        case SharedShape =>
+          "@hidden has no effect on a spliced options group (put it on the group's fields)"
+        case _ =>
+          P match
+            case true  => "@hidden cannot be combined with @positional"
+            case false => Rules[S, t, P, Sh, true, G, Sp, Gr, NH]
+    case Ann[flagged.group, ?, ?] *: t =>
+      S match
+        case TrailingShape => "@group has no effect on a trailing field"
+        case GroupShape    => "@group has no effect on a subcommand field"
+        case _             =>
+          P match
+            case true  => "@group cannot be combined with @positional"
+            case false => Rules[S, t, P, Sh, H, true, Sp, Gr, NH]
+    case Ann[flagged.version, ?, ?] *: ? =>
+      "@version has no effect on a field (put it on the top-level type)"
+    case Ann[flagged.default, ?, ?] *: ? =>
+      "@default has no effect on a field (put it on a command-group enum case)"
+    case Ann[flagged.split, ?, ?] *: t =>
+      Gr match
         case true  => "@split cannot be combined with @greedy"
         case false =>
           S match
-            case RepeatedShape => ""
+            case RepeatedShape => Rules[S, t, P, Sh, H, G, true, Gr, NH]
             case _             => "@split requires a field with a repeated Parser (a collection)"
-    case Ann[flagged.greedy, ?, ?] *: _ =>
-      HasAnnT[flagged.split, All] match
+    case Ann[flagged.greedy, ?, ?] *: t =>
+      Sp match
         case true  => "@split cannot be combined with @greedy"
         case false =>
           S match
             case RepeatedShape =>
-              HasAnnT[flagged.positional, All] match
+              P match
                 case true =>
                   "@greedy has no effect on a positional field (a repeated positional is already greedy)"
-                case false => ""
+                case false => Rules[S, t, P, Sh, H, G, Sp, true, NH]
             case _ => "@greedy requires a field with a repeated Parser (a collection)"
-    case _ *: t => SplitGreedyScan[S, t, All]
-
-  type FieldErr[S <: Int, Anns, Opt <: Boolean] <: String =
-    SplitGreedyErr[S, Anns] match
-      case "" => FieldErr0[S, Anns, Opt]
-      case _  => SplitGreedyErr[S, Anns]
-
-  type FieldErr0[S <: Int, Anns, Opt <: Boolean] <: String =
-    HasAppliedT[Ann[flagged.short, 'h' *: EmptyTuple, ?], Anns] match
-      case true  => "short option 'h' is reserved for help"
-      case false =>
-        HasAnnT[flagged.version, Anns] match
-          case true  => "@version has no effect on a field (put it on the top-level type)"
-          case false =>
-            HasAnnT[flagged.default, Anns] match
-              case true => "@default has no effect on a field (put it on a command-group enum case)"
-              case false =>
-                HasAnnT[flagged.positional, Anns] match
-                  case true =>
-                    HasAnnT[flagged.hidden, Anns] match
-                      case true  => "@hidden cannot be combined with @positional"
-                      case false =>
-                        HasAnnT[flagged.group, Anns] match
-                          case true  => "@group cannot be combined with @positional"
-                          case false =>
-                            HasAnnT[flagged.short, Anns] match
-                              case true  => "@short cannot be combined with @positional"
-                              case false => ShapeErr[S, Anns, Opt]
-                  case false =>
-                    HasAppliedT[Ann[flagged.name, "help" *: EmptyTuple, ?], Anns] match
-                      case true  => "option name 'help' is reserved"
-                      case false => ShapeErr[S, Anns, Opt]
-
-  type ShapeErr[S <: Int, Anns, Opt <: Boolean] <: String = S match
-    case ValueShape      => ""
-    case ValuedFlagShape => ""
-    case ProductShape    => ""
-    case FlagShape       =>
-      Opt match
-        case true  => "a flag Parser without a value parser cannot be used inside Option"
-        case false =>
-          HasAnnT[flagged.positional, Anns] match
-            case true  => "a flag Parser without a value parser cannot be used positionally"
-            case false => ""
-    case RepeatedShape =>
-      Opt match
-        case true =>
-          "Option of a repeated Parser is not supported: the plain type is empty when absent"
-        case false => ""
-    case TrailingShape =>
-      HasAnnT[flagged.positional, Anns] match
-        case true  => "@positional cannot be combined with a trailing field"
-        case false =>
-          HasAnnT[flagged.short, Anns] match
-            case true  => "@short cannot be combined with a trailing field"
-            case false =>
-              HasAnnT[flagged.name, Anns] match
-                case true  => "@name has no effect on a trailing field"
-                case false =>
-                  HasAnnT[flagged.hidden, Anns] match
-                    case true  => "@hidden has no effect on a trailing field"
-                    case false =>
-                      HasAnnT[flagged.group, Anns] match
-                        case true  => "@group has no effect on a trailing field"
-                        case false => ""
-    case GroupShape =>
-      HasAnnT[flagged.positional, Anns] match
-        case true  => "@positional cannot be combined with a subcommand field"
-        case false =>
-          HasAnnT[flagged.short, Anns] match
-            case true  => "@short has no effect on a subcommand field"
-            case false =>
-              HasAnnT[flagged.name, Anns] match
-                case true =>
-                  "@name has no effect on a subcommand field (command names come from the cases)"
-                case false =>
-                  HasAnnT[flagged.help, Anns] match
-                    case true =>
-                      "@help has no effect on a subcommand field (put it on the enum or its cases)"
-                    case false =>
-                      HasAnnT[flagged.hidden, Anns] match
-                        case true =>
-                          "@hidden has no effect on a subcommand field (put it on the enum cases)"
-                        case false =>
-                          HasAnnT[flagged.group, Anns] match
-                            case true  => "@group has no effect on a subcommand field"
-                            case false => ""
-    case SharedShape =>
-      HasAnnT[flagged.positional, Anns] match
-        case true  => "@positional cannot be combined with a command-shaped Parser"
-        case false =>
-          HasAnnT[flagged.short, Anns] match
-            case true  => "@short has no effect on a spliced options group"
-            case false =>
-              HasAnnT[flagged.help, Anns] match
-                case true  => "@help has no effect on a spliced options group"
-                case false =>
-                  HasAnnT[flagged.hidden, Anns] match
-                    case true =>
-                      "@hidden has no effect on a spliced options group (put it on the group's fields)"
-                    case false => ""
+    case ? *: t => Rules[S, t, P, Sh, H, G, Sp, Gr, NH]
 
   /** The [[FieldsRes.Marks]] contribution of a field of shape `S` with annotations `Anns`. */
   type MarksOf[S <: Int, Anns] <: Int = S match
@@ -619,14 +616,6 @@ object Derive:
     case EmptyTuple        => false
     case Ann[A, ?, ?] *: _ => true
     case _ *: t            => HasAnnT[A, t]
-
-  /** Whether the slot contains a specific annotation *application*, e.g. `@short('h')` — decidable
-    * because `Ann` is invariant with constant arguments.
-    */
-  type HasAppliedT[Applied, Anns] <: Boolean = Anns match
-    case EmptyTuple   => false
-    case Applied *: _ => true
-    case _ *: t       => HasAppliedT[Applied, t]
 
   // ---- sums -----------------------------------------------------------------
 
