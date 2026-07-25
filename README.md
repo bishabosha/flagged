@@ -398,31 +398,31 @@ Full methodology and tables are in [`bench/`](bench/results.md); the comparison
 below is against mainargs 0.7.8 and case-app 2.1.0 on the same inputs (Apple M3 Max,
 Temurin JDK 25, Scala 3.8.3).
 
-**Compile time** is probably what people care most about for a derivation-heavy library. Derivation adds ~39–90 ms per file over a plain-data baseline across the
-benchmark scenarios, against ~166–243 ms for mainargs and ~435–520 ms for case-app.
-Cost grows linearly with field count, at ~1.1 ms per field, and stays below mainargs
+**Compile time** is probably what people care most about for a derivation-heavy library. Derivation adds ~43–94 ms per file over a plain-data baseline across the
+benchmark scenarios, against ~165–241 ms for mainargs and ~450–526 ms for case-app.
+Cost grows linearly with field count, at ~1.2 ms per field, and stays below mainargs
 at every measured size up to 128 fields.
 
 **The one-shot cost** — a CLI process constructs its parser once and parses once, and
-Flagged is measured on both halves: construction plus parse comes to 0.34 µs on a small
-command and 2.7 µs on a docker-style subcommand CLI, fastest of the six measured
-libraries end to end (4.6× ahead of mainargs, 19–95× ahead of case-app, scopt, scallop,
+Flagged is measured on both halves: construction plus parse comes to 0.35 µs on a small
+command and 2.3 µs on a docker-style subcommand CLI, fastest of the six measured
+libraries end to end (5.5× ahead of mainargs, 23–112× ahead of case-app, scopt, scallop,
 and picocli on the realistic scenario). Construction alone is the one place Flagged is
 not the quickest — it builds the complete parse-ready model up front, lookup tables
 included — which the parse numbers repay within the first parse.
 
-**Parse latency:** on non-trivial argument lists Flagged parses in 0.08–0.78 µs,
-1.6–85× faster than mainargs and case-app on the same scenarios, allocating 4.0–173×
+**Parse latency:** on non-trivial argument lists Flagged parses in 0.16–0.78 µs,
+1.7–82× faster than mainargs and case-app on the same scenarios, allocating 4.5–184×
 less — the widest gap on the `realistic` scenario, a docker-style subcommand CLI
-(13× vs mainargs, 85× vs case-app; scopt, scallop, and picocli, measured on the same
-scenario, come out 69–202× slower than Flagged); the hot path aims to allocate only what is necessary to build the target data (further improvements could be made to avoid boxing). The same holds on non-JVM platforms: Flagged
+(13× vs mainargs, 82× vs case-app; scopt, scallop, and picocli, measured on the same
+scenario, come out 70–204× slower than Flagged); the hot path aims to allocate only what is necessary to build the target data (further improvements could be made to avoid boxing). The same holds on non-JVM platforms: Flagged
 is the fastest of the three on every scenario on Scala.js, WebAssembly, and Scala
 Native.
 
 **Comparison to hand-written:**
-- A hand-written parser at feature-parity with Flagged is still 2.5–6.1× faster than the
+- A hand-written parser at feature-parity with Flagged is still 4.0–21× faster than the
 derived one
-- The typical quick hand-rolled parser (case class of defaults, pattern match for known tokens on a `List[String]`, copying per parsed option) is faster on small grammars but 2.6× slower at 25 options,
+- The typical quick hand-rolled parser (case class of defaults, pattern match for known tokens on a `List[String]`, copying per parsed option) is faster on small grammars but 2.1× slower at 25 options,
 since its cost grows with options × tokens where the engine's grows with tokens.
 - `@main` def (scala builtin parsing) is the fastest by far (but only handles positional arguments)
 
