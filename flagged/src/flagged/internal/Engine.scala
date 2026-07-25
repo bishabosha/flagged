@@ -26,10 +26,10 @@ import scala.collection.mutable
   * spec fields otherwise. Strings are built, and error buffers exist, only when something is
   * reported.
   *
-  * Errors do not stop parsing: routing and validation both record every problem they find (unknown
-  * options, missing values, invalid values, missing required arguments), and the parse fails at the
-  * end with all of them, including diagnostics from a selected subcommand. Only `--help`
-  * short-circuits.
+  * Errors do not stop parsing within one command level: routing and validation both record every
+  * problem they find (unknown options, missing values, invalid values, missing required arguments),
+  * and the parse fails at the end with all of them. A subcommand is not inspected after its parent
+  * has already failed. Only `--help` short-circuits.
   */
 private[flagged] object Engine:
 
@@ -62,7 +62,6 @@ private[flagged] object Engine:
       def hint = s"Try '$full --help' for more information."
 
       var errors: mutable.ArrayBuffer[String] = null
-      var failureHint                         = hint
       def report(msg: String): Unit           =
         if errors == null then errors = mutable.ArrayBuffer.empty[String]
         errors += msg
@@ -230,13 +229,11 @@ private[flagged] object Engine:
         null
 
       def runSub(sc: SubCase, fromIdx: Int): Unit =
-        deferred(sc.command, prog, path :+ sc.name, args, fromIdx) match
-          case Ok(build)                        => subBuild = build
-          case Err(h @ ParseError.Help(_))      => eval.raise(h)
-          case Err(ParseError.Failure(m, hint)) =>
-            report(m)
-            failureHint = hint
-            subErrored = true
+        if errors == null then
+          deferred(sc.command, prog, path :+ sc.name, args, fromIdx) match
+            case Ok(build) => subBuild = build
+            case Err(e)    => eval.raise(e)
+        else subErrored = true
         idx = args.length
 
       def handleFree(tok: String): Unit =
@@ -516,7 +513,7 @@ private[flagged] object Engine:
         case None => ()
         case _    => ()
 
-      if errors != null then eval.raise(ParseError.Failure(errors.mkString("\n"), failureHint))
+      if errors != null then eval.raise(ParseError.Failure(errors.mkString("\n"), hint))
 
       // ---- phase 3: deferred materialization -----------------------------------
 

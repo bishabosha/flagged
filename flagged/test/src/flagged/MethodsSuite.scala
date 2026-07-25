@@ -89,11 +89,11 @@ class MethodsSuite extends munit.FunSuite:
     assertEquals(guarded.invocations, 0)
   }
 
-  test("parse errors accumulate across a subcommand boundary") {
+  test("parent errors prevent a selected subcommand from being parsed") {
     guarded.invocations = 0
     val m = err(Flagged.parse[guarded.type](Seq("--bogus", "go", "--x", "bad")))
     assert(m.contains("unknown option '--bogus'"), m)
-    assert(m.contains("invalid value for '--x'"), m)
+    assert(!m.contains("invalid value for '--x'"), m)
     assertEquals(guarded.invocations, 0)
   }
 
