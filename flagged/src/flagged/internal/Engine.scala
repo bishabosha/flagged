@@ -115,8 +115,9 @@ private[flagged] object Engine:
     private val defaultSubCase: SubCase =
       if subGroup == null then null else subGroup.defaultCase.orNull
 
-    private val optSpecs = command.opts
-    private val posSpecs = command.positionals
+    private val shortChars = command.shortChars
+    private val shortSpecs = command.shortSpecs
+    private val posSpecs   = command.positionals
 
     private def appendPath(b: mutable.Builder[String, Vector[String]]): Unit =
       if parent != null then parent.appendPath(b)
@@ -164,26 +165,10 @@ private[flagged] object Engine:
       if lastDisp == null || lastDisp(spec.index) == null then null
       else values(spec.index).asInstanceOf[String]
 
-    private def matchesLong(key: String, name: String): Boolean =
-      key.length == name.length + 2 && key.startsWith(name, 2)
-
-    private def longSpec(key: String): OptSpec =
-      var i = 0
-      while i < optSpecs.length do
-        val spec = optSpecs(i)
-        if matchesLong(key, spec.long) then return spec
-        var ai = 0
-        while ai < spec.aliases.length do
-          if matchesLong(key, spec.aliases(ai)) then return spec
-          ai += 1
-        i += 1
-      null
-
     private def shortSpec(c: Char): OptSpec =
       var i = 0
-      while i < optSpecs.length do
-        val spec = optSpecs(i)
-        if spec.short == c.toInt then return spec
+      while i < shortChars.length do
+        if shortChars(i) == c then return shortSpecs(i)
         i += 1
       null
 
@@ -364,7 +349,7 @@ private[flagged] object Engine:
           val inlineValue = if eq == -1 then null else token.substring(eq + 1)
           if key == "--help" then
             return ParseError.Help(HelpFmt.render(command, prog, path, showHidden = false))
-          val spec = longSpec(key)
+          val spec = command.longLookup.get(key)
           if spec == null then
             if key == "--version" && command.version.nonEmpty then
               return ParseError.Help(command.version.get())

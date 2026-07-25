@@ -146,8 +146,7 @@ private[flagged] enum SubEntry:
 
   // ---- product assembly -------------------------------------------------------
 
-  def fieldsBuilder(n: Int, defaults: Defaults[?], versioned: Boolean = false): FieldsBuilder =
-    FieldsBuilder(n, defaults, versioned)
+  def fieldsBuilder(n: Int, defaults: Defaults[?]): FieldsBuilder = FieldsBuilder(n, defaults)
 
   /** The runtime half of product derivation, fused: the inline field walk calls [[addField]] once
     * per field in declaration order, and each call resolves the field's role from its parser's
@@ -156,12 +155,12 @@ private[flagged] enum SubEntry:
     * `Derive`; only value-level rules (reserved/duplicate names via kebab-cased labels, positional
     * ordering) are checked here. [[result]] closes the command.
     */
-  final class FieldsBuilder private[Assemble] (
-      n: Int,
-      defaults: Defaults[?],
-      versioned: Boolean
-  ):
+  final class FieldsBuilder private[Assemble] (n: Int, defaults: Defaults[?]):
+    // the long lookup the finished Command parses with, built as fields arrive — duplicate
+    // detection is the map insert itself
+    private var lookup: java.util.HashMap[String, OptSpec]    = null
     private var opts: mutable.ArrayBuffer[OptSpec]            = null
+    private var shorts: mutable.ArrayBuffer[OptSpec]          = null
     private var poss: mutable.ArrayBuffer[PosSpec]            = null
     private var spls: mutable.Builder[Splice, Vector[Splice]] = null
     private var sub: SubGroup                                 = null
@@ -173,40 +172,29 @@ private[flagged] enum SubEntry:
     private def origin(from: String): String =
       if from == null then "" else s" (from options group '$from')"
 
-    private def checkName(spec: OptSpec, name: String, aliasesBefore: Int, from: String): Unit =
-      if versioned && name == "version" then
-        invalid(s"duplicate option name '--$name'${origin(from)}")
-      var oi = 0
-      while oi < opts.length do
-        val old = opts(oi)
-        if old.long == name || old.aliases.contains(name) then
-          invalid(s"duplicate option name '--$name'${origin(from)}")
-        oi += 1
-      if aliasesBefore >= 0 then
-        if spec.long == name then invalid(s"duplicate option name '--$name'${origin(from)}")
-        var ai = 0
-        while ai < aliasesBefore do
-          if spec.aliases(ai) == name then
-            invalid(s"duplicate option name '--$name'${origin(from)}")
-          ai += 1
+    /** Register `spec` under `key` (`--`-prefixed); the insert doubles as duplicate detection. */
+    private def putName(key: String, spec: OptSpec, from: String): Unit =
+      if lookup == null then lookup = new java.util.HashMap
+      if lookup.put(key, spec) != null then invalid(s"duplicate option name '$key'${origin(from)}")
 
     private def addOpt(spec: OptSpec, from: String): Unit =
       if opts == null then opts = mutable.ArrayBuffer.empty
-      // The metadata array is also the engine's lookup structure. Validate against the entries
-      // already collected instead of allocating a second registry solely for parsing.
-      checkName(spec, spec.long, -1, from)
+      opts += spec
+      putName(spec.longDisplay, spec, from)
       var ai = 0
       while ai < spec.aliases.length do
-        checkName(spec, spec.aliases(ai), ai, from)
+        putName("--" + spec.aliases(ai), spec, from)
         ai += 1
       if spec.short >= 0 then
         val c = spec.short.toChar
-        var oi = 0
-        while oi < opts.length do
-          if opts(oi).short == spec.short then
-            invalid(s"duplicate short option '-$c'${origin(from)}")
-          oi += 1
-      opts += spec
+        if shorts == null then shorts = mutable.ArrayBuffer.empty
+        else
+          var si = 0
+          while si < shorts.length do
+            if shorts(si).short == spec.short then
+              invalid(s"duplicate short option '-$c'${origin(from)}")
+            si += 1
+        shorts += spec
 
     def addField(label: String, parser: Parser[?], optional: Boolean, anns: FieldAnnots): Unit =
       val i = index
@@ -341,6 +329,9 @@ private[flagged] enum SubEntry:
         build: (Array[Any], Int, Array[Any], Int) => Result[Unit, String],
         version: Option[() => String]
     ): Command =
+      // `@version` contributes an implicit hidden option. A null spec keeps its parsing built-in,
+      // while registering its name through the same insertion that diagnoses field collisions.
+      if version.nonEmpty then putName("--version", null, null)
       val allOpts    = if opts == null then Array.empty[OptSpec] else opts.toArray
       val allPos     = if poss == null then Array.empty[PosSpec] else poss.toArray
       val allSplices = if spls == null then Vector.empty[Splice] else spls.result()
@@ -355,5 +346,16 @@ private[flagged] enum SubEntry:
         allSplices,
         build,
         storage,
-        version
+        version,
+        if lookup == null then Command.noLookup else lookup,
+        if shorts == null then Command.noShortChars
+        else
+          val cs = new Array[Char](shorts.length)
+          var k  = 0
+          while k < cs.length do
+            cs(k) = shorts(k).short.toChar
+            k += 1
+          cs
+        ,
+        if shorts == null then Command.noShortSpecs else shorts.toArray
       )

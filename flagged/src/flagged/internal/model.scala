@@ -156,7 +156,14 @@ private[flagged] final case class Command(
     // allocating value-bearing Results or slicing their input arrays.
     build: (Array[Any], Int, Array[Any], Int) => Result[Unit, String],
     arity: Int, // value-storage size: own fields plus spliced children's storage
-    version: Option[() => String] = None // from Versioned[A]; called by --version and help
+    version: Option[() => String] = None, // from Versioned[A]; called by --version and help
+    // per-token lookups, built during assembly (duplicate-name detection rides on the map
+    // inserts): java.util maps return null instead of allocating an Option, and the long keys
+    // carry their `--` prefix so a plain long token needs no substring at all (the key doubles
+    // as the option's display spelling)
+    longLookup: java.util.HashMap[String, OptSpec] = Command.noLookup,
+    shortChars: Array[Char] = Command.noShortChars,
+    shortSpecs: Array[OptSpec] = Command.noShortSpecs
 ):
 
   /** Build spliced children from their storage ranges, then build this command's value; the first
@@ -206,6 +213,11 @@ private[flagged] final case class Command(
       build(values, base, out, outIndex).check
 
 private[flagged] object Command:
+  // shared empties for option-less commands; the map is never mutated after construction
+  private[internal] val noLookup     = new java.util.HashMap[String, OptSpec]
+  private[internal] val noShortChars = Array.empty[Char]
+  private[internal] val noShortSpecs = Array.empty[OptSpec]
+
   /** A command with no parameters that always produces `value` (parameterless enum case / case
     * object).
     */
