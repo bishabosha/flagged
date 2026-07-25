@@ -292,6 +292,8 @@ private[flagged] enum SubEntry:
         build: (Array[Any], Int) => Result[Any, String],
         version: Option[() => String]
     ): Command =
+      if version.nonEmpty && lookup != null && lookup.containsKey("--version") then
+        invalid("option name 'version' is reserved when @version is present")
       val allSplices = if spls == null then Vector.empty[Splice] else spls.result()
       // `build` receives the whole storage plus the parent's own field count — no trimming
       Command(

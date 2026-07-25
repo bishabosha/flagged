@@ -361,6 +361,13 @@ class ParitySuite extends munit.FunSuite:
     assert(e.contains("requires a given Versioned"), e)
   }
 
+  test("@version rejects a user option that would shadow --version") {
+    @version case class OwnVersion(version: String = "field") derives Parser.Command
+    given Versioned[OwnVersion] = Versioned.of("1.0")
+    val e = intercept[IllegalArgumentException](Parser.Command.derived[OwnVersion])
+    assert(e.getMessage.contains("option name 'version' is reserved"), e.getMessage)
+  }
+
   test("Versioned is consulted when printed, not at derivation") {
     def versionOut(): String = Flagged.parse[ParityDynVersioned](Seq("--version")) match
       case Err(ParseError.Help(t)) => t

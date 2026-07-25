@@ -29,7 +29,8 @@ final case class hidden() extends StaticAnnotation derives Defaults
 
 /** Opt into a `--version` flag and a version line in the help header. Valid on the top-level type
   * of a command or command group; requires a given [[Versioned]] instance for the type, which
-  * supplies the version string when it is printed.
+  * supplies the version string when it is printed. The command may not also declare an option or
+  * alias named `version`.
   */
 final case class version() extends StaticAnnotation derives Defaults
 
