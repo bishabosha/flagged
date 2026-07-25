@@ -48,6 +48,13 @@ private[flagged] enum Mode:
     */
   case Repeated(parser: flagged.Parser.Repeated[?], split: Char = 0, greedy: Boolean = false)
 
+/** The validation/materialisation view shared by named and positional fields. */
+private[flagged] sealed trait SlotSpec:
+  def index: Int
+  def mode: Mode
+  def default: Option[() => Any]
+  def display: String
+
 private[flagged] final case class OptSpec(
     long: String,
     short: Option[Char],
@@ -59,9 +66,10 @@ private[flagged] final case class OptSpec(
     hidden: Boolean = false,
     group: Option[String] = None,
     aliases: IndexedSeq[String] = Vector.empty
-):
+) extends SlotSpec:
   lazy val longDisplay: String  = "--" + long
   lazy val shortDisplay: String = short.fold(longDisplay)("-" + _)
+  def display: String           = longDisplay
 
 private[flagged] final case class PosSpec(
     name: String,
@@ -70,7 +78,7 @@ private[flagged] final case class PosSpec(
     index: Int,
     mode: Mode,
     default: Option[() => Any]
-):
+) extends SlotSpec:
   lazy val display: String = "<" + name + ">"
 
 private[flagged] final case class SubCase(
@@ -148,7 +156,12 @@ private[flagged] final case class Command(
     // as the option's display spelling)
     longLookup: java.util.HashMap[String, OptSpec] = Command.noLookup,
     shortChars: Array[Char] = Command.noShortChars,
-    shortSpecs: Array[OptSpec] = Command.noShortSpecs
+    shortSpecs: Array[OptSpec] = Command.noShortSpecs,
+    // Precompiled hot-path walks. Entries reuse the existing spec/splice objects: only the
+    // reference arrays are additional parser-construction state.
+    slots: IArray[SlotSpec] = IArray.empty,
+    defaultSlots: IArray[SlotSpec] = IArray.empty,
+    buildSteps: IArray[Splice] = IArray.empty
 ):
 
   /** Build spliced children from their storage slices, then build this command's value; the first
@@ -165,7 +178,7 @@ private[flagged] final case class Command(
   ): Result[Unit, String] =
     // fast path: keeps the hot no-splice case free of the splice loop's bytecode, which the JIT
     // otherwise weighs against inlining `finish` into the parse path
-    if splices.isEmpty then build(values, base, out, outIndex)
+    if buildSteps.isEmpty then build(values, base, out, outIndex)
     else finishSplicesInto(values, counts, base, out, outIndex)
 
   private def finishSplicesInto(
@@ -177,8 +190,8 @@ private[flagged] final case class Command(
   ): Result[Unit, String] =
     Result.task:
       var i = 0
-      while i < splices.length do
-        val s = splices(i)
+      while i < buildSteps.length do
+        val s = buildSteps(i)
         if s.skipped(counts, base) then
           values(base + s.slot) = s.default match
             case Some(d) => d()

@@ -465,18 +465,14 @@ private[flagged] object Engine:
         val absent = if cmd.splices.isEmpty then null else markAbsent(cmd.splices, 0, null)
         if absent == null then Set.empty else absent
 
-      val optSpecs = cmd.opts
-      var oi       = 0
-      while oi < optSpecs.length do
-        val o = optSpecs(oi)
-        if !skipIdx(o.index) then
-          if !finishSlot(o.index, o.longDisplay, o.mode, o.default) then addMissing(o.longDisplay)
-        oi += 1
-      var pi = 0
-      while pi < posSpecs.length do
-        val p = posSpecs(pi)
-        if !finishSlot(p.index, p.display, p.mode, p.default) then addMissing(p.display)
-        pi += 1
+      val slotSpecs = cmd.slots
+      var si        = 0
+      while si < slotSpecs.length do
+        val spec = slotSpecs(si)
+        if !skipIdx(spec.index) then
+          if !finishSlot(spec.index, spec.display, spec.mode, spec.default) then
+            addMissing(spec.display)
+        si += 1
       if missing != null then
         val what = if missing.sizeIs == 1 then "argument" else "arguments"
         report(s"missing required $what: ${missing.mkString(", ")}")
@@ -536,18 +532,13 @@ private[flagged] object Engine:
                 case None    => None // only an absent optional group can reach this branch
         case None => ()
 
-      var oj = 0
-      while oj < optSpecs.length do
-        val o = optSpecs(oj)
-        if counts(o.index) == 0 && !skipIdx(o.index) then
-          o.default.foreach(d => values(o.index) = d())
-        oj += 1
-
-      var pj = 0
-      while pj < posSpecs.length do
-        val p = posSpecs(pj)
-        if counts(p.index) == 0 then p.default.foreach(d => values(p.index) = d())
-        pj += 1
+      val defaultSlots = cmd.defaultSlots
+      var di           = 0
+      while di < defaultSlots.length do
+        val spec = defaultSlots(di)
+        if counts(spec.index) == 0 && !skipIdx(spec.index) then
+          values(spec.index) = spec.default.get()
+        di += 1
 
       cmd.trailing.foreach { t =>
         if !trailSeen then t.default.foreach(d => values(t.index) = d())

@@ -91,10 +91,11 @@ private[flagged] enum SubEntry:
         )
       case c: Parser.Command[?] =>
         return c.impl
+    val spec = PosSpec("value", "", p.typeName, 0, mode, None)
     Command(
       "",
       IArray.empty,
-      IArray(PosSpec("value", "", p.typeName, 0, mode, None)),
+      IArray(spec),
       None,
       None,
       Vector.empty,
@@ -102,7 +103,8 @@ private[flagged] enum SubEntry:
         Result.task:
           out(i) = arr(base)
       ,
-      1
+      1,
+      slots = IArray(spec)
     )
 
   def sum(
@@ -324,12 +326,54 @@ private[flagged] enum SubEntry:
       // `@version` contributes an implicit hidden option. A null spec keeps its parsing built-in,
       // while registering its name through the same insertion that diagnoses field collisions.
       if version.nonEmpty then putName("--version", null, null)
+      val allOpts    = if opts == null then Array.empty[OptSpec] else opts.toArray
+      val allPos     = if poss == null then Array.empty[PosSpec] else poss.toArray
       val allSplices = if spls == null then Vector.empty[Splice] else spls.result()
+
+      val slotArray = new Array[SlotSpec](allOpts.length + allPos.length)
+      var si        = 0
+      while si < allOpts.length do
+        slotArray(si) = allOpts(si)
+        si += 1
+      var pi = 0
+      while pi < allPos.length do
+        slotArray(si) = allPos(pi)
+        si += 1
+        pi += 1
+
+      var defaultsBuilder: mutable.ArrayBuilder[SlotSpec] = null
+      si = 0
+      while si < slotArray.length do
+        val spec = slotArray(si)
+        if spec.default.nonEmpty then
+          if defaultsBuilder == null then defaultsBuilder = mutable.ArrayBuilder.make[SlotSpec]
+          defaultsBuilder += spec
+        si += 1
+      val defaultArray =
+        if defaultsBuilder == null then Array.empty[SlotSpec] else defaultsBuilder.result()
+
+      var buildStepsBuilder: mutable.ArrayBuilder[Splice] = null
+      def addBuildStep(step: Splice): Unit                      =
+        if buildStepsBuilder == null then buildStepsBuilder = mutable.ArrayBuilder.make[Splice]
+        buildStepsBuilder += step
+      for outer <- allSplices do
+        val nested = outer.command.buildSteps
+        var bi     = 0
+        while bi < nested.length do
+          val step = nested(bi)
+          addBuildStep(
+            step.copy(slot = outer.offset + step.slot, offset = outer.offset + step.offset)
+          )
+          bi += 1
+        addBuildStep(outer)
+      val buildStepsArray =
+        if buildStepsBuilder == null then Array.empty[Splice] else buildStepsBuilder.result()
+
       // `build` receives the whole storage plus the parent's own field count — no trimming
       Command(
         onType.help.getOrElse(""),
-        if opts == null then IArray.empty else IArray.unsafeFromArray(opts.toArray),
-        if poss == null then IArray.empty else IArray.unsafeFromArray(poss.toArray),
+        IArray.unsafeFromArray(allOpts),
+        IArray.unsafeFromArray(allPos),
         if sub == null then None else Some(sub),
         if trailing == null then None else Some(trailing),
         allSplices,
@@ -346,5 +390,8 @@ private[flagged] enum SubEntry:
             k += 1
           cs
         ,
-        if shorts == null then Command.noShortSpecs else shorts.toArray
+        if shorts == null then Command.noShortSpecs else shorts.toArray,
+        IArray.unsafeFromArray(slotArray),
+        IArray.unsafeFromArray(defaultArray),
+        IArray.unsafeFromArray(buildStepsArray)
       )
