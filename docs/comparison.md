@@ -62,7 +62,7 @@ a library not named does not have it.
 | Duplicate name detection | compile time (constant names) + construction | case-app: opt-in runtime (`ensureNoDuplicates`); scallop, picocli: at model build/`verify()`; mainargs: none documented |
 | Hidden options / commands | `@hidden`, revealed by `--help-all` | mainargs, scallop, picocli `hidden = true`; case-app `@Hidden`, `--full-help`; scopt `.hidden()` |
 | Help sections | `@group` (also on spliced groups) | case-app `@Group`, sorted; scallop `group()`; picocli `@ArgGroup(heading = ...)` |
-| Name & version in help | `@version` + a `Versioned` instance, `--version` | case-app `@AppName`/`@AppVersion`; scopt `head(...)`/`version(...)`; scallop `version(...)`; picocli `@Command(version = ...)` |
+| Name & version in help | `@version("1.0")` literal, or bare `@version` via a `Versioned` instance; `--version` | case-app `@AppName`/`@AppVersion`; scopt `head(...)`/`version(...)`; scallop `version(...)`; picocli `@Command(version = ...)` |
 | Multiple names per option | repeatable `@name` + one short | case-app, picocli: any number; scopt: long + short + `abbr("ab")`; mainargs: one long + one short |
 | Command aliases / default command | repeatable `@name` / `@default` (with arg forwarding) | case-app: both; scallop: aliases; picocli: `aliases` / parent command runs |
 | Unrecognized-argument passthrough | no | mainargs: `Leftover` absorbs; case-app `stopAtFirstUnrecognized`/`ignoreUnrecognized`; scopt `errorOnUnknownArgument = false`; picocli `unmatchedArgumentsAllowed`/`stopAtUnmatched`/`stopAtPositional` |

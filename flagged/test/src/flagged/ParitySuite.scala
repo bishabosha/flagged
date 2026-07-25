@@ -366,6 +366,38 @@ class ParitySuite extends munit.FunSuite:
     assert(e.contains("requires a given Versioned"), e)
   }
 
+  test("@version with a literal needs no Versioned instance") {
+    @version("0.4.2") case class LitVersioned(x: Int = 0) derives Parser.Command
+    Flagged.parse[LitVersioned](Seq("--version")) match
+      case Err(ParseError.Help(t)) => assertEquals(t, "0.4.2")
+      case other                   => fail(s"expected version output, got $other")
+    val help = Flagged.help[LitVersioned]
+    assert(help.startsWith("lit-versioned 0.4.2"), help)
+  }
+
+  test("a non-empty @version literal takes precedence over dynamic") {
+    @version("9.9.9", dynamic = true) case class LitOver(x: Int = 0) derives Parser.Command
+    given Versioned[LitOver] = Versioned.of("3.0.0")
+    Flagged.parse[LitOver](Seq("--version")) match
+      case Err(ParseError.Help(t)) => assertEquals(t, "9.9.9")
+      case other                   => fail(s"expected version output, got $other")
+  }
+
+  test("an empty @version literal is not a version: dynamic applies") {
+    @version("") case class EmptyLit(x: Int = 0) derives Parser.Command
+    given Versioned[EmptyLit] = Versioned.of("3.0.0")
+    Flagged.parse[EmptyLit](Seq("--version")) match
+      case Err(ParseError.Help(t)) => assertEquals(t, "3.0.0")
+      case other                   => fail(s"expected version output, got $other")
+  }
+
+  test("@version(dynamic = true) without a Versioned instance is a compile error") {
+    val e = compileErrors(
+      "@version(dynamic = true) case class NoV2(x: Int = 0) derives Parser.Command"
+    )
+    assert(e.contains("requires a given Versioned"), e)
+  }
+
   test("@version rejects a user option that would shadow --version") {
     @version case class OwnVersion(version: String = "field") derives Parser.Command
     given Versioned[OwnVersion] = Versioned.of("1.0")
