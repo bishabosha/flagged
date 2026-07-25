@@ -91,7 +91,19 @@ private[flagged] enum SubEntry:
         )
       case c: Parser.Command[?] =>
         return c.impl
-    val spec = PosSpec("value", "", p.typeName, 0, mode, None)
+    val isRepeated = mode match
+      case Mode.Repeated(_, _, _) => true
+      case _                      => false
+    val spec =
+      PosSpec(
+        "value",
+        "",
+        p.typeName,
+        0,
+        mode,
+        None,
+        collectorIndex = if isRepeated then 0 else -1
+      )
     Command(
       "",
       IArray.empty,
@@ -104,7 +116,8 @@ private[flagged] enum SubEntry:
           out(i) = arr(base)
       ,
       1,
-      slots = IArray(spec)
+      slots = IArray(spec),
+      repeatedCount = if isRepeated then 1 else 0
     )
 
   def sum(
@@ -169,6 +182,9 @@ private[flagged] enum SubEntry:
     private var storage         = n // spliced children's specs live past the parent's own slots
     private var index           = 0
     private var optionalPosSeen = false
+    private var flagCount       = 0
+    private var repeatedCount   = 0
+    private var stageCount      = 0
 
     private def origin(from: String): String =
       if from == null then "" else s" (from options group '$from')"
@@ -179,15 +195,42 @@ private[flagged] enum SubEntry:
       if lookup.put(key, spec) != null then invalid(s"duplicate option name '$key'${origin(from)}")
 
     private def addOpt(spec: OptSpec, from: String): Unit =
+      val counterIndex = spec.mode match
+        case Mode.Flag(_, _) =>
+          val i = flagCount
+          flagCount += 1
+          i
+        case _ => -1
+      val collectorIndex = spec.mode match
+        case Mode.Repeated(_, _, _) =>
+          val i = repeatedCount
+          repeatedCount += 1
+          i
+        case _ => -1
+      val stageIndex = spec.mode match
+        case Mode.Single(_, _) =>
+          val i = stageCount
+          stageCount += 1
+          i
+        case Mode.Flag(parser, _) if parser.takesValue =>
+          val i = stageCount
+          stageCount += 1
+          i
+        case _ => -1
+      val runtimeSpec = spec.copy(
+        counterIndex = counterIndex,
+        collectorIndex = collectorIndex,
+        stageIndex = stageIndex
+      )
       if opts == null then opts = mutable.ArrayBuffer.empty
-      opts += spec
-      putName(spec.longDisplay, spec, from)
-      spec.aliases.foreach(a => putName("--" + a, spec, from))
-      spec.short.foreach { c =>
+      opts += runtimeSpec
+      putName(runtimeSpec.longDisplay, runtimeSpec, from)
+      runtimeSpec.aliases.foreach(a => putName("--" + a, runtimeSpec, from))
+      runtimeSpec.short.foreach { c =>
         if shorts == null then shorts = mutable.ArrayBuffer.empty
         else if shorts.exists(_.short.contains(c)) then
           invalid(s"duplicate short option '-$c'${origin(from)}")
-        shorts += spec
+        shorts += runtimeSpec
       }
 
     def addField(label: String, parser: Parser[?], optional: Boolean, anns: FieldAnnots): Unit =
@@ -224,13 +267,20 @@ private[flagged] enum SubEntry:
             )
         else optionalPosSeen = true
         if poss == null then poss = mutable.ArrayBuffer.empty
+        val collectorIndex = mode match
+          case Mode.Repeated(_, _, _) =>
+            val i = repeatedCount
+            repeatedCount += 1
+            i
+          case _ => -1
         poss += PosSpec(
           anns.name.getOrElse(kebab(label)),
           anns.help.getOrElse(""),
           metavar,
           i,
           mode,
-          default
+          default,
+          collectorIndex = collectorIndex
         )
       def requiredPos = !(optional || default.nonEmpty)
 
@@ -353,19 +403,22 @@ private[flagged] enum SubEntry:
         if defaultsBuilder == null then Array.empty[SlotSpec] else defaultsBuilder.result()
 
       var buildStepsBuilder: mutable.ArrayBuilder[Splice] = null
-      def addBuildStep(step: Splice): Unit                      =
-        if buildStepsBuilder == null then buildStepsBuilder = mutable.ArrayBuilder.make[Splice]
-        buildStepsBuilder += step
-      for outer <- allSplices do
+      var outerIndex                                      = 0
+      while outerIndex < allSplices.length do
+        val outer  = allSplices(outerIndex)
         val nested = outer.command.buildSteps
         var bi     = 0
         while bi < nested.length do
           val step = nested(bi)
-          addBuildStep(
-            step.copy(slot = outer.offset + step.slot, offset = outer.offset + step.offset)
+          if buildStepsBuilder == null then buildStepsBuilder = mutable.ArrayBuilder.make[Splice]
+          buildStepsBuilder += step.copy(
+            slot = outer.offset + step.slot,
+            offset = outer.offset + step.offset
           )
           bi += 1
-        addBuildStep(outer)
+        if buildStepsBuilder == null then buildStepsBuilder = mutable.ArrayBuilder.make[Splice]
+        buildStepsBuilder += outer
+        outerIndex += 1
       val buildStepsArray =
         if buildStepsBuilder == null then Array.empty[Splice] else buildStepsBuilder.result()
 
@@ -393,5 +446,8 @@ private[flagged] enum SubEntry:
         if shorts == null then Command.noShortSpecs else shorts.toArray,
         IArray.unsafeFromArray(slotArray),
         IArray.unsafeFromArray(defaultArray),
-        IArray.unsafeFromArray(buildStepsArray)
+        IArray.unsafeFromArray(buildStepsArray),
+        flagCount,
+        repeatedCount,
+        stageCount
       )

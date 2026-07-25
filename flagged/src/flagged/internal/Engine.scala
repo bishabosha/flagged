@@ -60,7 +60,7 @@ private[flagged] object Engine:
           val parent   = frame.parent
           val out      = if parent == null then frame.values else parent.values
           val outIndex = if parent == null then frame.resultIndex else frame.parentOutIndex
-          frame.command.finishInto(frame.values, frame.counts, 0, out, outIndex) match
+          frame.command.finishInto(frame.values, frame, 0, out, outIndex) match
             case Err(msg) => eval.raise(ParseError.Failure(msg, frame.hint))
             case _        => ()
           if parent != null && frame.parentOptional then out(outIndex) = Some(out(outIndex))
@@ -80,7 +80,7 @@ private[flagged] object Engine:
       pathName: String,
       val parentOutIndex: Int,
       val parentOptional: Boolean
-  ):
+  ) extends Mentions:
     private val n = command.arity
 
     // Only the root needs an additional destination for its built value. Child values land in the
@@ -88,13 +88,15 @@ private[flagged] object Engine:
     val resultIndex: Int   = n
     val values: Array[Any] =
       new Array[Any](n + (if parent == null then 1 else 0))
-    val counts: Array[Int] = new Array[Int](n)
+    private var seen0: Long           = 0L
+    private val seenMore: Array[Long] =
+      if n <= 64 then null else new Array[Long]((n + 63) >>> 6)
+    private val flagCounts: Array[Int] =
+      if command.flagCount == 0 then null else new Array[Int](command.flagCount)
 
-    // Named singles are last-wins and parse once during validation.
-    private val lastRaw: Array[String] =
-      if command.opts.isEmpty then null else new Array[String](n)
+    // Raw last-wins values stage directly in `values`; only their spelling needs side storage.
     private val lastDisp: Array[String] =
-      if command.opts.isEmpty then null else new Array[String](n)
+      if command.stageCount == 0 then null else new Array[String](command.stageCount)
 
     // Allocated on the first repeated occurrence.
     private var reps: Array[flagged.Parser.Collector] = null
@@ -139,13 +141,24 @@ private[flagged] object Engine:
       if errors == null then errors = mutable.ArrayBuffer.empty[String]
       errors += msg
 
-    private def stage(index: Int, raw: String, display: String): Unit =
-      if lastRaw != null then
-        lastRaw(index) = raw
-        lastDisp(index) = display
+    def isSeen(index: Int): Boolean =
+      if seenMore == null then (seen0 & (1L << index)) != 0
+      else (seenMore(index >>> 6) & (1L << (index & 63))) != 0
 
-    private def staged(index: Int): String =
-      if lastRaw == null then null else lastRaw(index)
+    private def markSeen(index: Int): Unit =
+      if seenMore == null then seen0 |= 1L << index
+      else seenMore(index >>> 6) |= 1L << (index & 63)
+
+    private def mention(spec: SlotSpec): Unit =
+      markSeen(spec.index)
+      if spec.counterIndex >= 0 then flagCounts(spec.counterIndex) += 1
+
+    private def stage(spec: SlotSpec, raw: String, display: String): Unit =
+      values(spec.index) = raw
+      lastDisp(spec.stageIndex) = display
+
+    private def staged(spec: SlotSpec): String =
+      if spec.stageIndex < 0 then null else values(spec.index).asInstanceOf[String]
 
     private def shortSpec(c: Char): OptSpec =
       var i = 0
@@ -176,22 +189,22 @@ private[flagged] object Engine:
       case _               => false
 
     private def addElem(
-        index: Int,
+        spec: SlotSpec,
         parser: flagged.Parser.Repeated[?],
         raw: String,
         display: String
     ): Unit =
-      if reps == null then reps = new Array[flagged.Parser.Collector](n)
-      var c = reps(index)
+      if reps == null then reps = new Array[flagged.Parser.Collector](command.repeatedCount)
+      var c = reps(spec.collectorIndex)
       if c == null then
         c = parser.collector()
-        reps(index) = c
-      c.offer(raw, values, index) match
+        reps(spec.collectorIndex) = c
+      c.offer(raw, values, spec.index) match
         case Err(msg) => report(s"invalid value for '$display': $msg")
         case _        => ()
 
     private def addSplitElems(
-        index: Int,
+        spec: SlotSpec,
         parser: flagged.Parser.Repeated[?],
         raw: String,
         display: String,
@@ -201,16 +214,16 @@ private[flagged] object Engine:
       while start <= raw.length do
         val cut = raw.indexOf(sep, start)
         val end = if cut == -1 then raw.length else cut
-        addElem(index, parser, raw.substring(start, end), display)
+        addElem(spec, parser, raw.substring(start, end), display)
         start = end + 1
 
     private def offerProduct(
-        index: Int,
+        spec: SlotSpec,
         parser: flagged.Parser.Product[?],
         display: String,
         first: String
     ): Unit =
-      counts(index) += 1
+      mention(spec)
       val ar      = parser.arity
       val scratch = new Array[Any](ar)
       var failed  = false
@@ -228,25 +241,25 @@ private[flagged] object Engine:
             case _ => ()
           k += 1
       if !failed then
-        parser.buildInto(scratch, values, index) match
+        parser.buildInto(scratch, values, spec.index) match
           case Err(msg) => report(s"invalid value for '$display': $msg")
           case _        => ()
 
-    private def offerValue(index: Int, mode: Mode, raw: String, display: String): Unit =
-      counts(index) += 1
-      mode match
+    private def offerValue(spec: SlotSpec, raw: String, display: String): Unit =
+      mention(spec)
+      spec.mode match
         case Mode.Repeated(parser, sep, _) =>
-          if sep != 0 then addSplitElems(index, parser, raw, display, sep)
-          else addElem(index, parser, raw, display)
+          if sep != 0 then addSplitElems(spec, parser, raw, display, sep)
+          else addElem(spec, parser, raw, display)
         case Mode.Product(parser, _) =>
           report(s"option '$display' takes ${parser.arity} values, each as its own argument")
         case Mode.Flag(parser, _) if !parser.takesValue =>
           report(s"flag '$display' does not take a value")
-        case _ => stage(index, raw, display)
+        case _ => stage(spec, raw, display)
 
-    private def offerBare(index: Int): Unit =
-      counts(index) += 1
-      if lastRaw != null then lastRaw(index) = null
+    private def offerBare(spec: SlotSpec): Unit =
+      mention(spec)
+      if spec.stageIndex >= 0 then values(spec.index) = null
 
     private def findCase(group: SubGroup, token: String): SubCase =
       var i = 0
@@ -285,18 +298,18 @@ private[flagged] object Engine:
         val spec = posSpecs(posIdx)
         spec.mode match
           case Mode.Repeated(_, _, _) =>
-            offerValue(spec.index, spec.mode, token, spec.display)
+            offerValue(spec, token, spec.display)
           case Mode.Product(parser, _) =>
-            offerProduct(spec.index, parser, spec.display, token)
+            offerProduct(spec, parser, spec.display, token)
             posIdx += 1
           case Mode.Single(parser, _) =>
-            counts(spec.index) += 1
+            mention(spec)
             parser.readInto(token, values, spec.index) match
               case Err(msg) => report(s"invalid value for '${spec.display}': $msg")
               case _        => ()
             posIdx += 1
           case Mode.Flag(_, _) =>
-            offerValue(spec.index, spec.mode, token, spec.display)
+            offerValue(spec, token, spec.display)
             posIdx += 1
 
     private def isFreeToken(token: String): Boolean =
@@ -306,7 +319,7 @@ private[flagged] object Engine:
     private def consumeGreedy(spec: OptSpec): Unit = spec.mode match
       case Mode.Repeated(_, _, true) =>
         while idx < args.length && isFreeToken(args(idx)) do
-          offerValue(spec.index, spec.mode, args(idx), spec.longDisplay)
+          offerValue(spec, args(idx), spec.longDisplay)
           idx += 1
       case _ => ()
 
@@ -352,16 +365,16 @@ private[flagged] object Engine:
                 .map(s => s" (did you mean '--$s'?)")
                 .getOrElse("")
               report(s"unknown option '$key'$suggestion")
-          else if inlineValue != null then offerValue(spec.index, spec.mode, inlineValue, key)
-          else if isFlag(spec) then offerBare(spec.index)
+          else if inlineValue != null then offerValue(spec, inlineValue, key)
+          else if isFlag(spec) then offerBare(spec)
           else
             spec.mode match
               case Mode.Product(parser, _) =>
-                offerProduct(spec.index, parser, key, null)
+                offerProduct(spec, parser, key, null)
               case _ =>
                 val value = takeValue(key)
                 if value != null then
-                  offerValue(spec.index, spec.mode, value, key)
+                  offerValue(spec, value, key)
                   consumeGreedy(spec)
         else
           var i    = 1
@@ -376,12 +389,12 @@ private[flagged] object Engine:
               else report(s"unknown option '-$c'")
               stop = true
             else if isFlag(spec) then
-              offerBare(spec.index)
+              offerBare(spec)
               i += 1
             else
               spec.mode match
                 case Mode.Product(parser, _) if i + 1 >= token.length =>
-                  offerProduct(spec.index, parser, spec.shortDisplay, null)
+                  offerProduct(spec, parser, spec.shortDisplay, null)
                 case _ =>
                   val attached = i + 1 < token.length
                   val raw      =
@@ -390,7 +403,7 @@ private[flagged] object Engine:
                       else token.substring(i + 1)
                     else takeValue(spec.shortDisplay)
                   if raw != null then
-                    offerValue(spec.index, spec.mode, raw, spec.shortDisplay)
+                    offerValue(spec, raw, spec.shortDisplay)
                     if !attached then consumeGreedy(spec)
               stop = true
       null
@@ -401,11 +414,11 @@ private[flagged] object Engine:
         case _        => ()
 
     private def finishFlag(
+        spec: SlotSpec,
         parser: flagged.Parser.Flag[?],
-        index: Int,
         display: String
     ): Unit =
-      parser.countInto(counts(index), values, index) match
+      parser.countInto(flagCounts(spec.counterIndex), values, spec.index) match
         case Err(msg) => report(s"flag '$display': $msg")
         case _        => ()
 
@@ -415,31 +428,35 @@ private[flagged] object Engine:
       val display = spec.display
       spec.mode match
         case Mode.Flag(parser, optional) =>
-          if counts(index) == 0 then
+          if !isSeen(index) then
             spec.default match
               case Some(_)          => ()
               case None if optional => values(index) = None
               case None             => reportInvalid(parser.countInto(0, values, index), display)
           else
             parser match
-              case valued: flagged.Parser.ValuedFlag[?] if staged(index) != null =>
-                reportInvalid(valued.readInto(lastRaw(index), values, index), lastDisp(index))
-              case _ => finishFlag(parser, index, display)
+              case valued: flagged.Parser.ValuedFlag[?] if staged(spec) != null =>
+                reportInvalid(
+                  valued.readInto(staged(spec), values, index),
+                  lastDisp(spec.stageIndex)
+                )
+              case _ => finishFlag(spec, parser, display)
             if optional then values(index) = Some(values(index))
           true
         case Mode.Single(parser, optional) =>
-          if counts(index) == 0 then
+          if !isSeen(index) then
             spec.default match
               case Some(_)          => ()
               case None if optional => values(index) = None
               case None             => return false
           else
-            val raw = staged(index)
-            if raw != null then reportInvalid(parser.readInto(raw, values, index), lastDisp(index))
+            val raw = staged(spec)
+            if raw != null then
+              reportInvalid(parser.readInto(raw, values, index), lastDisp(spec.stageIndex))
             if optional then values(index) = Some(values(index))
           true
         case Mode.Product(_, optional) =>
-          if counts(index) == 0 then
+          if !isSeen(index) then
             spec.default match
               case Some(_)          => ()
               case None if optional => values(index) = None
@@ -447,13 +464,13 @@ private[flagged] object Engine:
           else if optional then values(index) = Some(values(index))
           true
         case Mode.Repeated(parser, _, _) =>
-          if counts(index) == 0 then
+          if !isSeen(index) then
             spec.default match
               case Some(_) => ()
               case None    =>
                 reportInvalid(parser.collector().finishInto(values, index), display)
           else
-            val collector = reps(index)
+            val collector = reps(spec.collectorIndex)
             if !collector.failed then reportInvalid(collector.finishInto(values, index), display)
           true
 
@@ -466,7 +483,7 @@ private[flagged] object Engine:
       var i      = 0
       while i < splices.length do
         val splice = splices(i)
-        if splice.skipped(counts, base) then
+        if splice.skipped(this, base) then
           if absent == null then absent = mutable.BitSet.empty
           absent.addAll((base + splice.offset) until (base + splice.offset + splice.command.arity))
         else absent = markAbsent(splice.command.splices, base + splice.offset, absent)
@@ -533,8 +550,7 @@ private[flagged] object Engine:
       var i        = 0
       while i < defaults.length do
         val spec = defaults(i)
-        if counts(spec.index) == 0 && !skipIdx(spec.index) then
-          values(spec.index) = spec.default.get()
+        if !isSeen(spec.index) && !skipIdx(spec.index) then values(spec.index) = spec.default.get()
         i += 1
 
       command.trailing match

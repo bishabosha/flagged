@@ -54,6 +54,9 @@ private[flagged] sealed trait SlotSpec:
   def mode: Mode
   def default: Option[() => Any]
   def display: String
+  def counterIndex: Int
+  def collectorIndex: Int
+  def stageIndex: Int
 
 private[flagged] final case class OptSpec(
     long: String,
@@ -65,7 +68,10 @@ private[flagged] final case class OptSpec(
     default: Option[() => Any],
     hidden: Boolean = false,
     group: Option[String] = None,
-    aliases: IndexedSeq[String] = Vector.empty
+    aliases: IndexedSeq[String] = Vector.empty,
+    counterIndex: Int = -1,
+    collectorIndex: Int = -1,
+    stageIndex: Int = -1
 ) extends SlotSpec:
   lazy val longDisplay: String  = "--" + long
   lazy val shortDisplay: String = short.fold(longDisplay)("-" + _)
@@ -77,7 +83,10 @@ private[flagged] final case class PosSpec(
     metavar: String,
     index: Int,
     mode: Mode,
-    default: Option[() => Any]
+    default: Option[() => Any],
+    counterIndex: Int = -1,
+    collectorIndex: Int = -1,
+    stageIndex: Int = -1
 ) extends SlotSpec:
   lazy val display: String = "<" + name + ">"
 
@@ -104,6 +113,9 @@ private[flagged] final case class SubGroup(
   * plays the same role for a non-`Option` group: it is used, and the group is not built, when none
   * of its options occur.
   */
+private[flagged] trait Mentions:
+  def isSeen(index: Int): Boolean
+
 private[flagged] final case class Splice(
     slot: Int,
     offset: Int,
@@ -112,11 +124,11 @@ private[flagged] final case class Splice(
     default: Option[() => Any] = None
 ):
   /** Whether any of this splice's slots was mentioned on the command line. */
-  def mentioned(counts: Array[Int], base: Int): Boolean =
+  def mentioned(mentions: Mentions, base: Int): Boolean =
     var i   = base + offset
     val end = base + offset + command.arity
     while i < end do
-      if counts(i) > 0 then return true
+      if mentions.isSeen(i) then return true
       i += 1
     false
 
@@ -124,8 +136,8 @@ private[flagged] final case class Splice(
     * options are then not enforced). Inline: as an outlined call it perturbs the JIT's inlining
     * plan for the parse path enough to cost ~50% on the group benchmark.
     */
-  inline def skipped(counts: Array[Int], base: Int): Boolean =
-    (optional || default.nonEmpty) && !mentioned(counts, base)
+  inline def skipped(mentions: Mentions, base: Int): Boolean =
+    (optional || default.nonEmpty) && !mentioned(mentions, base)
 
 /** A field collecting the raw arguments after `--`, verbatim. */
 private[flagged] final case class TrailingSpec(
@@ -161,17 +173,20 @@ private[flagged] final case class Command(
     // reference arrays are additional parser-construction state.
     slots: IArray[SlotSpec] = IArray.empty,
     defaultSlots: IArray[SlotSpec] = IArray.empty,
-    buildSteps: IArray[Splice] = IArray.empty
+    buildSteps: IArray[Splice] = IArray.empty,
+    flagCount: Int = 0,
+    repeatedCount: Int = 0,
+    stageCount: Int = 0
 ):
 
-  /** Build spliced children from their storage slices, then build this command's value; the first
-    * failing build (e.g. an `emap` validation) short-circuits. `counts` holds per-slot mention
-    * counts, indexed from `base` for this command's storage: a skipped splice (see
-    * [[Splice.skipped]]) becomes `None` or its field default without being built.
+  /** Build spliced children from their storage ranges, then build this command's value; the first
+    * failing build (e.g. an `emap` validation) short-circuits. `mentions` identifies slots relative
+    * to `base`: a skipped splice (see [[Splice.skipped]]) becomes `None` or its field default
+    * without being built.
     */
   def finishInto(
       values: Array[Any],
-      counts: Array[Int],
+      mentions: Mentions,
       base: Int,
       out: Array[Any],
       outIndex: Int
@@ -179,11 +194,11 @@ private[flagged] final case class Command(
     // fast path: keeps the hot no-splice case free of the splice loop's bytecode, which the JIT
     // otherwise weighs against inlining `finish` into the parse path
     if buildSteps.isEmpty then build(values, base, out, outIndex)
-    else finishSplicesInto(values, counts, base, out, outIndex)
+    else finishSplicesInto(values, mentions, base, out, outIndex)
 
   private def finishSplicesInto(
       values: Array[Any],
-      counts: Array[Int],
+      mentions: Mentions,
       base: Int,
       out: Array[Any],
       outIndex: Int
@@ -192,7 +207,7 @@ private[flagged] final case class Command(
       var i = 0
       while i < buildSteps.length do
         val s = buildSteps(i)
-        if s.skipped(counts, base) then
+        if s.skipped(mentions, base) then
           values(base + s.slot) = s.default match
             case Some(d) => d()
             case None    => None
@@ -200,7 +215,7 @@ private[flagged] final case class Command(
           s.command
             .finishInto(
               values,
-              counts,
+              mentions,
               base + s.offset,
               values,
               base + s.slot

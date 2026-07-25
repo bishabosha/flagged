@@ -82,7 +82,10 @@ sealed trait Parser[A]:
   final def parse(args: Seq[String]): ParseResult[A] = parse(args, typeName)
 
   final def parse(args: Seq[String], prog: String): ParseResult[A] =
-    Engine.run(command, prog, Vector.empty, args.toIndexedSeq, 0).asInstanceOf[ParseResult[A]]
+    val indexed = args match
+      case xs: IndexedSeq[?] => xs.asInstanceOf[IndexedSeq[String]]
+      case _                 => ArraySeq.unsafeWrapArray(args.toArray)
+    Engine.run(command, prog, Vector.empty, indexed, 0).asInstanceOf[ParseResult[A]]
 
   /** The rendered top-level help screen. */
   final def help: String = help(typeName)
