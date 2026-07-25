@@ -44,8 +44,10 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     summonFrom:
       case am: AnnotMirror.Product[A] =>
         val onType = Annots.targetAnnotsOf[am.MirroredSelfAnnotations]
+        val version = versionOf[A, am.MirroredSelfAnnotations]
         val cmd    = fieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, am.MirroredAnnotations](
-          Defaults.derived[A]
+          Defaults.derived[A],
+          version.nonEmpty
         ).resultInto(
           onType,
           (arr, base, out, outIndex) =>
@@ -54,7 +56,7 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
                 arrayProductAt(arr, base, constValue[Tuple.Size[m.MirroredElemTypes]])
               )
           ,
-          versionOf[A, am.MirroredSelfAnnotations]
+          version
         )
         Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], onType))
 
@@ -67,9 +69,11 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     summonFrom:
       case am: AnnotMirror.Product[A] =>
         val onType = Annots.targetAnnotsOf[am.MirroredSelfAnnotations]
+        val version = versionOf[A, am.MirroredSelfAnnotations]
         val cmd    =
           sharedFieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, am.MirroredAnnotations](
-            Defaults.derived[A]
+            Defaults.derived[A],
+            version.nonEmpty
           ).resultInto(
             onType,
             (arr, base, out, outIndex) =>
@@ -78,7 +82,7 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
                   arrayProductAt(arr, base, constValue[Tuple.Size[m.MirroredElemTypes]])
                 )
             ,
-            versionOf[A, am.MirroredSelfAnnotations]
+            version
           )
         Parser.makeShared[A](cmd, Assemble.progName(constValue[m.MirroredLabel], onType))
 
@@ -177,36 +181,40 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
   type FieldsB = Assemble.FieldsBuilder
 
   inline def fieldsOf[Labels <: Tuple, Types <: Tuple, Slots <: Tuple](
-      defaults: Defaults[?]
+      defaults: Defaults[?],
+      versioned: Boolean = false
   ): FieldsB =
     // one destructuring match per tuple so the walk's match types (`Take`/`Drop`/`Size`) operate
     // on concrete tuple types: the mirror members arrive as abstract paths (`am.MirroredAnnotations`)
     // that inline-match reduction resolves but match-type reduction alone does not
     inline erasedValue[Types] match
-      case _: EmptyTuple => Assemble.fieldsBuilder(0, defaults)
+      case _: EmptyTuple => Assemble.fieldsBuilder(0, defaults, versioned)
       case _: (t0 *: tr) =>
         inline erasedValue[Slots] match
           case _: (s0 *: sr) =>
             inline erasedValue[Labels] match
               case _: (l0 *: lr) =>
                 checkDupNames[s0 *: sr]
-                val b = Assemble.fieldsBuilder(constValue[Tuple.Size[t0 *: tr]], defaults)
+                val b =
+                  Assemble.fieldsBuilder(constValue[Tuple.Size[t0 *: tr]], defaults, versioned)
                 walk[l0 *: lr, t0 *: tr, s0 *: sr](b)
                 b
 
   /** [[fieldsOf]] plus the `Parser.Shared` splice invariants, read off the walk's final marks. */
   inline def sharedFieldsOf[Labels <: Tuple, Types <: Tuple, Slots <: Tuple](
-      defaults: Defaults[?]
+      defaults: Defaults[?],
+      versioned: Boolean = false
   ): FieldsB =
     inline erasedValue[Types] match
-      case _: EmptyTuple => Assemble.fieldsBuilder(0, defaults)
+      case _: EmptyTuple => Assemble.fieldsBuilder(0, defaults, versioned)
       case _: (t0 *: tr) =>
         inline erasedValue[Slots] match
           case _: (s0 *: sr) =>
             inline erasedValue[Labels] match
               case _: (l0 *: lr) =>
                 checkDupNames[s0 *: sr]
-                val b = Assemble.fieldsBuilder(constValue[Tuple.Size[t0 *: tr]], defaults)
+                val b =
+                  Assemble.fieldsBuilder(constValue[Tuple.Size[t0 *: tr]], defaults, versioned)
                 sharedChecked(walk[l0 *: lr, t0 *: tr, s0 *: sr](b))
                 b
 

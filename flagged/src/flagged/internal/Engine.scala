@@ -115,8 +115,11 @@ private[flagged] object Engine:
     private val defaultSubCase: SubCase =
       if subGroup == null then null else subGroup.defaultCase.orNull
 
-    private val shortChars = command.shortChars
-    private val shortSpecs = command.shortSpecs
+    // Elaboration is demand-driven: only commands reached by this parse build routing indexes.
+    private val prepared   = command.prepare
+    private val longLookup = prepared.longLookup
+    private val shortChars = prepared.shortChars
+    private val shortSpecs = prepared.shortSpecs
     private val posSpecs   = command.positionals
 
     private def appendPath(b: mutable.Builder[String, Vector[String]]): Unit =
@@ -349,7 +352,7 @@ private[flagged] object Engine:
           val inlineValue = if eq == -1 then null else token.substring(eq + 1)
           if key == "--help" then
             return ParseError.Help(HelpFmt.render(command, prog, path, showHidden = false))
-          val spec = command.longLookup.get(key)
+          val spec = longLookup.get(key)
           if spec == null then
             if key == "--version" && command.version.nonEmpty then
               return ParseError.Help(command.version.get())
