@@ -100,9 +100,10 @@ private[flagged] object Engine:
       val posSpecs   = cmd.positionals
       val subGroup   = cmd.sub.orNull
 
-      /** With a `@default` command and no own options, unrecognized tokens are its arguments. */
-      val defaultSubCase: SubCase =
-        if cmd.opts.isEmpty then cmd.sub.flatMap(_.defaultCase).orNull else null
+      /** With a `@default` command, unrecognized tokens are forwarded as its arguments after this
+        * command has had the chance to consume its own options.
+        */
+      val defaultSubCase: SubCase = cmd.sub.flatMap(_.defaultCase).orNull
 
       def shortSpec(c: Char): OptSpec =
         var i = 0

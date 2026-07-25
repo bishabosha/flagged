@@ -124,6 +124,11 @@ enum ParityGit derives Parser.CommandGroup:
   @default case Status(@short('s') short: Boolean = false)
   case Push(remote: String = "origin")
 
+case class ParityWrappedDefault(
+    verbose: Boolean = false,
+    action: ParityGit
+) derives Parser.Command
+
 case class ParityNet(
     @group("Network") host: String = "localhost",
     @group("Network") port: Int = 80,
@@ -400,6 +405,17 @@ class ParitySuite extends munit.FunSuite:
     val help = Flagged.help[ParityGit]
     assert(help.contains("(default)"), help)
     assert(help.contains("[<command>]"), help)
+  }
+
+  test("a nested default command receives arguments after parent options") {
+    assertEquals(
+      ok(Flagged.parse[ParityWrappedDefault](Seq("--short"))),
+      ParityWrappedDefault(action = ParityGit.Status(true))
+    )
+    assertEquals(
+      ok(Flagged.parse[ParityWrappedDefault](Seq("--verbose", "--short"))),
+      ParityWrappedDefault(verbose = true, action = ParityGit.Status(true))
+    )
   }
 
   test("@default on a field is a compile error") {
