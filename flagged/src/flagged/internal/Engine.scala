@@ -28,7 +28,8 @@ import scala.collection.mutable
   *
   * Errors do not stop parsing: routing and validation both record every problem they find (unknown
   * options, missing values, invalid values, missing required arguments), and the parse fails at the
-  * end with all of them. Only `--help` and a failing subcommand short-circuit.
+  * end with all of them, including diagnostics from a selected subcommand. Only `--help`
+  * short-circuits.
   */
 private[flagged] object Engine:
 
@@ -46,7 +47,8 @@ private[flagged] object Engine:
       case Err(e)    => Err(e)
 
   /** Parse and validate one command level without building its result. Keeping the build deferred
-    * is what lets an ancestor report its own errors before an `@run` method is evaluated.
+    * lets command levels aggregate their diagnostics before an `@run` method or default is
+    * evaluated.
     */
   private def deferred(
       cmd: Command,
@@ -60,6 +62,7 @@ private[flagged] object Engine:
       def hint = s"Try '$full --help' for more information."
 
       var errors: mutable.ArrayBuffer[String] = null
+      var failureHint                         = hint
       def report(msg: String): Unit           =
         if errors == null then errors = mutable.ArrayBuffer.empty[String]
         errors += msg
@@ -227,8 +230,12 @@ private[flagged] object Engine:
 
       def runSub(sc: SubCase, fromIdx: Int): Unit =
         deferred(sc.command, prog, path :+ sc.name, args, fromIdx) match
-          case Ok(build) => subBuild = build
-          case Err(e)    => eval.raise(e)
+          case Ok(build)                        => subBuild = build
+          case Err(h @ ParseError.Help(_))      => eval.raise(h)
+          case Err(ParseError.Failure(m, hint)) =>
+            report(m)
+            failureHint = hint
+            subErrored = true
         idx = args.length
 
       def handleFree(tok: String): Unit =
@@ -508,7 +515,7 @@ private[flagged] object Engine:
         case None => ()
         case _    => ()
 
-      if errors != null then eval.raise(ParseError.Failure(errors.mkString("\n"), hint))
+      if errors != null then eval.raise(ParseError.Failure(errors.mkString("\n"), failureHint))
 
       // ---- phase 3: deferred materialization -----------------------------------
 

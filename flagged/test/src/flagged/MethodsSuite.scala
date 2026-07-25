@@ -89,6 +89,14 @@ class MethodsSuite extends munit.FunSuite:
     assertEquals(guarded.invocations, 0)
   }
 
+  test("parse errors accumulate across a subcommand boundary") {
+    guarded.invocations = 0
+    val m = err(Flagged.parse[guarded.type](Seq("--bogus", "go", "--x", "bad")))
+    assert(m.contains("unknown option '--bogus'"), m)
+    assert(m.contains("invalid value for '--x'"), m)
+    assertEquals(guarded.invocations, 0)
+  }
+
   test("@name renames a method command; @positional works on parameters") {
     assertEquals(ok(multi.parse(Seq("rm", "x.txt"))), "rm x.txt")
     assertEquals(ok(multi.parse(Seq("rm", "x.txt", "--force"))), "rm -f x.txt")
