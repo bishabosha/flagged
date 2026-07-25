@@ -400,7 +400,7 @@ private[flagged] object Engine:
           case Mode.Flag(parser, optional) =>
             if counts(index) == 0 then
               default match
-                case Some(d)          => values(index) = d()
+                case Some(_)          => () // materialized only after every command level validates
                 case None if optional => values(index) = None
                 case None             => reportInvalid(parser.countInto(0, values, index), display)
             else
@@ -413,9 +413,9 @@ private[flagged] object Engine:
           case Mode.Single(parser, optional) =>
             if counts(index) == 0 then
               default match
-                case Some(d)          => values(index) = d()
+                case Some(_)          => () // materialized only after every command level validates
                 case None if optional => values(index) = None
-                case None             => return false // missing required
+                case None => return false // missing required
             else
               // null staged raw: an eagerly parsed positional, already in its slot
               val raw = staged(index)
@@ -427,15 +427,15 @@ private[flagged] object Engine:
             // occurrences were parsed and built eagerly at routing; only absence remains
             if counts(index) == 0 then
               default match
-                case Some(d)          => values(index) = d()
+                case Some(_)          => () // materialized only after every command level validates
                 case None if optional => values(index) = None
-                case None             => return false // missing required
+                case None => return false // missing required
             else if optional then values(index) = Some(values(index))
             true
           case Mode.Repeated(parser, _, _) =>
             if counts(index) == 0 then
               default match
-                case Some(d) => values(index) = d()
+                case Some(_) => () // materialized only after every command level validates
                 case None    =>
                   // an empty collector: `build` still decides (it may require an occurrence)
                   reportInvalid(parser.collector().finishInto(values, index), display)
@@ -491,7 +491,7 @@ private[flagged] object Engine:
             if t.optional then values(t.index) = Some(values(t.index))
           else
             t.default match
-              case Some(d) => values(t.index) = d()
+              case Some(_) => () // materialized only after every command level validates
               case None    =>
                 if t.optional then values(t.index) = None
                 else
@@ -530,6 +530,23 @@ private[flagged] object Engine:
                 g.default match
                   case Some(d) => d()
                   case None    => None // only an absent optional group can reach this branch
+          }
+
+          var oj = 0
+          while oj < optSpecs.length do
+            val o = optSpecs(oj)
+            if counts(o.index) == 0 && !skipIdx(o.index) then
+              o.default.foreach(d => values(o.index) = d())
+            oj += 1
+
+          var pj = 0
+          while pj < posSpecs.length do
+            val p = posSpecs(pj)
+            if counts(p.index) == 0 then p.default.foreach(d => values(p.index) = d())
+            pj += 1
+
+          cmd.trailing.foreach { t =>
+            if !trailSeen then t.default.foreach(d => values(t.index) = d())
           }
 
           cmd.finish(values, counts, 0) match

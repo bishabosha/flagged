@@ -210,6 +210,12 @@ class ParitySuite extends munit.FunSuite:
     )
   }
 
+  test("defaults are not evaluated when parsing has already failed") {
+    val msg = err(Flagged.parse[ParityLazyDefault](Seq("--wrong")))
+    assert(msg.contains("unknown option '--wrong'"), msg)
+    assert(msg.contains("--name"), msg)
+  }
+
   test("more than 22 fields derive and parse (mainargs: supported since 0.6.3)") {
     assertEquals(ok(Flagged.parse[ParityWide](Nil)), ParityWide())
     assertEquals(ok(Flagged.parse[ParityWide](Seq("--f-23", "99"))), ParityWide(f23 = 99))
