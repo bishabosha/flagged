@@ -91,12 +91,11 @@ private[flagged] object Engine:
     private var seen0: Long           = 0L
     private val seenMore: Array[Long] =
       if n <= 64 then null else new Array[Long]((n + 63) >>> 6)
-    private val flagCounts: Array[Int] =
-      if command.flagCount == 0 then null else new Array[Int](command.flagCount)
+    // Occurrence counts matter only for flags and are allocated on their first occurrence.
+    private var flagCounts: Array[Int] = null
 
     // Raw last-wins values stage directly in `values`; only their spelling needs side storage.
-    private val lastDisp: Array[String] =
-      if command.stageCount == 0 then null else new Array[String](command.stageCount)
+    private var lastDisp: Array[String] = null
 
     // Allocated on the first repeated occurrence.
     private var reps: Array[flagged.Parser.Collector] = null
@@ -151,14 +150,20 @@ private[flagged] object Engine:
 
     private def mention(spec: SlotSpec): Unit =
       markSeen(spec.index)
-      if spec.counterIndex >= 0 then flagCounts(spec.counterIndex) += 1
+      spec.mode match
+        case Mode.Flag(_, _) =>
+          if flagCounts == null then flagCounts = new Array[Int](n)
+          flagCounts(spec.index) += 1
+        case _ => ()
 
     private def stage(spec: SlotSpec, raw: String, display: String): Unit =
+      if lastDisp == null then lastDisp = new Array[String](n)
       values(spec.index) = raw
-      lastDisp(spec.stageIndex) = display
+      lastDisp(spec.index) = display
 
     private def staged(spec: SlotSpec): String =
-      if spec.stageIndex < 0 then null else values(spec.index).asInstanceOf[String]
+      if lastDisp == null || lastDisp(spec.index) == null then null
+      else values(spec.index).asInstanceOf[String]
 
     private def shortSpec(c: Char): OptSpec =
       var i = 0
@@ -194,11 +199,11 @@ private[flagged] object Engine:
         raw: String,
         display: String
     ): Unit =
-      if reps == null then reps = new Array[flagged.Parser.Collector](command.repeatedCount)
-      var c = reps(spec.collectorIndex)
+      if reps == null then reps = new Array[flagged.Parser.Collector](n)
+      var c = reps(spec.index)
       if c == null then
         c = parser.collector()
-        reps(spec.collectorIndex) = c
+        reps(spec.index) = c
       c.offer(raw, values, spec.index) match
         case Err(msg) => report(s"invalid value for '$display': $msg")
         case _        => ()
@@ -259,7 +264,7 @@ private[flagged] object Engine:
 
     private def offerBare(spec: SlotSpec): Unit =
       mention(spec)
-      if spec.stageIndex >= 0 then values(spec.index) = null
+      values(spec.index) = null
 
     private def findCase(group: SubGroup, token: String): SubCase =
       var i = 0
@@ -418,7 +423,7 @@ private[flagged] object Engine:
         parser: flagged.Parser.Flag[?],
         display: String
     ): Unit =
-      parser.countInto(flagCounts(spec.counterIndex), values, spec.index) match
+      parser.countInto(flagCounts(spec.index), values, spec.index) match
         case Err(msg) => report(s"flag '$display': $msg")
         case _        => ()
 
@@ -438,7 +443,7 @@ private[flagged] object Engine:
               case valued: flagged.Parser.ValuedFlag[?] if staged(spec) != null =>
                 reportInvalid(
                   valued.readInto(staged(spec), values, index),
-                  lastDisp(spec.stageIndex)
+                  lastDisp(index)
                 )
               case _ => finishFlag(spec, parser, display)
             if optional then values(index) = Some(values(index))
@@ -451,8 +456,7 @@ private[flagged] object Engine:
               case None             => return false
           else
             val raw = staged(spec)
-            if raw != null then
-              reportInvalid(parser.readInto(raw, values, index), lastDisp(spec.stageIndex))
+            if raw != null then reportInvalid(parser.readInto(raw, values, index), lastDisp(index))
             if optional then values(index) = Some(values(index))
           true
         case Mode.Product(_, optional) =>
@@ -470,7 +474,7 @@ private[flagged] object Engine:
               case None    =>
                 reportInvalid(parser.collector().finishInto(values, index), display)
           else
-            val collector = reps(spec.collectorIndex)
+            val collector = reps(index)
             if !collector.failed then reportInvalid(collector.finishInto(values, index), display)
           true
 
@@ -496,10 +500,16 @@ private[flagged] object Engine:
       skipIdx = if absent == null then Set.empty else absent
 
       var missing: mutable.ArrayBuffer[String] = null
-      val slots                                = command.slots
       var i                                    = 0
-      while i < slots.length do
-        val spec = slots(i)
+      while i < command.opts.length do
+        val spec = command.opts(i)
+        if !skipIdx(spec.index) && !finishSlot(spec) then
+          if missing == null then missing = mutable.ArrayBuffer.empty[String]
+          missing += spec.display
+        i += 1
+      i = 0
+      while i < command.positionals.length do
+        val spec = command.positionals(i)
         if !skipIdx(spec.index) && !finishSlot(spec) then
           if missing == null then missing = mutable.ArrayBuffer.empty[String]
           missing += spec.display
@@ -546,11 +556,17 @@ private[flagged] object Engine:
           case Some(default) => default()
           case None          => None
 
-      val defaults = command.defaultSlots
-      var i        = 0
-      while i < defaults.length do
-        val spec = defaults(i)
-        if !isSeen(spec.index) && !skipIdx(spec.index) then values(spec.index) = spec.default.get()
+      var i = 0
+      while i < command.opts.length do
+        val spec = command.opts(i)
+        if spec.default.nonEmpty && !isSeen(spec.index) && !skipIdx(spec.index) then
+          values(spec.index) = spec.default.get()
+        i += 1
+      i = 0
+      while i < command.positionals.length do
+        val spec = command.positionals(i)
+        if spec.default.nonEmpty && !isSeen(spec.index) && !skipIdx(spec.index) then
+          values(spec.index) = spec.default.get()
         i += 1
 
       command.trailing match

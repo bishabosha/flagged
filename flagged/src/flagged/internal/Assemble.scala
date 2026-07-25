@@ -91,19 +91,7 @@ private[flagged] enum SubEntry:
         )
       case c: Parser.Command[?] =>
         return c.impl
-    val isRepeated = mode match
-      case Mode.Repeated(_, _, _) => true
-      case _                      => false
-    val spec =
-      PosSpec(
-        "value",
-        "",
-        p.typeName,
-        0,
-        mode,
-        None,
-        collectorIndex = if isRepeated then 0 else -1
-      )
+    val spec = PosSpec("value", "", p.typeName, 0, mode, None)
     Command(
       "",
       IArray.empty,
@@ -115,9 +103,7 @@ private[flagged] enum SubEntry:
         Result.task:
           out(i) = arr(base)
       ,
-      1,
-      slots = IArray(spec),
-      repeatedCount = if isRepeated then 1 else 0
+      1
     )
 
   def sum(
@@ -182,9 +168,6 @@ private[flagged] enum SubEntry:
     private var storage         = n // spliced children's specs live past the parent's own slots
     private var index           = 0
     private var optionalPosSeen = false
-    private var flagCount       = 0
-    private var repeatedCount   = 0
-    private var stageCount      = 0
 
     private def origin(from: String): String =
       if from == null then "" else s" (from options group '$from')"
@@ -195,42 +178,15 @@ private[flagged] enum SubEntry:
       if lookup.put(key, spec) != null then invalid(s"duplicate option name '$key'${origin(from)}")
 
     private def addOpt(spec: OptSpec, from: String): Unit =
-      val counterIndex = spec.mode match
-        case Mode.Flag(_, _) =>
-          val i = flagCount
-          flagCount += 1
-          i
-        case _ => -1
-      val collectorIndex = spec.mode match
-        case Mode.Repeated(_, _, _) =>
-          val i = repeatedCount
-          repeatedCount += 1
-          i
-        case _ => -1
-      val stageIndex = spec.mode match
-        case Mode.Single(_, _) =>
-          val i = stageCount
-          stageCount += 1
-          i
-        case Mode.Flag(parser, _) if parser.takesValue =>
-          val i = stageCount
-          stageCount += 1
-          i
-        case _ => -1
-      val runtimeSpec = spec.copy(
-        counterIndex = counterIndex,
-        collectorIndex = collectorIndex,
-        stageIndex = stageIndex
-      )
       if opts == null then opts = mutable.ArrayBuffer.empty
-      opts += runtimeSpec
-      putName(runtimeSpec.longDisplay, runtimeSpec, from)
-      runtimeSpec.aliases.foreach(a => putName("--" + a, runtimeSpec, from))
-      runtimeSpec.short.foreach { c =>
+      opts += spec
+      putName(spec.longDisplay, spec, from)
+      spec.aliases.foreach(a => putName("--" + a, spec, from))
+      spec.short.foreach { c =>
         if shorts == null then shorts = mutable.ArrayBuffer.empty
         else if shorts.exists(_.short.contains(c)) then
           invalid(s"duplicate short option '-$c'${origin(from)}")
-        shorts += runtimeSpec
+        shorts += spec
       }
 
     def addField(label: String, parser: Parser[?], optional: Boolean, anns: FieldAnnots): Unit =
@@ -267,20 +223,13 @@ private[flagged] enum SubEntry:
             )
         else optionalPosSeen = true
         if poss == null then poss = mutable.ArrayBuffer.empty
-        val collectorIndex = mode match
-          case Mode.Repeated(_, _, _) =>
-            val i = repeatedCount
-            repeatedCount += 1
-            i
-          case _ => -1
         poss += PosSpec(
           anns.name.getOrElse(kebab(label)),
           anns.help.getOrElse(""),
           metavar,
           i,
           mode,
-          default,
-          collectorIndex = collectorIndex
+          default
         )
       def requiredPos = !(optional || default.nonEmpty)
 
@@ -380,48 +329,6 @@ private[flagged] enum SubEntry:
       val allPos     = if poss == null then Array.empty[PosSpec] else poss.toArray
       val allSplices = if spls == null then Vector.empty[Splice] else spls.result()
 
-      val slotArray = new Array[SlotSpec](allOpts.length + allPos.length)
-      var si        = 0
-      while si < allOpts.length do
-        slotArray(si) = allOpts(si)
-        si += 1
-      var pi = 0
-      while pi < allPos.length do
-        slotArray(si) = allPos(pi)
-        si += 1
-        pi += 1
-
-      var defaultsBuilder: mutable.ArrayBuilder[SlotSpec] = null
-      si = 0
-      while si < slotArray.length do
-        val spec = slotArray(si)
-        if spec.default.nonEmpty then
-          if defaultsBuilder == null then defaultsBuilder = mutable.ArrayBuilder.make[SlotSpec]
-          defaultsBuilder += spec
-        si += 1
-      val defaultArray =
-        if defaultsBuilder == null then Array.empty[SlotSpec] else defaultsBuilder.result()
-
-      var buildStepsBuilder: mutable.ArrayBuilder[Splice] = null
-      var outerIndex                                      = 0
-      while outerIndex < allSplices.length do
-        val outer  = allSplices(outerIndex)
-        val nested = outer.command.buildSteps
-        var bi     = 0
-        while bi < nested.length do
-          val step = nested(bi)
-          if buildStepsBuilder == null then buildStepsBuilder = mutable.ArrayBuilder.make[Splice]
-          buildStepsBuilder += step.copy(
-            slot = outer.offset + step.slot,
-            offset = outer.offset + step.offset
-          )
-          bi += 1
-        if buildStepsBuilder == null then buildStepsBuilder = mutable.ArrayBuilder.make[Splice]
-        buildStepsBuilder += outer
-        outerIndex += 1
-      val buildStepsArray =
-        if buildStepsBuilder == null then Array.empty[Splice] else buildStepsBuilder.result()
-
       // `build` receives the whole storage plus the parent's own field count — no trimming
       Command(
         onType.help.getOrElse(""),
@@ -443,11 +350,5 @@ private[flagged] enum SubEntry:
             k += 1
           cs
         ,
-        if shorts == null then Command.noShortSpecs else shorts.toArray,
-        IArray.unsafeFromArray(slotArray),
-        IArray.unsafeFromArray(defaultArray),
-        IArray.unsafeFromArray(buildStepsArray),
-        flagCount,
-        repeatedCount,
-        stageCount
+        if shorts == null then Command.noShortSpecs else shorts.toArray
       )
