@@ -156,22 +156,15 @@ private[flagged] final case class Command(
     // allocating value-bearing Results or slicing their input arrays.
     build: (Array[Any], Int, Array[Any], Int) => Result[Unit, String],
     arity: Int, // value-storage size: own fields plus spliced children's storage
-    version: Option[() => String] = None // from Versioned[A]; called by --version and help
+    version: Option[() => String] = None, // from Versioned[A]; called by --version and help
+    // per-token lookups, built during assembly (duplicate-name detection rides on the map
+    // inserts): java.util maps return null instead of allocating an Option, and the long keys
+    // carry their `--` prefix so a plain long token needs no substring at all (the key doubles
+    // as the option's display spelling)
+    longLookup: java.util.HashMap[String, OptSpec] = Command.noLookup,
+    shortChars: Array[Char] = Command.noShortChars,
+    shortSpecs: Array[OptSpec] = Command.noShortSpecs
 ):
-  // Parsing indexes are operational data, not command metadata. Full-tree assembly validates every
-  // command, but the engine prepares these indexes only for commands on the selected path. A
-  // benign race may build the same immutable plan twice; volatile publication makes either result
-  // safe without an AtomicReference allocation or lazy-val machinery.
-  @volatile private var prepared0: PreparedCommand = null
-
-  def prepare: PreparedCommand =
-    var p = prepared0
-    if p == null then
-      p = PreparedCommand(this)
-      prepared0 = p
-    p
-
-  private[flagged] def isPrepared: Boolean = prepared0 != null
 
   /** Build spliced children from their storage ranges, then build this command's value; the first
     * failing build (e.g. an `emap` validation) short-circuits. `mentions` identifies slots relative
@@ -220,6 +213,11 @@ private[flagged] final case class Command(
       build(values, base, out, outIndex).check
 
 private[flagged] object Command:
+  // shared empties for option-less commands; the map is never mutated after construction
+  private[internal] val noLookup     = new java.util.HashMap[String, OptSpec]
+  private[internal] val noShortChars = Array.empty[Char]
+  private[internal] val noShortSpecs = Array.empty[OptSpec]
+
   /** A command with no parameters that always produces `value` (parameterless enum case / case
     * object).
     */
@@ -237,52 +235,3 @@ private[flagged] object Command:
       ,
       0
     )
-
-/** Parse-only indexes elaborated from validated command metadata when the engine first enters a
-  * command. Long keys retain their `--` prefix so ordinary long-option lookup needs no substring.
-  */
-private[flagged] final class PreparedCommand private (
-    val longLookup: java.util.HashMap[String, OptSpec],
-    val shortChars: Array[Char],
-    val shortSpecs: Array[OptSpec]
-)
-
-private[flagged] object PreparedCommand:
-  private val noLookup     = new java.util.HashMap[String, OptSpec]
-  private val noShortChars = Array.empty[Char]
-  private val noShortSpecs = Array.empty[OptSpec]
-  private val empty        = new PreparedCommand(noLookup, noShortChars, noShortSpecs)
-
-  def apply(command: Command): PreparedCommand =
-    val opts = command.opts
-    if opts.isEmpty then empty
-    else
-      var names  = 0
-      var shorts = 0
-      var i      = 0
-      while i < opts.length do
-        val spec = opts(i)
-        names += 1 + spec.aliases.length
-        if spec.short >= 0 then shorts += 1
-        i += 1
-
-      val capacity = ((names / 0.75f).toInt + 1).max(4)
-      val lookup   = new java.util.HashMap[String, OptSpec](capacity)
-      val chars    = if shorts == 0 then noShortChars else new Array[Char](shorts)
-      val specs    = if shorts == 0 then noShortSpecs else new Array[OptSpec](shorts)
-
-      i = 0
-      var si = 0
-      while i < opts.length do
-        val spec = opts(i)
-        lookup.put(spec.longDisplay, spec)
-        var ai = 0
-        while ai < spec.aliases.length do
-          lookup.put("--" + spec.aliases(ai), spec)
-          ai += 1
-        if spec.short >= 0 then
-          chars(si) = spec.short.toChar
-          specs(si) = spec
-          si += 1
-        i += 1
-      new PreparedCommand(lookup, chars, specs)

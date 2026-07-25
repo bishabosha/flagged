@@ -180,32 +180,6 @@ class SubcommandSuite extends munit.FunSuite:
     assert(e.getMessage.contains("duplicate option name '--max-retries'"), e.getMessage)
   }
 
-  test("construction validates an invalid unselected subcommand") {
-    enum Tree:
-      case Good
-      case Bad(maxRetries: Int = 0, @name("max-retries") retryLimit: Int = 0)
-
-    val e = intercept[IllegalArgumentException](Parser.CommandGroup.derived[Tree])
-    assert(e.getMessage.contains("duplicate option name '--max-retries'"), e.getMessage)
-  }
-
-  test("parse indexes are prepared only along the selected command path") {
-    enum Tree:
-      case Left(@short('x') x: Int = 0)
-      case Right(@short('y') y: Int = 0)
-
-    val parser = Parser.CommandGroup.derived[Tree]
-    val root   = parser.impl
-    val cases  = root.sub.get.cases
-    assert(!root.isPrepared)
-    assert(cases.forall(c => !c.command.isPrepared))
-
-    assertEquals(parser.parse(Seq("left", "--x", "2")), Ok(Tree.Left(2)))
-    assert(root.isPrepared)
-    assert(cases(0).command.isPrepared)
-    assert(!cases(1).command.isPrepared)
-  }
-
   test("duplicate constant command names are compile errors") {
     val e = compileErrors(
       "enum E derives Parser.CommandGroup:\n  @name(\"x\") case A\n  @name(\"x\") case B(f: Int)"

@@ -174,12 +174,8 @@ import steps.result.Result
       m: M,
       onMethod: TargetAnnots
   ): Command =
-    val version = Derive.versionOf[T, m.MirroredSelfAnnotations]
     Derive
-      .fieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, m.MirroredAnnotations](
-        m,
-        version.nonEmpty
-      )
+      .fieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, m.MirroredAnnotations](m)
       .resultInto(
         onMethod,
         (arr, base, out, outIndex) =>
@@ -189,5 +185,5 @@ import steps.result.Result
               else arr.slice(base, base + constValue[Tuple.Size[m.MirroredElemTypes]])
             out(outIndex) = m.invoke(o, input)
         ,
-        version
+        Derive.versionOf[T, m.MirroredSelfAnnotations]
       )

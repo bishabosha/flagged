@@ -13,9 +13,8 @@ import caseapp.Parser as CParser
   * libraries on the same grammars.
   *
   * Each method re-executes what a fresh process pays after class loading: flagged's inline
-  * derivation body (the field walk feeding `Assemble.FieldsBuilder`: validated metadata; parse
-  * indexes are demand-built by the engine), mainargs' `ParserForClass`/`ParserForMethods`
-  * materialization, case-app's `Parser[T]` derivation.
+  * derivation body (the field walk feeding `Assemble.FieldsBuilder`: specs, registries), mainargs'
+  * `ParserForClass`/`ParserForMethods` materialization, case-app's `Parser[T]` derivation.
   * flagged's `derives` clause caches the given per companion, so the benchmark invokes `derived`
   * directly; the other two are macro/inline materializations that rebuild at every call site
   * invocation alike. Shared value-level givens (element readers such as `Parser.Value[Int]`,
