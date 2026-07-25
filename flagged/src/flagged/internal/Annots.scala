@@ -5,6 +5,11 @@ import compiletime.ops.int./
 import flagged.meta.{Ann, AnnotMirror, Defaults}
 import scala.annotation.publicInBinary
 
+/** Allocation-free optional character for derivation metadata. */
+@publicInBinary private[flagged] object MaybeChar:
+  final val empty: Int               = -1
+  inline def apply(value: Char): Int = value.toInt
+
 /** flagged's annotations on a type or an enum case, extracted at compile time from an
   * [[AnnotMirror]] — fully typed, no `Any` and no runtime type tests.
   */
@@ -22,18 +27,18 @@ private[flagged] final case class TargetAnnots @publicInBinary() (
 /** flagged's annotations on one constructor field, extracted at compile time. */
 private[flagged] final case class FieldAnnots @publicInBinary() (
     name: Option[String],
-    short: Option[Char],
+    short: Int,
     help: Option[String],
     positional: Boolean,
     hidden: Boolean = false,
     group: Option[String] = None,
     aliases: IndexedSeq[String] = Vector.empty,
-    split: Option[Char] = None,
+    split: Int = MaybeChar.empty,
     greedy: Boolean = false
 )
 
 @publicInBinary private[flagged] object FieldAnnots:
-  val empty: FieldAnnots = FieldAnnots(None, None, None, false, false)
+  val empty: FieldAnnots = FieldAnnots(None, MaybeChar.empty, None, false, false)
 
 /** Runtime carrier for extracted annotations, built by `Derive.productAnnots` / `Derive.sumAnnots`.
   * Shaped like the type they describe: products carry per-field slots, sums per-case slots.
@@ -130,18 +135,27 @@ private[flagged] enum Annots[A]:
       case _             => fieldAnnotsOfSome[Anns]
 
   inline def fieldAnnotsOfSome[Anns]: FieldAnnots =
-    collectField[Anns](Vector.empty, None, None, None, false, false, None, false)
+    collectField[Anns](
+      Vector.empty,
+      MaybeChar.empty,
+      None,
+      None,
+      false,
+      false,
+      MaybeChar.empty,
+      false
+    )
 
   // inline parameters: arguments substitute as expressions, so pass-through values bind
   // nothing per step and a value replaced later in the walk is never constructed at all
   inline def collectField[Anns](
       inline names: Vector[String],
-      inline short: Option[Char],
+      inline short: Int,
       inline help: Option[String],
       inline group: Option[String],
       inline positional: Boolean,
       inline hidden: Boolean,
-      inline split: Option[Char],
+      inline split: Int,
       inline greedy: Boolean
   ): FieldAnnots =
     inline erasedValue[Anns] match
@@ -172,7 +186,7 @@ private[flagged] enum Annots[A]:
       case _: (Ann[flagged.short, args, ?] *: t) =>
         collectField[t](
           names,
-          Some(const1[args, Char]),
+          MaybeChar(const1[args, Char]),
           help,
           group,
           positional,
@@ -217,12 +231,21 @@ private[flagged] enum Annots[A]:
               group,
               positional,
               hidden,
-              Some(const1[args, Char]),
+              MaybeChar(const1[args, Char]),
               greedy
             )
           case _ =>
             val sep = summonInline[Defaults[flagged.split]].defaultArgument(0).asInstanceOf[Char]
-            collectField[t](names, short, help, group, positional, hidden, Some(sep), greedy)
+            collectField[t](
+              names,
+              short,
+              help,
+              group,
+              positional,
+              hidden,
+              MaybeChar(sep),
+              greedy
+            )
       case _: (Ann[flagged.greedy, ?, ?] *: t) =>
         collectField[t](names, short, help, group, positional, hidden, split, true)
       case _: (_ *: t) =>

@@ -1,7 +1,7 @@
 package flagged
 
 import flagged.meta.{Ann, AnnotMirror}
-import flagged.internal.{Derive, FieldAnnots, TargetAnnots}
+import flagged.internal.{Derive, FieldAnnots, MaybeChar, TargetAnnots}
 import scala.deriving.Mirror
 import scala.annotation.targetName
 import flagged.internal.Annots
@@ -87,7 +87,7 @@ class MetaSuite extends munit.FunSuite:
     assertEquals(
       a.perField,
       Vector(
-        FieldAnnots(None, Some('n'), Some("who"), positional = false),
+        FieldAnnots(None, MaybeChar('n'), Some("who"), positional = false),
         FieldAnnots.empty
       )
     )
@@ -123,6 +123,6 @@ class MetaSuite extends munit.FunSuite:
     assertEquals(oldAnnots.onType, TargetAnnots.empty)
     assertEquals(
       oldAnnots.perField,
-      Vector(FieldAnnots(None, Some('x'), None, positional = false))
+      Vector(FieldAnnots(None, MaybeChar('x'), None, positional = false))
     )
   }

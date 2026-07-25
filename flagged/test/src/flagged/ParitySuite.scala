@@ -124,6 +124,16 @@ enum ParityGit derives Parser.CommandGroup:
   @default case Status(@short('s') short: Boolean = false)
   case Push(remote: String = "origin")
 
+case class ParityWrappedDefault(
+    verbose: Boolean = false,
+    action: ParityGit
+) derives Parser.Command
+
+case class ParityRequiredWrappedDefault(
+    required: String,
+    action: ParityGit
+) derives Parser.Command
+
 case class ParityNet(
     @group("Network") host: String = "localhost",
     @group("Network") port: Int = 80,
@@ -208,6 +218,12 @@ class ParitySuite extends munit.FunSuite:
       ok(Flagged.parse[ParityLazyDefault](Seq("--name", "a", "--expensive", "5"))),
       ParityLazyDefault("a", 5)
     )
+  }
+
+  test("defaults are not evaluated when parsing has already failed") {
+    val msg = err(Flagged.parse[ParityLazyDefault](Seq("--wrong")))
+    assert(msg.contains("unknown option '--wrong'"), msg)
+    assert(msg.contains("--name"), msg)
   }
 
   test("more than 22 fields derive and parse (mainargs: supported since 0.6.3)") {
@@ -350,6 +366,13 @@ class ParitySuite extends munit.FunSuite:
     assert(e.contains("requires a given Versioned"), e)
   }
 
+  test("@version rejects a user option that would shadow --version") {
+    @version case class OwnVersion(version: String = "field") derives Parser.Command
+    given Versioned[OwnVersion] = Versioned.of("1.0")
+    val e = intercept[IllegalArgumentException](Parser.Command.derived[OwnVersion])
+    assert(e.getMessage.contains("duplicate option name '--version'"), e.getMessage)
+  }
+
   test("Versioned is consulted when printed, not at derivation") {
     def versionOut(): String = Flagged.parse[ParityDynVersioned](Seq("--version")) match
       case Err(ParseError.Help(t)) => t
@@ -394,6 +417,23 @@ class ParitySuite extends munit.FunSuite:
     val help = Flagged.help[ParityGit]
     assert(help.contains("(default)"), help)
     assert(help.contains("[<command>]"), help)
+  }
+
+  test("a nested default command receives arguments after parent options") {
+    assertEquals(
+      ok(Flagged.parse[ParityWrappedDefault](Seq("--short"))),
+      ParityWrappedDefault(action = ParityGit.Status(true))
+    )
+    assertEquals(
+      ok(Flagged.parse[ParityWrappedDefault](Seq("--verbose", "--short"))),
+      ParityWrappedDefault(verbose = true, action = ParityGit.Status(true))
+    )
+  }
+
+  test("a subcommand is not parsed until its parent has validated") {
+    val msg = err(Flagged.parse[ParityRequiredWrappedDefault](Seq("--child-option")))
+    assert(msg.contains("missing required argument: --required"), msg)
+    assert(!msg.contains("child-option"), msg)
   }
 
   test("@default on a field is a compile error") {

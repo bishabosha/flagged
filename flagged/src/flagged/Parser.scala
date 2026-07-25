@@ -82,7 +82,10 @@ sealed trait Parser[A]:
   final def parse(args: Seq[String]): ParseResult[A] = parse(args, typeName)
 
   final def parse(args: Seq[String], prog: String): ParseResult[A] =
-    Engine.run(command, prog, Vector.empty, args.toIndexedSeq, 0).asInstanceOf[ParseResult[A]]
+    val indexed = args match
+      case xs: IndexedSeq[?] => xs.asInstanceOf[IndexedSeq[String]]
+      case _                 => ArraySeq.unsafeWrapArray(args.toArray)
+    Engine.run(command, prog, Vector.empty, indexed, 0).asInstanceOf[ParseResult[A]]
 
   /** The rendered top-level help screen. */
   final def help: String = help(typeName)
@@ -374,7 +377,12 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     def emap[B](f: A => Result[B, String]): Command[B] = make(emapImpl(f), prog)
     def withProg(name: String): Command[A]             = make(impl, name)
     private[flagged] final def emapImpl[B](f: A => Result[B, String]): flagged.internal.Command =
-      impl.copy(build = arr => impl.build(arr).flatMap(a => f(a.asInstanceOf[A])))
+      impl.copy(build =
+        (arr, base, out, outIndex) =>
+          Result.task:
+            impl.build(arr, base, out, outIndex).check
+            out(outIndex) = f(out(outIndex).asInstanceOf[A]).ok
+      )
   object Command:
     /** Derivation for a single command: `case class Config(...) derives Parser.Command`. */
     inline def derived[A](using m: Mirror.ProductOf[A]): Command[A] = internal.Derive.product[A]

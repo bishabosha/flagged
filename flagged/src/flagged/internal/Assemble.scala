@@ -4,6 +4,8 @@ import flagged.Parser
 import flagged.meta.Defaults
 import scala.annotation.publicInBinary
 import steps.result.Result
+import steps.result.Result.eval.ok
+import scala.collection.immutable.IntMap
 import scala.collection.mutable
 
 /** One case of a derived sum: either a singleton value or a nested command. */
@@ -82,19 +84,26 @@ private[flagged] enum SubEntry:
           None,
           Some(spec),
           Vector.empty,
-          arr => Result.Ok(arr(0)),
+          (arr, base, out, i) =>
+            Result.task:
+              out(i) = arr(base)
+          ,
           1
         )
       case c: Parser.Command[?] =>
         return c.impl
+    val spec = PosSpec("value", "", p.typeName, 0, mode, None)
     Command(
       "",
       IArray.empty,
-      IArray(PosSpec("value", "", p.typeName, 0, mode, None)),
+      IArray(spec),
       None,
       None,
       Vector.empty,
-      arr => Result.Ok(arr(0)),
+      (arr, base, out, i) =>
+        Result.task:
+          out(i) = arr(base)
+      ,
       1
     )
 
@@ -128,7 +137,10 @@ private[flagged] enum SubEntry:
       Some(SubGroup(0, false, None, cases, defaultCase)),
       None,
       Vector.empty,
-      arr => Result.Ok(arr(0)),
+      (arr, base, out, i) =>
+        Result.task:
+          out(i) = arr(base)
+      ,
       1,
       version
     )
@@ -149,7 +161,7 @@ private[flagged] enum SubEntry:
     // detection is the map insert itself
     private var lookup: java.util.HashMap[String, OptSpec]    = null
     private var opts: mutable.ArrayBuffer[OptSpec]            = null
-    private var shorts: mutable.ArrayBuffer[OptSpec]          = null
+    private var shorts: IntMap[OptSpec]                       = IntMap.empty
     private var poss: mutable.ArrayBuffer[PosSpec]            = null
     private var spls: mutable.Builder[Splice, Vector[Splice]] = null
     private var sub: SubGroup                                 = null
@@ -170,13 +182,14 @@ private[flagged] enum SubEntry:
       if opts == null then opts = mutable.ArrayBuffer.empty
       opts += spec
       putName(spec.longDisplay, spec, from)
-      spec.aliases.foreach(a => putName("--" + a, spec, from))
-      spec.short.foreach { c =>
-        if shorts == null then shorts = mutable.ArrayBuffer.empty
-        else if shorts.exists(_.short.contains(c)) then
-          invalid(s"duplicate short option '-$c'${origin(from)}")
-        shorts += spec
-      }
+      var ai = 0
+      while ai < spec.aliases.length do
+        putName("--" + spec.aliases(ai), spec, from)
+        ai += 1
+      if spec.short >= 0 then
+        val c = spec.short.toChar
+        if shorts.contains(spec.short) then invalid(s"duplicate short option '-$c'${origin(from)}")
+        shorts = shorts.updated(spec.short, spec)
 
     def addField(label: String, parser: Parser[?], optional: Boolean, anns: FieldAnnots): Unit =
       val i = index
@@ -238,7 +251,7 @@ private[flagged] enum SubEntry:
             // a prefixed splice renames its options (--net-host) and drops their short aliases,
             // so the same group can be spliced more than once
             val long    = prefix.fold(o.long)(pre => s"$pre-${o.long}")
-            val short   = if prefix.isEmpty then o.short else None
+            val short   = if prefix.isEmpty then o.short else MaybeChar.empty
             val aliases = o.aliases.map(a => prefix.fold(a)(pre => s"$pre-$a"))
             addOpt(
               o.copy(
@@ -279,7 +292,7 @@ private[flagged] enum SubEntry:
           else named(pr.helpMetavar, mode)
 
         case r: Parser.Repeated[?] =>
-          val mode = Mode.Repeated(r, anns.split.getOrElse(0), anns.greedy)
+          val mode = Mode.Repeated(r, anns.split, anns.greedy)
           if anns.positional then positional(r.typeName, mode, required = false)
           else named(r.typeName, mode)
 
@@ -292,27 +305,43 @@ private[flagged] enum SubEntry:
         build: (Array[Any], Int) => Result[Any, String],
         version: Option[() => String]
     ): Command =
+      // Compatibility entry point for inline derivations compiled against the original
+      // value-returning builder protocol. Newly compiled derivations use `resultInto` below.
+      resultInto(
+        onType,
+        (arr, base, out, outIndex) =>
+          Result.task:
+            val input =
+              if base == 0 && arr.length == storage then arr
+              else arr.slice(base, base + storage)
+            out(outIndex) = build(input, n).ok
+        ,
+        version
+      )
+
+    def resultInto(
+        onType: TargetAnnots,
+        build: (Array[Any], Int, Array[Any], Int) => Result[Unit, String],
+        version: Option[() => String]
+    ): Command =
+      // `@version` contributes an implicit hidden option. A null spec keeps its parsing built-in,
+      // while registering its name through the same insertion that diagnoses field collisions.
+      if version.nonEmpty then putName("--version", null, null)
+      val allOpts    = if opts == null then Array.empty[OptSpec] else opts.toArray
+      val allPos     = if poss == null then Array.empty[PosSpec] else poss.toArray
       val allSplices = if spls == null then Vector.empty[Splice] else spls.result()
+
       // `build` receives the whole storage plus the parent's own field count — no trimming
       Command(
         onType.help.getOrElse(""),
-        if opts == null then IArray.empty else IArray.unsafeFromArray(opts.toArray),
-        if poss == null then IArray.empty else IArray.unsafeFromArray(poss.toArray),
+        IArray.unsafeFromArray(allOpts),
+        IArray.unsafeFromArray(allPos),
         if sub == null then None else Some(sub),
         if trailing == null then None else Some(trailing),
         allSplices,
-        arr => build(arr, n),
+        build,
         storage,
         version,
         if lookup == null then Command.noLookup else lookup,
-        if shorts == null then Command.noShortChars
-        else
-          val cs = new Array[Char](shorts.length)
-          var k  = 0
-          while k < cs.length do
-            cs(k) = shorts(k).short.get
-            k += 1
-          cs
-        ,
-        if shorts == null then Command.noShortSpecs else shorts.toArray
+        shorts
       )

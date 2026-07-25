@@ -49,6 +49,18 @@ class ValueParserSuite extends munit.FunSuite:
     assertEquals(cfg.id, Some(id))
   }
 
+  test("negative infinity is accepted as a separate or positional numeric value") {
+    assertEquals(
+      ok(Flagged.parse[ValueConfig](Seq("--ratio", "-Infinity"))).ratio,
+      Double.NegativeInfinity
+    )
+    case class Infinite(@positional value: Double) derives Parser.Command
+    assertEquals(
+      ok(Flagged.parse[Infinite](Seq("-Infinity"))),
+      Infinite(Double.NegativeInfinity)
+    )
+  }
+
   test("reader typeName appears as metavar in help") {
     Flagged.parse[ValueConfig](Seq("--help")) match
       case Err(ParseError.Help(t)) =>
