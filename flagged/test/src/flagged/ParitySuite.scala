@@ -365,7 +365,7 @@ class ParitySuite extends munit.FunSuite:
     @version case class OwnVersion(version: String = "field") derives Parser.Command
     given Versioned[OwnVersion] = Versioned.of("1.0")
     val e = intercept[IllegalArgumentException](Parser.Command.derived[OwnVersion])
-    assert(e.getMessage.contains("option name 'version' is reserved"), e.getMessage)
+    assert(e.getMessage.contains("duplicate option name '--version'"), e.getMessage)
   }
 
   test("Versioned is consulted when printed, not at derivation") {
