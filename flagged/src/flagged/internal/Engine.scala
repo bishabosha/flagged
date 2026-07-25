@@ -2,8 +2,8 @@ package flagged.internal
 
 import flagged.{ParseError, ParseResult}
 import steps.result.Result
-import steps.result.Result.{Ok, Err, eval}
-import steps.result.Result.eval.ok
+import steps.result.Result.{Err, eval}
+import steps.result.Result.eval.{check, ok}
 import scala.collection.mutable
 
 /** The token-stream parser, in three orthogonal phases:
@@ -16,8 +16,8 @@ import scala.collection.mutable
   *   1. *validation* — one pass per spec interprets those scalars (count flags, last-wins singles,
   *      combined repeats), parsing single values exactly once — an overridden earlier mention is
   *      never parsed — and collecting missing required arguments;
-  *   1. *materialization* — after every selected command level validates, deferred builds evaluate
-  *      defaults, construct values, and finally invoke an `@run` method if one was selected.
+  *   1. *materialization* — after every selected command level validates, builds evaluate defaults,
+  *      construct values, and finally invoke an `@run` method if one was selected.
   *
   * The hot path allocates nothing per token: parsers write successful values straight into the
   * value slots through the `*Into` protocol (success is the shared `Result.done`), per-slot state
@@ -33,8 +33,6 @@ import scala.collection.mutable
   */
 private[flagged] object Engine:
 
-  private type Deferred = () => ParseResult[Any]
-
   def run(
       cmd: Command,
       prog: String,
@@ -42,22 +40,23 @@ private[flagged] object Engine:
       args: IndexedSeq[String],
       from: Int
   ): ParseResult[Any] =
-    deferred(cmd, prog, path, args, from) match
-      case Ok(build) => build()
-      case Err(e)    => Err(e)
+    val out = new Array[Any](1)
+    runInto(cmd, prog, path, args, from, out, 0).map(_ => out(0))
 
-  /** Parse and validate one command level without building its result. Keeping the build deferred
-    * lets command levels aggregate their diagnostics before an `@run` method or default is
-    * evaluated.
+  /** Parse one command level and write its result into `out`. The task boundary stays in this
+    * method, so its `.ok`, `.check`, and `raise` operations cannot escape through a helper method
+    * or closure.
     */
-  private def deferred(
+  private def runInto(
       cmd: Command,
       prog: String,
       path: IndexedSeq[String],
       args: IndexedSeq[String],
-      from: Int
-  ): ParseResult[Deferred] =
-    Result:
+      from: Int,
+      out: Array[Any],
+      outIndex: Int
+  ): ParseResult[Unit] =
+    Result.task:
       def full = (prog +: path).mkString(" ")
       def hint = s"Try '$full --help' for more information."
 
@@ -65,8 +64,6 @@ private[flagged] object Engine:
       def report(msg: String): Unit           =
         if errors == null then errors = mutable.ArrayBuffer.empty[String]
         errors += msg
-      def helpNow(all: Boolean = false): Nothing =
-        eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path, all)))
 
       val n      = cmd.arity
       val values = new Array[Any](n)
@@ -87,12 +84,13 @@ private[flagged] object Engine:
       // element collectors for repeated specs, allocated only when one occurs
       var reps: Array[flagged.Parser.Collector] = null
 
-      var subBuild: Deferred = null
-      var subErrored         = false
-      var trailSeen          = false
-      var idx                = from
-      var posIdx             = 0
-      var noMoreOpts         = false
+      var selectedSub: SubCase = null
+      var selectedFrom         = 0
+      var subErrored           = false
+      var trailSeen            = false
+      var idx                  = from
+      var posIdx               = 0
+      var noMoreOpts           = false
 
       val shortChars = cmd.shortChars
       val shortSpecs = cmd.shortSpecs
@@ -228,19 +226,16 @@ private[flagged] object Engine:
           i += 1
         null
 
-      def runSub(sc: SubCase, fromIdx: Int): Unit =
-        if errors == null then
-          deferred(sc.command, prog, path :+ sc.name, args, fromIdx) match
-            case Ok(build) => subBuild = build
-            case Err(e)    => eval.raise(e)
-        else subErrored = true
+      def selectSub(sc: SubCase, fromIdx: Int): Unit =
+        selectedSub = sc
+        selectedFrom = fromIdx
         idx = args.length
 
       def handleFree(tok: String): Unit =
         if subGroup != null then
           val sc = findCase(subGroup, tok)
-          if sc != null then runSub(sc, idx)
-          else if defaultSubCase != null then runSub(defaultSubCase, idx - 1)
+          if sc != null then selectSub(sc, idx)
+          else if defaultSubCase != null then selectSub(defaultSubCase, idx - 1)
           else
             val cand = Vector.newBuilder[String]
             subGroup.cases.foreach { c =>
@@ -317,14 +312,16 @@ private[flagged] object Engine:
           val eq          = tok.indexOf('=')
           val key         = if eq == -1 then tok else tok.substring(0, eq)
           val inlineValue = if eq == -1 then null else tok.substring(eq + 1)
-          if key == "--help" then helpNow()
+          if key == "--help" then
+            eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path, showHidden = false)))
           val spec = cmd.longLookup.get(key)
           if spec == null then
             if key == "--version" && cmd.version.nonEmpty then
               // a user option named `version` takes precedence (the lookup ran first)
               eval.raise(ParseError.Help(cmd.version.get()))
-            else if key == "--help-all" then helpNow(all = true)
-            else if defaultSubCase != null then runSub(defaultSubCase, idx - 1)
+            else if key == "--help-all" then
+              eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path, showHidden = true)))
+            else if defaultSubCase != null then selectSub(defaultSubCase, idx - 1)
             else
               val cand = Vector.newBuilder[String]
               cmd.opts.foreach { o =>
@@ -357,8 +354,9 @@ private[flagged] object Engine:
             val c    = tok(i)
             val spec = shortSpec(c)
             if spec == null then
-              if c == 'h' then helpNow()
-              if i == 1 && defaultSubCase != null then runSub(defaultSubCase, idx - 1)
+              if c == 'h' then
+                eval.raise(ParseError.Help(HelpFmt.render(cmd, prog, path, showHidden = false)))
+              if i == 1 && defaultSubCase != null then selectSub(defaultSubCase, idx - 1)
               else report(s"unknown option '-$c'")
               stop = true // the rest of the cluster is unintelligible
             else if isFlag(spec) then
@@ -499,12 +497,12 @@ private[flagged] object Engine:
         case None => ()
 
       cmd.sub match
-        case Some(g) if subBuild == null && !subErrored =>
+        case Some(g) if selectedSub == null && !subErrored =>
           g.default match
             case Some(_) => ()
             case None    =>
               g.defaultCase match
-                case Some(dc) => runSub(dc, args.length)
+                case Some(dc) => selectSub(dc, args.length)
                 case None     =>
                   if !g.optional then
                     report(
@@ -515,38 +513,44 @@ private[flagged] object Engine:
 
       if errors != null then eval.raise(ParseError.Failure(errors.mkString("\n"), hint))
 
-      // ---- phase 3: deferred materialization -----------------------------------
+      // ---- phase 3: materialization --------------------------------------------
 
-      () =>
-        Result:
-          cmd.sub.foreach { g =>
-            values(g.index) =
-              if subBuild != null then
-                val v = subBuild().ok
-                if g.optional then Some(v) else v
-              else
-                g.default match
-                  case Some(d) => d()
-                  case None    => None // only an absent optional group can reach this branch
-          }
+      cmd.sub match
+        case Some(g) =>
+          values(g.index) =
+            if selectedSub != null then
+              runInto(
+                selectedSub.command,
+                prog,
+                path :+ selectedSub.name,
+                args,
+                selectedFrom,
+                values,
+                g.index
+              ).check
+              val v = values(g.index)
+              if g.optional then Some(v) else v
+            else
+              g.default match
+                case Some(d) => d()
+                case None    => None // only an absent optional group can reach this branch
+        case None => ()
 
-          var oj = 0
-          while oj < optSpecs.length do
-            val o = optSpecs(oj)
-            if counts(o.index) == 0 && !skipIdx(o.index) then
-              o.default.foreach(d => values(o.index) = d())
-            oj += 1
+      var oj = 0
+      while oj < optSpecs.length do
+        val o = optSpecs(oj)
+        if counts(o.index) == 0 && !skipIdx(o.index) then
+          o.default.foreach(d => values(o.index) = d())
+        oj += 1
 
-          var pj = 0
-          while pj < posSpecs.length do
-            val p = posSpecs(pj)
-            if counts(p.index) == 0 then p.default.foreach(d => values(p.index) = d())
-            pj += 1
+      var pj = 0
+      while pj < posSpecs.length do
+        val p = posSpecs(pj)
+        if counts(p.index) == 0 then p.default.foreach(d => values(p.index) = d())
+        pj += 1
 
-          cmd.trailing.foreach { t =>
-            if !trailSeen then t.default.foreach(d => values(t.index) = d())
-          }
+      cmd.trailing.foreach { t =>
+        if !trailSeen then t.default.foreach(d => values(t.index) = d())
+      }
 
-          cmd.finish(values, counts, 0) match
-            case Ok(v)    => v
-            case Err(msg) => eval.raise(ParseError.Failure(msg, hint))
+      out(outIndex) = cmd.finish(values, counts, 0).mapErr(msg => ParseError.Failure(msg, hint)).ok

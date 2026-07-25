@@ -129,6 +129,11 @@ case class ParityWrappedDefault(
     action: ParityGit
 ) derives Parser.Command
 
+case class ParityRequiredWrappedDefault(
+    required: String,
+    action: ParityGit
+) derives Parser.Command
+
 case class ParityNet(
     @group("Network") host: String = "localhost",
     @group("Network") port: Int = 80,
@@ -423,6 +428,12 @@ class ParitySuite extends munit.FunSuite:
       ok(Flagged.parse[ParityWrappedDefault](Seq("--verbose", "--short"))),
       ParityWrappedDefault(verbose = true, action = ParityGit.Status(true))
     )
+  }
+
+  test("a subcommand is not parsed until its parent has validated") {
+    val msg = err(Flagged.parse[ParityRequiredWrappedDefault](Seq("--child-option")))
+    assert(msg.contains("missing required argument: --required"), msg)
+    assert(!msg.contains("child-option"), msg)
   }
 
   test("@default on a field is a compile error") {
