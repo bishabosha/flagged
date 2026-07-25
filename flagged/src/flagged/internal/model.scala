@@ -3,6 +3,7 @@ package flagged.internal
 import steps.result.Result
 import steps.result.Result.eval.check
 import scala.annotation.publicInBinary
+import scala.collection.immutable.IntMap
 
 /** Internal runtime model of a derived command — `private[flagged]` like the rest of `internal`;
   * inline expansions reach the pieces they need through `@publicInBinary` terms.
@@ -157,13 +158,11 @@ private[flagged] final case class Command(
     build: (Array[Any], Int, Array[Any], Int) => Result[Unit, String],
     arity: Int, // value-storage size: own fields plus spliced children's storage
     version: Option[() => String] = None, // from Versioned[A]; called by --version and help
-    // per-token lookups, built during assembly (duplicate-name detection rides on the map
-    // inserts): java.util maps return null instead of allocating an Option, and the long keys
-    // carry their `--` prefix so a plain long token needs no substring at all (the key doubles
-    // as the option's display spelling)
+    // Per-token lookups, built during assembly. Long keys carry their `--` prefix so a plain long
+    // token needs no substring (the key doubles as the option's display spelling). IntMap keeps
+    // short-option characters unboxed without a linear scan.
     longLookup: java.util.HashMap[String, OptSpec] = Command.noLookup,
-    shortChars: Array[Char] = Command.noShortChars,
-    shortSpecs: Array[OptSpec] = Command.noShortSpecs
+    shortLookup: IntMap[OptSpec] = Command.noShortLookup
 ):
 
   /** Build spliced children from their storage ranges, then build this command's value; the first
@@ -214,9 +213,8 @@ private[flagged] final case class Command(
 
 private[flagged] object Command:
   // shared empties for option-less commands; the map is never mutated after construction
-  private[internal] val noLookup     = new java.util.HashMap[String, OptSpec]
-  private[internal] val noShortChars = Array.empty[Char]
-  private[internal] val noShortSpecs = Array.empty[OptSpec]
+  private[internal] val noLookup      = new java.util.HashMap[String, OptSpec]
+  private[internal] val noShortLookup = IntMap.empty[OptSpec]
 
   /** A command with no parameters that always produces `value` (parameterless enum case / case
     * object).

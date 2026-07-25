@@ -5,6 +5,7 @@ import flagged.meta.Defaults
 import scala.annotation.publicInBinary
 import steps.result.Result
 import steps.result.Result.eval.ok
+import scala.collection.immutable.IntMap
 import scala.collection.mutable
 
 /** One case of a derived sum: either a singleton value or a nested command. */
@@ -160,7 +161,7 @@ private[flagged] enum SubEntry:
     // detection is the map insert itself
     private var lookup: java.util.HashMap[String, OptSpec]    = null
     private var opts: mutable.ArrayBuffer[OptSpec]            = null
-    private var shorts: mutable.ArrayBuffer[OptSpec]          = null
+    private var shorts: IntMap[OptSpec]                       = IntMap.empty
     private var poss: mutable.ArrayBuffer[PosSpec]            = null
     private var spls: mutable.Builder[Splice, Vector[Splice]] = null
     private var sub: SubGroup                                 = null
@@ -187,14 +188,8 @@ private[flagged] enum SubEntry:
         ai += 1
       if spec.short >= 0 then
         val c = spec.short.toChar
-        if shorts == null then shorts = mutable.ArrayBuffer.empty
-        else
-          var si = 0
-          while si < shorts.length do
-            if shorts(si).short == spec.short then
-              invalid(s"duplicate short option '-$c'${origin(from)}")
-            si += 1
-        shorts += spec
+        if shorts.contains(spec.short) then invalid(s"duplicate short option '-$c'${origin(from)}")
+        shorts = shorts.updated(spec.short, spec)
 
     def addField(label: String, parser: Parser[?], optional: Boolean, anns: FieldAnnots): Unit =
       val i = index
@@ -348,14 +343,5 @@ private[flagged] enum SubEntry:
         storage,
         version,
         if lookup == null then Command.noLookup else lookup,
-        if shorts == null then Command.noShortChars
-        else
-          val cs = new Array[Char](shorts.length)
-          var k  = 0
-          while k < cs.length do
-            cs(k) = shorts(k).short.toChar
-            k += 1
-          cs
-        ,
-        if shorts == null then Command.noShortSpecs else shorts.toArray
+        shorts
       )

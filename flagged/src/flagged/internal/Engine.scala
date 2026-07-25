@@ -115,9 +115,8 @@ private[flagged] object Engine:
     private val defaultSubCase: SubCase =
       if subGroup == null then null else subGroup.defaultCase.orNull
 
-    private val shortChars = command.shortChars
-    private val shortSpecs = command.shortSpecs
-    private val posSpecs   = command.positionals
+    private val shortLookup = command.shortLookup
+    private val posSpecs    = command.positionals
 
     private def appendPath(b: mutable.Builder[String, Vector[String]]): Unit =
       if parent != null then parent.appendPath(b)
@@ -166,11 +165,7 @@ private[flagged] object Engine:
       else values(spec.index).asInstanceOf[String]
 
     private def shortSpec(c: Char): OptSpec =
-      var i = 0
-      while i < shortChars.length do
-        if shortChars(i) == c then return shortSpecs(i)
-        i += 1
-      null
+      shortLookup.getOrElse(c.toInt, null)
 
     private def isNegativeNumber(s: String): Boolean =
       s.length > 1 && s(0) == '-' &&
