@@ -176,8 +176,14 @@ import steps.result.Result
   ): Command =
     Derive
       .fieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, m.MirroredAnnotations](m)
-      .result(
+      .resultInto(
         onMethod,
-        (arr, _) => Result.Ok(m.invoke(o, arr)),
+        (arr, base, out, outIndex) =>
+          Result.task:
+            val input =
+              if base == 0 then arr
+              else arr.slice(base, base + constValue[Tuple.Size[m.MirroredElemTypes]])
+            out(outIndex) = m.invoke(o, input)
+        ,
         Derive.versionOf[T, m.MirroredSelfAnnotations]
       )

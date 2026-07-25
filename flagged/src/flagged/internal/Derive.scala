@@ -32,15 +32,28 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
   @publicInBinary private[flagged] def arrayProduct(arr: Array[Any], n: Int): Product =
     ArrayProduct(arr, n)
 
+  /** Offset-aware counterpart used by destination-oriented command builders. */
+  @publicInBinary private[flagged] def arrayProductAt(
+      arr: Array[Any],
+      offset: Int,
+      n: Int
+  ): Product =
+    ArrayProduct(arr, offset, n)
+
   inline def product[A](using m: Mirror.ProductOf[A]): Parser.Command[A] =
     summonFrom:
       case am: AnnotMirror.Product[A] =>
         val onType = Annots.targetAnnotsOf[am.MirroredSelfAnnotations]
         val cmd    = fieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, am.MirroredAnnotations](
           Defaults.derived[A]
-        ).result(
+        ).resultInto(
           onType,
-          (arr, k) => steps.result.Result.Ok(m.fromProduct(arrayProduct(arr, k))),
+          (arr, base, out, outIndex) =>
+            steps.result.Result.task:
+              out(outIndex) = m.fromProduct(
+                arrayProductAt(arr, base, constValue[Tuple.Size[m.MirroredElemTypes]])
+              )
+          ,
           versionOf[A, am.MirroredSelfAnnotations]
         )
         Parser.make[A](cmd, Assemble.progName(constValue[m.MirroredLabel], onType))
@@ -57,9 +70,14 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
         val cmd    =
           sharedFieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, am.MirroredAnnotations](
             Defaults.derived[A]
-          ).result(
+          ).resultInto(
             onType,
-            (arr, k) => steps.result.Result.Ok(m.fromProduct(arrayProduct(arr, k))),
+            (arr, base, out, outIndex) =>
+              steps.result.Result.task:
+                out(outIndex) = m.fromProduct(
+                  arrayProductAt(arr, base, constValue[Tuple.Size[m.MirroredElemTypes]])
+                )
+            ,
             versionOf[A, am.MirroredSelfAnnotations]
           )
         Parser.makeShared[A](cmd, Assemble.progName(constValue[m.MirroredLabel], onType))

@@ -553,4 +553,6 @@ private[flagged] object Engine:
         if !trailSeen then t.default.foreach(d => values(t.index) = d())
       }
 
-      out(outIndex) = cmd.finish(values, counts, 0).mapErr(msg => ParseError.Failure(msg, hint)).ok
+      cmd.finishInto(values, counts, 0, out, outIndex) match
+        case Err(msg) => eval.raise(ParseError.Failure(msg, hint))
+        case _        => ()

@@ -4,6 +4,7 @@ import flagged.Parser
 import flagged.meta.Defaults
 import scala.annotation.publicInBinary
 import steps.result.Result
+import steps.result.Result.eval.ok
 import scala.collection.mutable
 
 /** One case of a derived sum: either a singleton value or a nested command. */
@@ -82,7 +83,10 @@ private[flagged] enum SubEntry:
           None,
           Some(spec),
           Vector.empty,
-          arr => Result.Ok(arr(0)),
+          (arr, base, out, i) =>
+            Result.task:
+              out(i) = arr(base)
+          ,
           1
         )
       case c: Parser.Command[?] =>
@@ -94,7 +98,10 @@ private[flagged] enum SubEntry:
       None,
       None,
       Vector.empty,
-      arr => Result.Ok(arr(0)),
+      (arr, base, out, i) =>
+        Result.task:
+          out(i) = arr(base)
+      ,
       1
     )
 
@@ -128,7 +135,10 @@ private[flagged] enum SubEntry:
       Some(SubGroup(0, false, None, cases, defaultCase)),
       None,
       Vector.empty,
-      arr => Result.Ok(arr(0)),
+      (arr, base, out, i) =>
+        Result.task:
+          out(i) = arr(base)
+      ,
       1,
       version
     )
@@ -292,6 +302,25 @@ private[flagged] enum SubEntry:
         build: (Array[Any], Int) => Result[Any, String],
         version: Option[() => String]
     ): Command =
+      // Compatibility entry point for inline derivations compiled against the original
+      // value-returning builder protocol. Newly compiled derivations use `resultInto` below.
+      resultInto(
+        onType,
+        (arr, base, out, outIndex) =>
+          Result.task:
+            val input =
+              if base == 0 && arr.length == storage then arr
+              else arr.slice(base, base + storage)
+            out(outIndex) = build(input, n).ok
+        ,
+        version
+      )
+
+    def resultInto(
+        onType: TargetAnnots,
+        build: (Array[Any], Int, Array[Any], Int) => Result[Unit, String],
+        version: Option[() => String]
+    ): Command =
       // `@version` contributes an implicit hidden option. A null spec keeps its parsing built-in,
       // while registering its name through the same insertion that diagnoses field collisions.
       if version.nonEmpty then putName("--version", null, null)
@@ -304,7 +333,7 @@ private[flagged] enum SubEntry:
         if sub == null then None else Some(sub),
         if trailing == null then None else Some(trailing),
         allSplices,
-        arr => build(arr, n),
+        build,
         storage,
         version,
         if lookup == null then Command.noLookup else lookup,
