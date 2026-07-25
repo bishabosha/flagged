@@ -129,8 +129,9 @@ Annotations fine-tune the rest: `@name` (long-name override and aliases), `@shor
 separator, `,` by default: `--env A,B,C`), `@greedy` (a repeated option consumes the
 following free tokens: `--nums 10 20 99`; compile error if the command also declares
 positional or subcommand fields, which would make the grammar ambiguous), `@version`
-(adds `--version` via a `Versioned` instance), and `@default` (the command run when
-no command token is given).
+(adds `--version`: `@version("0.1.0")` prints the literal, bare `@version` reads a
+given `Versioned` instance when printed), and `@default` (the command run when no
+command token is given).
 
 ### Subcommands
 

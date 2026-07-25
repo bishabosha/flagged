@@ -95,16 +95,31 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
         )
         Parser.makeGroup[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
-  /** `@version` on the type requires a [[flagged.Versioned]] instance; the string is requested when
-    * printed, not captured at derivation.
+  /** `@version` on the type: a non-empty literal argument is the version string as given and takes
+    * precedence over `dynamic`; otherwise `dynamic` (the default) requires a [[flagged.Versioned]]
+    * instance instead, whose string is requested when printed, not captured at derivation. With
+    * `dynamic = false` and no usable literal, the (empty) `value` is used as-is.
     */
   inline def versionOf[A, Anns]: Option[() => String] =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                        => None
-      case _: (Ann[flagged.version, ?, ?] *: _) =>
-        val v = summonInline[flagged.Versioned[A]]
-        Some(() => v.version)
+      case _: EmptyTuple                                   => None
+      case _: (Ann[flagged.version, args, defaulted] *: _) =>
+        inline erasedValue[(args, defaulted)] match
+          case _: ((("", ?)), ?)  => versionDynamic[A, args] // provided but empty: no literal
+          case _: (?, (false, ?)) =>
+            Some(() => constValue[Tuple.Head[args & NonEmptyTuple] & String])
+          case _ => versionDynamic[A, args]
       case _: (_ *: t) => versionOf[A, t]
+
+  private inline def versionDynamic[A, Args <: Tuple]: Option[() => String] =
+    inline erasedValue[Args] match
+      // `dynamic = false` with no non-empty literal: the empty value is used as-is
+      case _: (?, false) => Some(() => "")
+      case _             => summonVersioned[A]
+
+  private inline def summonVersioned[A]: Option[() => String] =
+    val v = summonInline[flagged.Versioned[A]]
+    Some(() => v.version)
 
   /** Product parser for a tuple: each element type's `Value` parses one consecutive token. */
   inline def tupleProduct[T <: NonEmptyTuple]: Parser.Product[T] =

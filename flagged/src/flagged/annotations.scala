@@ -28,11 +28,14 @@ final case class positional() extends StaticAnnotation derives Defaults
 final case class hidden() extends StaticAnnotation derives Defaults
 
 /** Opt into a `--version` flag and a version line in the help header. Valid on the top-level type
-  * of a command or command group; requires a given [[Versioned]] instance for the type, which
-  * supplies the version string when it is printed. The command may not also declare an option or
-  * alias named `version`.
+  * of a command or command group. `@version("0.1.0")` prints the given literal; without one,
+  * `dynamic` (true by default, so bare `@version` implies it) requires a given [[Versioned]]
+  * instance for the type, which supplies the version string when it is printed. A non-empty `value`
+  * takes precedence over `dynamic`. The command may not also declare an option or alias named
+  * `version`.
   */
-final case class version() extends StaticAnnotation derives Defaults
+final case class version(value: String = "", dynamic: Boolean = true) extends StaticAnnotation
+    derives Defaults
 
 /** Put an option under a titled section in help output (`Output options:`). On a spliced options
   * group field, titles all of the group's options that have no group of their own.

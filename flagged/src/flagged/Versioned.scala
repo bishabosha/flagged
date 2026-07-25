@@ -2,9 +2,10 @@ package flagged
 
 /** Provides the version string printed by `--version` and shown in the help header.
   *
-  * Required by `@version` on a top-level type. The string is requested when help or `--version` is
-  * rendered, not at derivation, so it can be a constant or computed on demand (build info, an
-  * environment variable, ...).
+  * Required by `@version` on a top-level type unless it carries a non-empty literal
+  * (`@version("0.1.0")`), which is used as-is and needs no instance. The string is requested when
+  * help or `--version` is rendered, not at derivation, so it can be a constant or computed on
+  * demand (build info, an environment variable, ...).
   */
 @scala.annotation.implicitNotFound(
   "@version on ${A} requires a given Versioned[${A}] that provides the version string."
