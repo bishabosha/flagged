@@ -114,7 +114,7 @@ private[flagged] object Engine:
 
       def isNegativeNumber(s: String): Boolean =
         s.length > 1 && s(0) == '-' &&
-          (s(1).isDigit || (s(1) == '.' && s.length > 2 && s(2).isDigit))
+          (s(1).isDigit || (s(1) == '.' && s.length > 2 && s(2).isDigit) || s == "-Infinity")
 
       def looksLikeOption(s: String): Boolean =
         s.length > 1 && s.startsWith("-") && !isNegativeNumber(s)
