@@ -181,13 +181,20 @@ private[flagged] enum SubEntry:
       if opts == null then opts = mutable.ArrayBuffer.empty
       opts += spec
       putName(spec.longDisplay, spec, from)
-      spec.aliases.foreach(a => putName("--" + a, spec, from))
-      spec.short.foreach { c =>
+      var ai = 0
+      while ai < spec.aliases.length do
+        putName("--" + spec.aliases(ai), spec, from)
+        ai += 1
+      if spec.short >= 0 then
+        val c = spec.short.toChar
         if shorts == null then shorts = mutable.ArrayBuffer.empty
-        else if shorts.exists(_.short.contains(c)) then
-          invalid(s"duplicate short option '-$c'${origin(from)}")
+        else
+          var si = 0
+          while si < shorts.length do
+            if shorts(si).short == spec.short then
+              invalid(s"duplicate short option '-$c'${origin(from)}")
+            si += 1
         shorts += spec
-      }
 
     def addField(label: String, parser: Parser[?], optional: Boolean, anns: FieldAnnots): Unit =
       val i = index
@@ -249,7 +256,7 @@ private[flagged] enum SubEntry:
             // a prefixed splice renames its options (--net-host) and drops their short aliases,
             // so the same group can be spliced more than once
             val long    = prefix.fold(o.long)(pre => s"$pre-${o.long}")
-            val short   = if prefix.isEmpty then o.short else None
+            val short   = if prefix.isEmpty then o.short else MaybeChar.empty
             val aliases = o.aliases.map(a => prefix.fold(a)(pre => s"$pre-$a"))
             addOpt(
               o.copy(
@@ -290,7 +297,7 @@ private[flagged] enum SubEntry:
           else named(pr.helpMetavar, mode)
 
         case r: Parser.Repeated[?] =>
-          val mode = Mode.Repeated(r, anns.split.getOrElse(0), anns.greedy)
+          val mode = Mode.Repeated(r, anns.split, anns.greedy)
           if anns.positional then positional(r.typeName, mode, required = false)
           else named(r.typeName, mode)
 
@@ -346,7 +353,7 @@ private[flagged] enum SubEntry:
           val cs = new Array[Char](shorts.length)
           var k  = 0
           while k < cs.length do
-            cs(k) = shorts(k).short.get
+            cs(k) = shorts(k).short.toChar
             k += 1
           cs
         ,

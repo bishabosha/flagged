@@ -254,7 +254,7 @@ private[flagged] object Engine:
       mention(spec)
       spec.mode match
         case Mode.Repeated(parser, sep, _) =>
-          if sep != 0 then addSplitElems(spec, parser, raw, display, sep)
+          if sep >= 0 then addSplitElems(spec, parser, raw, display, sep.toChar)
           else addElem(spec, parser, raw, display)
         case Mode.Product(parser, _) =>
           report(s"option '$display' takes ${parser.arity} values, each as its own argument")

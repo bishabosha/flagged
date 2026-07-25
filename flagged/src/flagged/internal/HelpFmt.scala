@@ -107,7 +107,7 @@ private[flagged] object HelpFmt:
       case _                         => false)
 
   private def optLeft(o: OptSpec): String =
-    val short = o.short.map(c => s"-$c, ").getOrElse("    ")
+    val short = if o.short < 0 then "    " else s"-${o.short.toChar}, "
     val value = o.mode match
       case Mode.Flag(_, _)        => ""
       case Mode.Single(_, _)      => s" <${o.metavar}>"

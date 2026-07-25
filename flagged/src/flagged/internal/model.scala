@@ -42,11 +42,15 @@ private[flagged] enum Mode:
 
   /** Option that may appear multiple times; elements are parsed with the parser's element and
     * combined with its build from an indexed view (also invoked empty when absent; may fail, e.g.
-    * to require at least one occurrence). `split` (0 = none) divides each occurrence's value into
-    * segments, each parsed as an element; `greedy` lets an occurrence consume the following free
-    * tokens as further elements.
+    * to require at least one occurrence). A non-negative `split` is the unsigned `Char` value that
+    * divides each occurrence into segments; `greedy` lets an occurrence consume the following free
+    * tokens as further elements. `-1` means no split.
     */
-  case Repeated(parser: flagged.Parser.Repeated[?], split: Char = 0, greedy: Boolean = false)
+  case Repeated(
+      parser: flagged.Parser.Repeated[?],
+      split: Int = MaybeChar.empty,
+      greedy: Boolean = false
+  )
 
 /** The validation/materialisation view shared by named and positional fields. */
 private[flagged] sealed trait SlotSpec:
@@ -57,7 +61,7 @@ private[flagged] sealed trait SlotSpec:
 
 private[flagged] final case class OptSpec(
     long: String,
-    short: Option[Char],
+    short: Int,
     help: String,
     metavar: String,
     index: Int,
@@ -68,7 +72,7 @@ private[flagged] final case class OptSpec(
     aliases: IndexedSeq[String] = Vector.empty
 ) extends SlotSpec:
   lazy val longDisplay: String  = "--" + long
-  lazy val shortDisplay: String = short.fold(longDisplay)("-" + _)
+  lazy val shortDisplay: String = if short < 0 then longDisplay else "-" + short.toChar
   def display: String           = longDisplay
 
 private[flagged] final case class PosSpec(
