@@ -6,16 +6,18 @@ import steps.result.Result.{Ok, Err, eval}
 import steps.result.Result.eval.ok
 import scala.collection.mutable
 
-/** The token-stream parser, in two orthogonal phases:
+/** The token-stream parser, in three orthogonal phases:
   *
   *   1. *routing* — a cursor walk over the argument array, deciding which spec each token belongs
   *      to and whether it consumes a value, and recording per-slot scalars: a mention count plus
   *      the last raw value and the spelling it arrived under (repeated specs parse their elements
   *      eagerly into per-slot collectors — collection builders for the built-in instances;
   *      subcommands and `--` trailing divert the remaining tokens immediately);
-  *   1. *finishing* — one pass per spec interprets those scalars (count flags, last-wins singles,
+  *   1. *validation* — one pass per spec interprets those scalars (count flags, last-wins singles,
   *      combined repeats), parsing single values exactly once — an overridden earlier mention is
-  *      never parsed — and falling back to defaults, then builds the command's value.
+  *      never parsed — and collecting missing required arguments;
+  *   1. *materialization* — after every selected command level validates, deferred builds evaluate
+  *      defaults, construct values, and finally invoke an `@run` method if one was selected.
   *
   * The hot path allocates nothing per token: parsers write successful values straight into the
   * value slots through the `*Into` protocol (success is the shared `Result.done`), per-slot state
@@ -24,11 +26,13 @@ import scala.collection.mutable
   * spec fields otherwise. Strings are built, and error buffers exist, only when something is
   * reported.
   *
-  * Errors do not stop parsing: routing and finishing both record every problem they find (unknown
+  * Errors do not stop parsing: routing and validation both record every problem they find (unknown
   * options, missing values, invalid values, missing required arguments), and the parse fails at the
-  * end with all of them. Only `--help` and delegation to a subcommand short-circuit.
+  * end with all of them. Only `--help` and a failing subcommand short-circuit.
   */
 private[flagged] object Engine:
+
+  private type Deferred = () => ParseResult[Any]
 
   def run(
       cmd: Command,
@@ -37,6 +41,20 @@ private[flagged] object Engine:
       args: IndexedSeq[String],
       from: Int
   ): ParseResult[Any] =
+    deferred(cmd, prog, path, args, from) match
+      case Ok(build) => build()
+      case Err(e)    => Err(e)
+
+  /** Parse and validate one command level without building its result. Keeping the build deferred
+    * is what lets an ancestor report its own errors before an `@run` method is evaluated.
+    */
+  private def deferred(
+      cmd: Command,
+      prog: String,
+      path: IndexedSeq[String],
+      args: IndexedSeq[String],
+      from: Int
+  ): ParseResult[Deferred] =
     Result:
       def full = (prog +: path).mkString(" ")
       def hint = s"Try '$full --help' for more information."
@@ -67,12 +85,12 @@ private[flagged] object Engine:
       // element collectors for repeated specs, allocated only when one occurs
       var reps: Array[flagged.Parser.Collector] = null
 
-      var subValue   = Option.empty[Any]
-      var subErrored = false
-      var trailSeen  = false
-      var idx        = from
-      var posIdx     = 0
-      var noMoreOpts = false
+      var subBuild: Deferred = null
+      var subErrored         = false
+      var trailSeen          = false
+      var idx                = from
+      var posIdx             = 0
+      var noMoreOpts         = false
 
       val shortChars = cmd.shortChars
       val shortSpecs = cmd.shortSpecs
@@ -208,8 +226,9 @@ private[flagged] object Engine:
         null
 
       def runSub(sc: SubCase, fromIdx: Int): Unit =
-        // .ok propagates the subcommand's Help/Failure to our caller unchanged
-        subValue = Some(run(sc.command, prog, path :+ sc.name, args, fromIdx).ok)
+        deferred(sc.command, prog, path :+ sc.name, args, fromIdx) match
+          case Ok(build) => subBuild = build
+          case Err(e)    => eval.raise(e)
         idx = args.length
 
       def handleFree(tok: String): Unit =
@@ -357,7 +376,7 @@ private[flagged] object Engine:
                     if !attached then consumeGreedy(spec)
               stop = true
 
-      // ---- phase 2: finishing ---------------------------------------------------
+      // ---- phase 2: validation --------------------------------------------------
 
       def reportInvalid(r: Result[Unit, String], display: String): Unit = r match
         case Err(msg) => report(s"invalid value for '$display': $msg")
@@ -475,29 +494,37 @@ private[flagged] object Engine:
         case None => ()
 
       cmd.sub match
-        case Some(g) =>
-          values(g.index) = subValue match
-            case Some(v) => if g.optional then Some(v) else v
+        case Some(g) if subBuild == null && !subErrored =>
+          g.default match
+            case Some(_) => ()
             case None    =>
-              g.default match
-                case Some(d) => d()
-                case None    =>
-                  g.defaultCase match
-                    case Some(dc) =>
-                      val v = run(dc.command, prog, path :+ dc.name, args, args.length).ok
-                      if g.optional then Some(v) else v
-                    case None =>
-                      if g.optional then None
-                      else
-                        if !subErrored then
-                          report(
-                            s"missing command (expected one of: ${g.cases.iterator.map(_.name).mkString(", ")})"
-                          )
-                        null
+              g.defaultCase match
+                case Some(dc) => runSub(dc, args.length)
+                case None     =>
+                  if !g.optional then
+                    report(
+                      s"missing command (expected one of: ${g.cases.iterator.map(_.name).mkString(", ")})"
+                    )
         case None => ()
+        case _    => ()
 
       if errors != null then eval.raise(ParseError.Failure(errors.mkString("\n"), hint))
 
-      cmd.finish(values, counts, 0) match
-        case Ok(v)    => v
-        case Err(msg) => eval.raise(ParseError.Failure(msg, hint))
+      // ---- phase 3: deferred materialization -----------------------------------
+
+      () =>
+        Result:
+          cmd.sub.foreach { g =>
+            values(g.index) =
+              if subBuild != null then
+                val v = subBuild().ok
+                if g.optional then Some(v) else v
+              else
+                g.default match
+                  case Some(d) => d()
+                  case None    => None // only an absent optional group can reach this branch
+          }
+
+          cmd.finish(values, counts, 0) match
+            case Ok(v)    => v
+            case Err(msg) => eval.raise(ParseError.Failure(msg, hint))

@@ -36,6 +36,15 @@ object mixed:
   @run def go(x: Int): Int    = x + 1
   @cmd def other(y: Int): Int = y
 
+object guarded:
+  var invocations = 0
+
+  @run def go(x: Int = 0): Int =
+    invocations += 1
+    x
+
+  @run def noop(): Int = 0
+
 class MethodsSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
@@ -71,6 +80,13 @@ class MethodsSuite extends munit.FunSuite:
   test("a group of @run methods parses as subcommands, kebab-named") {
     assertEquals(ok(multi.parse(Seq("add", "--a", "2", "--b", "3"))), 5)
     assertEquals(ok(multi.parse(Seq("add", "--a", "2"))), 2)
+  }
+
+  test("a grouped @run method is not invoked when an ancestor has parse errors") {
+    guarded.invocations = 0
+    val m = err(Flagged.parse[guarded.type](Seq("--bogus", "go")))
+    assert(m.contains("unknown option '--bogus'"), m)
+    assertEquals(guarded.invocations, 0)
   }
 
   test("@name renames a method command; @positional works on parameters") {
