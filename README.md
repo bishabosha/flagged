@@ -240,7 +240,7 @@ type:
 given Parser.Value[Port] = Parser.of[Port]("port")(s =>
   s.toIntOption.filter(p => p > 0 && p < 65536) match
     case Some(p) => Result.Ok(Port(p))
-    case None    => Err(s"'$s' is not a valid port"))
+    case None    => Result.Err((s"'$s' is not a valid port"))
 ```
 
 For simple cases, `map`/`emap` on an existing parser also works, and preserves the
