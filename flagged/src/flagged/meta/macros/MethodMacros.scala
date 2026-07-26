@@ -70,12 +70,14 @@ object MethodMacros:
 
       // default getters live on the same object: `m$default$N`
       val getters: List[(Int, Term)] = params.zipWithIndex.flatMap { (p, i) =>
-        if p.flags.is(Flags.HasDefault) then
-          mod.moduleClass
-            .methodMember(s"${m.name}$$default$$${i + 1}")
-            .headOption
-            .map(g => i -> Ref(mod).select(g))
-        else None
+        Option.when(p.flags.is(Flags.HasDefault)):
+          mod.moduleClass.methodMember(s"${m.name}$$default$$${i + 1}").headOption match
+            case Some(g) => i -> Ref(mod).select(g)
+            // silently dropping it would turn an optional parameter into a required one
+            case None =>
+              report.errorAndAbort(
+                s"command method ${m.name}: no default-argument getter for parameter '${p.name}'"
+              )
       }
 
       def invokeBody(args: Expr[Array[Any]]): Expr[Any] =
