@@ -17,12 +17,6 @@ private[flagged] object Runtime:
   private def notABool(s: String): String =
     s"'${s.trim}' is not a valid bool (expected true/false)"
 
-  def parseBool(s: String): Result[Boolean, String] =
-    Result:
-      val b = boolOf(s)
-      if b < 0 then eval.raise(notABool(s))
-      b == 1
-
   def parseBoolInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
     Result.task:
       val b = boolOf(s)

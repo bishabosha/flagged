@@ -15,16 +15,16 @@ case class ValueConfig(
 class ValueParserSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
-    case Ok(a) => a
-    case other => fail(s"expected success, got $other")
+    case Result.Ok(a) => a
+    case other        => fail(s"expected success, got $other")
 
   /** Parse a single token through the engine's slot protocol, boxed for assertions. */
-  def read[A](s: String)(using p: Parser[A]): Result[A, String] =
+  def read[A](s: String)(using p: Parser.SingleToken[A]): Result[A, String] =
     val out = new Array[Any](1)
     p.readInto(s, out, 0).map(_ => out(0).asInstanceOf[A])
 
   test("by-name enum Parser parses by kebab-cased name") {
-    assertEquals(read[LogLevel]("warn"), Ok(LogLevel.Warn))
+    assertEquals(read[LogLevel]("warn"), Result.Ok(LogLevel.Warn))
     assert(read[LogLevel]("DEBUG").isErr) // exact match, like clap/click/argmatch
     assert(read[LogLevel]("nope").isErr)
     assertEquals(summon[Parser[LogLevel]].typeName, "debug|info|warn|error")
@@ -63,7 +63,7 @@ class ValueParserSuite extends munit.FunSuite:
 
   test("reader typeName appears as metavar in help") {
     Flagged.parse[ValueConfig](Seq("--help")) match
-      case Err(ParseError.Help(t)) =>
+      case Result.Err(ParseError.Help(t)) =>
         assert(t.contains("--timeout <duration>"), t)
         assert(t.contains("--level <debug|info|warn|error>"), t)
       case other => fail(s"expected help, got $other")
@@ -72,20 +72,20 @@ class ValueParserSuite extends munit.FunSuite:
   test("map/emap combinators") {
     given portParser: Parser.Value[Int] = Parser.of[Int]("port")(s =>
       s.toIntOption match
-        case Some(p) if p > 0 && p < 65536 => Ok(p)
-        case Some(_)                       => Err(s"'$s' out of range")
-        case None                          => Err(s"'$s' is not a port")
+        case Some(p) if p > 0 && p < 65536 => Result.Ok(p)
+        case Some(_)                       => Result.Err(s"'$s' out of range")
+        case None                          => Result.Err(s"'$s' is not a port")
     )
     case class Srv(port: Int = 80) derives Parser.Command
     assertEquals(ok(Flagged.parse[Srv](Seq("--port", "8080"))).port, 8080)
     Flagged.parse[Srv](Seq("--port", "99999")) match
-      case Err(ParseError.Failure(m, _)) => assert(m.contains("out of range"), m)
-      case other                         => fail(s"expected failure, got $other")
+      case Result.Err(ParseError.Failure(m, _)) => assert(m.contains("out of range"), m)
+      case other                                => fail(s"expected failure, got $other")
   }
 
   test("boolean reader accepts unix-y spellings") {
-    assertEquals(read[Boolean]("on"), Ok(true))
-    assertEquals(read[Boolean]("0"), Ok(false))
+    assertEquals(read[Boolean]("on"), Result.Ok(true))
+    assertEquals(read[Boolean]("0"), Result.Ok(false))
     assert(read[Boolean]("maybe").isErr)
   }
 
@@ -100,30 +100,32 @@ class ValueParserSuite extends munit.FunSuite:
     enum Volume:
       case Quiet, Loud
     given Parser.Flag[Volume] =
-      Parser.flag(n => Ok(if n > 0 then Volume.Loud else Volume.Quiet))
+      Parser.flag(n => Result.Ok(if n > 0 then Volume.Loud else Volume.Quiet))
     case class Player(@short('l') loud: Volume = Volume.Quiet) derives Parser.Command
     assertEquals(ok(Flagged.parse[Player](Seq("-l"))).loud, Volume.Loud)
     assertEquals(ok(Flagged.parse[Player](Nil)).loud, Volume.Quiet)
     // no value parser: --loud=x is rejected
     Flagged.parse[Player](Seq("--loud=x")) match
-      case Err(ParseError.Failure(m, _)) => assert(m.contains("does not take a value"), m)
-      case other                         => fail(s"expected failure, got $other")
+      case Result.Err(ParseError.Failure(m, _)) => assert(m.contains("does not take a value"), m)
+      case other                                => fail(s"expected failure, got $other")
   }
 
   test("a flag reader can bound the occurrence count") {
     case class Verbosity(n: Int)
     given Parser.Flag[Verbosity] =
-      Parser.flag(n => if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)"))
+      Parser.flag(n =>
+        if n <= 3 then Result.Ok(Verbosity(n)) else Result.Err(s"at most 3 occurrences (got $n)")
+      )
     case class C(@short('v') verbose: Verbosity = Verbosity(0)) derives Parser.Command
     assertEquals(ok(Flagged.parse[C](Seq("-vv"))).verbose, Verbosity(2))
     Flagged.parse[C](Seq("-vvvv")) match
-      case Err(ParseError.Failure(m, _)) => assert(m.contains("at most 3"), m)
-      case other                         => fail(s"expected failure, got $other")
+      case Result.Err(ParseError.Failure(m, _)) => assert(m.contains("at most 3"), m)
+      case other                                => fail(s"expected failure, got $other")
   }
 
   test("any type can opt into repeated shape via Parser.repeated") {
     given Parser.Repeated[Set[String]] =
-      Parser.repeated[String, Set[String]](l => Ok(l.toSet))
+      Parser.repeated[String, Set[String]](l => Result.Ok(l.toSet))
     case class Tags(tag: Set[String] = Set.empty) derives Parser.Command
     assertEquals(
       ok(Flagged.parse[Tags](Seq("--tag", "a", "--tag", "b", "--tag", "a"))),
@@ -135,7 +137,8 @@ class ValueParserSuite extends munit.FunSuite:
   test("a repeated reader can require at least one occurrence") {
     case class AtLeastOne(xs: List[Int])
     given Parser.Repeated[AtLeastOne] = Parser.repeated[Int, AtLeastOne](l =>
-      if l.isEmpty then Err("expected at least one occurrence") else Ok(AtLeastOne(l.toList))
+      if l.isEmpty then Result.Err("expected at least one occurrence")
+      else Result.Ok(AtLeastOne(l.toList))
     )
     case class Cfg(num: AtLeastOne) derives Parser.Command
     assertEquals(
@@ -143,21 +146,21 @@ class ValueParserSuite extends munit.FunSuite:
       Cfg(AtLeastOne(List(1, 2)))
     )
     Flagged.parse[Cfg](Nil) match
-      case Err(ParseError.Failure(m, _)) =>
+      case Result.Err(ParseError.Failure(m, _)) =>
         assert(m.contains("--num") && m.contains("expected at least one"), m)
       case other => fail(s"expected failure, got $other")
   }
 
   test("emap composes over a repeated reader") {
     given Parser.Value[Int] =
-      Parser.of[Int]("int")(s => s.toIntOption.fold(Err(s"'$s' not an int"))(Ok(_)))
+      Parser.of[Int]("int")(s => s.toIntOption.fold(Result.Err(s"'$s' not an int"))(Result.Ok(_)))
     given Parser.Repeated[List[Int]] =
       Parser
-        .repeated[Int, List[Int]](l => Ok(l.toList))
-        .emap(l => if l.sum > 10 then Err("sum too large") else Ok(l))
+        .repeated[Int, List[Int]](l => Result.Ok(l.toList))
+        .emap(l => if l.sum > 10 then Result.Err("sum too large") else Result.Ok(l))
     case class Sums(n: List[Int] = Nil) derives Parser.Command
     assertEquals(ok(Flagged.parse[Sums](Seq("--n", "1", "--n", "2"))), Sums(List(1, 2)))
     Flagged.parse[Sums](Seq("--n", "9", "--n", "9")) match
-      case Err(ParseError.Failure(m, _)) => assert(m.contains("sum too large"), m)
-      case other                         => fail(s"expected failure, got $other")
+      case Result.Err(ParseError.Failure(m, _)) => assert(m.contains("sum too large"), m)
+      case other                                => fail(s"expected failure, got $other")
   }

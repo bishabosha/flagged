@@ -28,8 +28,8 @@ class MethodBench:
   @Setup
   def validate(): Unit =
     def fVal(r: flagged.ParseResult[Int]): Int = r match
-      case flagged.Ok(v) => v
-      case other         => throw new IllegalStateException(s"flagged failed: $other")
+      case flagged.Result.Ok(v) => v
+      case other                => throw new IllegalStateException(s"flagged failed: $other")
     def mVal(r: Either[String, Any]): Any = r match
       case Right(v) => v
       case Left(e)  => throw new IllegalStateException(s"mainargs failed: $e")

@@ -153,13 +153,13 @@ case class ParityGrouped(
 class ParitySuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
-    case Ok(a)                         => a
-    case Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
-    case Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
+    case Result.Ok(a)                         => a
+    case Result.Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
+    case Result.Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
 
   def err[A](r: ParseResult[A]): String = r match
-    case Err(ParseError.Failure(m, _)) => m
-    case other                         => fail(s"expected failure, got $other")
+    case Result.Err(ParseError.Failure(m, _)) => m
+    case other                                => fail(s"expected failure, got $other")
 
   // ---- mainargs parity: `=` handling -------------------------------------------
 
@@ -239,8 +239,8 @@ class ParitySuite extends munit.FunSuite:
 
   test("--help is honored in any position (mainargs: first token only)") {
     Flagged.parse[ParityBasic](Seq("--output", "x", "--help")) match
-      case Err(ParseError.Help(_)) => ()
-      case other                   => fail(s"expected help, got $other")
+      case Result.Err(ParseError.Help(_)) => ()
+      case other                          => fail(s"expected help, got $other")
   }
 
   test("an all-dash token is an unknown option (mainargs: treated as a plain value)") {
@@ -345,8 +345,8 @@ class ParitySuite extends munit.FunSuite:
 
   test("@version adds --version and a help header (case-app @AppVersion: same)") {
     Flagged.parse[ParityVersioned](Seq("--version")) match
-      case Err(ParseError.Help(t)) => assertEquals(t, "1.2.3")
-      case other                   => fail(s"expected version output, got $other")
+      case Result.Err(ParseError.Help(t)) => assertEquals(t, "1.2.3")
+      case other                          => fail(s"expected version output, got $other")
     val help = Flagged.help[ParityVersioned]
     assert(help.startsWith("parity-versioned 1.2.3"), help)
     assert(help.contains("--version"), help)
@@ -369,8 +369,8 @@ class ParitySuite extends munit.FunSuite:
   test("@version with a literal needs no Versioned instance") {
     @version("0.4.2") case class LitVersioned(x: Int = 0) derives Parser.Command
     Flagged.parse[LitVersioned](Seq("--version")) match
-      case Err(ParseError.Help(t)) => assertEquals(t, "0.4.2")
-      case other                   => fail(s"expected version output, got $other")
+      case Result.Err(ParseError.Help(t)) => assertEquals(t, "0.4.2")
+      case other                          => fail(s"expected version output, got $other")
     val help = Flagged.help[LitVersioned]
     assert(help.startsWith("lit-versioned 0.4.2"), help)
   }
@@ -379,16 +379,16 @@ class ParitySuite extends munit.FunSuite:
     @version("9.9.9", dynamic = true) case class LitOver(x: Int = 0) derives Parser.Command
     given Versioned[LitOver] = Versioned.of("3.0.0")
     Flagged.parse[LitOver](Seq("--version")) match
-      case Err(ParseError.Help(t)) => assertEquals(t, "9.9.9")
-      case other                   => fail(s"expected version output, got $other")
+      case Result.Err(ParseError.Help(t)) => assertEquals(t, "9.9.9")
+      case other                          => fail(s"expected version output, got $other")
   }
 
   test("an empty @version literal is not a version: dynamic applies") {
     @version("") case class EmptyLit(x: Int = 0) derives Parser.Command
     given Versioned[EmptyLit] = Versioned.of("3.0.0")
     Flagged.parse[EmptyLit](Seq("--version")) match
-      case Err(ParseError.Help(t)) => assertEquals(t, "3.0.0")
-      case other                   => fail(s"expected version output, got $other")
+      case Result.Err(ParseError.Help(t)) => assertEquals(t, "3.0.0")
+      case other                          => fail(s"expected version output, got $other")
   }
 
   test("@version(dynamic = true) without a Versioned instance is a compile error") {
@@ -407,8 +407,8 @@ class ParitySuite extends munit.FunSuite:
 
   test("Versioned is consulted when printed, not at derivation") {
     def versionOut(): String = Flagged.parse[ParityDynVersioned](Seq("--version")) match
-      case Err(ParseError.Help(t)) => t
-      case other                   => fail(s"expected version output, got $other")
+      case Result.Err(ParseError.Help(t)) => t
+      case other                          => fail(s"expected version output, got $other")
     ParityDynVersioned.current = "0.1.0"
     assertEquals(versionOut(), "0.1.0")
     ParityDynVersioned.current = "0.2.0"

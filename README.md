@@ -1,6 +1,6 @@
 # Flagged
 
-Command-line argument parsing and schema validation for Scala 3. Supports derivation of Parsers and automatic help-text from case class/enum or methods. 
+Command-line argument parsing and schema validation for Scala 3. Supports derivation of Parsers and automatic help-text from case class/enum or methods.
 
 ## Why a new library?
 
@@ -114,7 +114,9 @@ The field's `Parser` instance decides its shape:
 | `x: A` | required option `--x <a>` |
 | `x: A = default` | optional, default shown in help |
 | `x: Option[A]` | optional, `None` when absent |
-| `x: List[A]` (any collection with a `Factory`) | repeatable |
+| `x: Iterable[A]` | `--x a --x b` repeatable option with `A` as value |
+| `@split(',') x: Iterable[A]` | `--x a,b --x c` repeatable option with `A` as value, token splits on separator char. |
+| `@greedy x: Iterable[A]` | `--x a b c --x d` repeatable option that greedily consumes arguments as `A`. |
 | `x: Map[K, V]` | repeatable `--x key=value` entries |
 | `x: (A, B)` (any tuple of `Value` types, or a case class deriving `Parser.Product`) | fixed multi-token value: `--x 1 2` |
 | `x: E` (enum deriving `Parser.CommandGroup`) | nested subcommands |
@@ -123,15 +125,21 @@ The field's `Parser` instance decides its shape:
 | `x: Trailing` | the raw arguments after `--`, verbatim |
 | `@positional x: A` | positional argument (same rules) |
 
-Annotations fine-tune the rest: `@name` (long-name override and aliases), `@short`,
-`@help`, `@positional`, `@hidden` (omitted from help, shown by `--help-all`),
-`@group` (titled help sections), `@split` (divide a repeated option's value at a
-separator, `,` by default: `--env A,B,C`), `@greedy` (a repeated option consumes the
-following free tokens: `--nums 10 20 99`; compile error if the command also declares
-positional or subcommand fields, which would make the grammar ambiguous), `@version`
-(adds `--version`: `@version("0.1.0")` prints the literal, bare `@version` reads a
-given `Versioned` instance when printed), and `@default` (the command run when no
-command token is given).
+Annotations control both metadata for help-text, and fine-tune parser details:
+
+#### Parser Tuning
+- `@positional`: parse a field as an unnamed argument,
+- `@split` (divide a repeated option's value at a separator, `,` by default: `--env A,B,C`),
+- `@greedy` (a repeated option consumes the following free tokens: `--nums 10 20 99`; compile error if the command also declares positional or subcommand fields, which would make the grammar ambiguous),
+
+#### Metadata
+- `@name("...")`: long-name override and provide aliases,
+- `@short('x')`: provide a short-name,
+- `@help("...")`: provide a description,
+- `@hidden`: omit option from help, shown by `--help-all`,
+- `@group`: assign an option to a titled help section,
+- `@version`: add a `--version` flag, that will print the version. Data is sourced from either a literal argument (e.g. `@version("0.1.0")`), or bare `@version` reads a given `Versioned` instance when printed,
+- `@default`: annotate one command of a group — a subcommand case, a `@run` method, or a `@run` object — parser will route here if no command token is detected.
 
 ### Subcommands
 
@@ -231,8 +239,8 @@ type:
 ```scala
 given Parser.Value[Port] = Parser.of[Port]("port")(s =>
   s.toIntOption.filter(p => p > 0 && p < 65536) match
-    case Some(p) => Ok(Port(p))
-    case None    => Err(s"'$s' is not a valid port"))
+    case Some(p) => Result.Ok(Port(p))
+    case None    => Result.Err((s"'$s' is not a valid port"))
 ```
 
 For simple cases, `map`/`emap` on an existing parser also works, and preserves the
@@ -329,7 +337,7 @@ expressible (it is also invoked empty when the argument is absent):
 
 ```scala
 given Parser.Repeated[NonEmpty] = Parser.repeated[Int, NonEmpty](l =>
-  if l.isEmpty then Err("expected at least one occurrence") else Ok(NonEmpty(l.toList)))
+  if l.isEmpty then Result.Err("expected at least one occurrence") else Result.Ok(NonEmpty(l.toList)))
 ```
 
 `Parser.flag` does the same for flags, building the value from the occurrence count
@@ -337,7 +345,7 @@ given Parser.Repeated[NonEmpty] = Parser.repeated[Int, NonEmpty](l =>
 
 ```scala
 given Parser.Flag[Verbosity] = Parser.flag(n =>
-  if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)"))
+  if n <= 3 then Result.Ok(Verbosity(n)) else Result.Err(s"at most 3 occurrences (got $n)"))
 ```
 
 ### Validate across fields
@@ -349,15 +357,17 @@ value, so cross-field rules report through the normal error channel:
 case class Fetch(url: String, tls: Boolean = false, certFile: Option[Path] = None)
 
 given Parser.Command[Fetch] = Parser.Command.derived[Fetch].emap(cfg =>
-  if cfg.tls && cfg.certFile.isEmpty then Err("--tls requires --cert-file") else Ok(cfg))
+  if cfg.tls && cfg.certFile.isEmpty then Result.Err("--tls requires --cert-file") else Result.Ok(cfg))
 ```
 
 ### Make a subcommand optional or default
 
 An `Option[E]`-typed command field makes the command optional, and a field default
-(`action: Action = Action.List`) works too. At the top level, `@default` on one enum
-case marks the command run when no command token is given, with the remaining
-arguments forwarded to it.
+(`action: Action = Action.List`) works too. `@default` on one command of a group —
+an enum case, a `@run` method, or a `@run` object — marks the command run when no
+command token is given, with the remaining arguments forwarded to it. Every group
+takes its own `@default`, so a group that is itself the default keeps forwarding down
+to its default; a second `@default` in the same group is a compile error.
 
 ### Handle results without exiting
 
@@ -366,9 +376,9 @@ value instead of exiting:
 
 ```scala
 Flagged.parse[Greet](Seq("--name", "Jamie")) match
-  case Ok(cfg)                            => run(cfg)
-  case Err(ParseError.Help(text))         => println(text)
-  case Err(ParseError.Failure(msg, hint)) => logger.error(msg)
+  case Result.Ok(cfg)                            => run(cfg)
+  case Result.Err(ParseError.Help(text))         => println(text)
+  case Result.Err(ParseError.Failure(msg, hint)) => logger.error(msg)
 ```
 
 `import flagged.*` brings `Result`, `Ok`, and `Err` into scope, and the full steps

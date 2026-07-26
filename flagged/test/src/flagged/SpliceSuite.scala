@@ -8,16 +8,32 @@ case class LogOpts(
 
 case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser.Command
 
+case class Token(@help("API token") token: String) derives Parser.Shared
+
+// the same group spliced into @run method parameters
+object pack:
+  @run def build(target: String = "all", logging: LogOpts = LogOpts()): String =
+    s"$target/${logging.quiet}/${logging.logLevel}"
+
+object tools:
+  @run def build(target: String = "all", logging: LogOpts = LogOpts()): String =
+    s"$target/${logging.quiet}/${logging.logLevel}"
+
+  @run def clean(logging: LogOpts = LogOpts()): String = s"clean/${logging.quiet}"
+
+object publish:
+  @run def push(remote: String = "origin", auth: Token): String = s"$remote:${auth.token}"
+
 class SpliceSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
-    case Ok(a)                         => a
-    case Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
-    case Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
+    case Result.Ok(a)                         => a
+    case Result.Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
+    case Result.Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
 
   def err[A](r: ParseResult[A]): String = r match
-    case Err(ParseError.Failure(m, _)) => m
-    case other                         => fail(s"expected failure, got $other")
+    case Result.Err(ParseError.Failure(m, _)) => m
+    case other                                => fail(s"expected failure, got $other")
 
   test("a product-shaped Parser field splices its options into the parent") {
     assertEquals(
@@ -32,7 +48,7 @@ class SpliceSuite extends munit.FunSuite:
 
   test("spliced options appear in the parent's help") {
     Flagged.parse[Serve](Seq("--help")) match
-      case Err(ParseError.Help(t)) =>
+      case Result.Err(ParseError.Help(t)) =>
         assert(t.contains("-q, --quiet"), t)
         assert(t.contains("--log-level <string>"), t)
         assert(t.contains("--port <int>"), t)
@@ -60,6 +76,31 @@ class SpliceSuite extends munit.FunSuite:
     )
   }
 
+  test("splicing works in @run method parameters") {
+    // the group's options flatten into the method's own, at both shapes: a lone @run method
+    // parsed flat, and a method selected from a group
+    assertEquals(ok(Parser.method(pack).parse(Seq("--target", "x", "-q"))), "x/true/info")
+    assertEquals(ok(Parser.method(pack).parse(Nil)), "all/false/info")
+    val g = Parser.methods(tools)
+    assertEquals(ok(g.parse(Seq("build", "--log-level", "debug"))), "all/false/debug")
+    assertEquals(ok(g.parse(Seq("clean", "-q"))), "clean/true")
+  }
+
+  test("a spliced group's options show in a @run method's help") {
+    Parser.methods(tools).parse(Seq("build", "--help")) match
+      case Result.Err(ParseError.Help(t)) =>
+        assert(t.contains("-q, --quiet"), t)
+        assert(t.contains("--log-level <string>"), t)
+        assert(t.contains("--target <string>"), t)
+      case other => fail(s"expected help, got $other")
+  }
+
+  test("a spliced group's required options are enforced on a @run method") {
+    val m = err(Parser.method(publish).parse(Nil))
+    assert(m.contains("--token"), m)
+    assertEquals(ok(Parser.method(publish).parse(Seq("--token", "t0"))), "origin:t0")
+  }
+
   test("splicing works inside subcommand cases") {
     assertEquals(
       ok(Flagged.parse[Deploy](Seq("run", "--log-level", "warn"))),
@@ -72,18 +113,21 @@ class SpliceSuite extends munit.FunSuite:
     case class Range(lo: Int = 0, hi: Int = 10)
     val p = Parser.Command
       .derived[Range]
-      .emap(r => if r.lo <= r.hi then Ok(r) else Err(s"lo (${r.lo}) must not exceed hi (${r.hi})"))
+      .emap(r =>
+        if r.lo <= r.hi then Result.Ok(r)
+        else Result.Err(s"lo (${r.lo}) must not exceed hi (${r.hi})")
+      )
     assertEquals(ok(p.parse(Seq("--lo", "3"))), Range(3, 10))
     p.parse(Seq("--lo", "5", "--hi", "3")) match
-      case Err(ParseError.Failure(m, _)) => assert(m.contains("must not exceed"), m)
-      case other                         => fail(s"expected failure, got $other")
+      case Result.Err(ParseError.Failure(m, _)) => assert(m.contains("must not exceed"), m)
+      case other                                => fail(s"expected failure, got $other")
   }
 
   test("a validated options group keeps its validation when spliced") {
     case class Window(min: Int = 0, max: Int = 100)
     given Parser.Shared[Window] = Parser.Shared
       .derived[Window]
-      .emap(w => if w.min <= w.max then Ok(w) else Err("min must not exceed max"))
+      .emap(w => if w.min <= w.max then Result.Ok(w) else Result.Err("min must not exceed max"))
     case class App(label: String = "", window: Window = Window()) derives Parser.Command
     assertEquals(ok(Flagged.parse[App](Seq("--min", "5"))), App("", Window(5, 100)))
     val m = err(Flagged.parse[App](Seq("--min", "7", "--max", "2")))
@@ -187,12 +231,12 @@ class SpliceSuite extends munit.FunSuite:
 
   test("an embedded command keeps its own grammar and help") {
     Flagged.parse[Workbench](Seq("ext", "--help")) match
-      case Err(ParseError.Help(t)) =>
+      case Result.Err(ParseError.Help(t)) =>
         assert(t.contains("-f, --force"), t)
         assert(t.contains("<target>"), t)
       case other => fail(s"expected help, got $other")
     Flagged.parse[Workbench](Seq("--help")) match
-      case Err(ParseError.Help(t)) =>
+      case Result.Err(ParseError.Help(t)) =>
         assert(t.contains("ext"), t)
         assert(t.contains("An embedded external command"), t)
       case other => fail(s"expected help, got $other")

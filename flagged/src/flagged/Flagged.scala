@@ -37,11 +37,11 @@ object Flagged:
     orExit(e.parser.parse(args, prog), prog)
 
   private def orExit[A](result: ParseResult[A], prog: String): A = result match
-    case Ok(a)                      => a
-    case Err(ParseError.Help(text)) =>
+    case Result.Ok(a)                      => a
+    case Result.Err(ParseError.Help(text)) =>
       println(text)
       internal.PlatformExit.exit(0)
-    case Err(ParseError.Failure(message, hint)) =>
+    case Result.Err(ParseError.Failure(message, hint)) =>
       System.err.println(s"$prog: $message")
       if hint.nonEmpty then System.err.println(hint)
       internal.PlatformExit.exit(2)

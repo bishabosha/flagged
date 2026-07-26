@@ -33,7 +33,7 @@ sealed trait MethodEntry[T]:
   val entries: Entries
 
 object MethodEntry:
-  final class Impl[T, O, M <: MethodsMirror[T], E <: EntriesResults[?]](
+  private final class Impl[T, O, M <: MethodsMirror[T], E <: EntriesResults[?]](
       val mirror: M,
       val entries: E
   ) extends MethodEntry[T]:
@@ -43,7 +43,7 @@ object MethodEntry:
 
   given of: [T] => (mm: MethodsMirror[T]) => (er: EntriesResults[mm.MirroredEntries])
     => (
-      Impl[T, er.Out, mm.type, er.type]
+      MethodEntry[T] { type Out = er.Out; type Mirror = mm.type; type Entries = er.type }
     ) =
     Impl[T, er.Out, mm.type, er.type](mm, er)
 

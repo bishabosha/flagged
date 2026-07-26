@@ -255,8 +255,8 @@ object RealisticDefs:
     */
   def agrees(args: Seq[String]): Boolean =
     val f = flaggedDocker.parse(args) match
-      case flagged.Ok(v) => v == expectedF
-      case _             => false
+      case flagged.Result.Ok(v) => v == expectedF
+      case _                    => false
     val m = mainargsDocker.runEither(args) == Right(expectedM)
     val c = caseappDocker(args) match
       case Right((opts, rem: caseapp.RemainingArgs)) =>

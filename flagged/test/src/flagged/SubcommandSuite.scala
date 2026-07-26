@@ -47,13 +47,13 @@ enum NoDerive:
 class SubcommandSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
-    case Ok(a)                         => a
-    case Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
-    case Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
+    case Result.Ok(a)                         => a
+    case Result.Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
+    case Result.Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
 
   def err[A](r: ParseResult[A]): String = r match
-    case Err(ParseError.Failure(m, _)) => m
-    case other                         => fail(s"expected failure, got $other")
+    case Result.Err(ParseError.Failure(m, _)) => m
+    case other                                => fail(s"expected failure, got $other")
 
   test("parameterless subcommand") {
     assertEquals(ok(Flagged.parse[Git](Seq("status"))), Git.Status)
@@ -143,9 +143,9 @@ class SubcommandSuite extends munit.FunSuite:
       case object Noop                                       extends Op
     assertEquals(
       Flagged.parse[Op](Seq("add", "1", "2")),
-      Ok(Op.Add(1, 2))
+      Result.Ok(Op.Add(1, 2))
     )
-    assertEquals(Flagged.parse[Op](Seq("noop")), Ok(Op.Noop))
+    assertEquals(Flagged.parse[Op](Seq("noop")), Result.Ok(Op.Noop))
   }
 
   test("derivation reuses a Parser given in scope for a subcommand field") {

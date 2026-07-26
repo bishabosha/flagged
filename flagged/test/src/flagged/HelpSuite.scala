@@ -8,8 +8,8 @@ class HelpSuite extends munit.FunSuite:
 
   def helpText[A](args: Seq[String])(using Parser[A]): String =
     Flagged.parse[A](args) match
-      case Err(ParseError.Help(t)) => t
-      case other                   => fail(s"expected help, got $other")
+      case Result.Err(ParseError.Help(t)) => t
+      case other                          => fail(s"expected help, got $other")
 
   test("--help at top level") {
     val t = helpText[Git](Seq("--help"))
@@ -78,7 +78,7 @@ class HelpSuite extends munit.FunSuite:
 
   test("failure hints point at --help for the right level") {
     Flagged.parse[Git](Seq("clone")) match
-      case Err(ParseError.Failure(m, hint)) =>
+      case Result.Err(ParseError.Failure(m, hint)) =>
         assert(m.contains("<repo>"), m)
         assert(hint.contains("git clone --help"), hint)
       case other => fail(s"expected failure, got $other")
@@ -112,6 +112,6 @@ class HelpSuite extends munit.FunSuite:
 
   test("a user option named help-all takes precedence over the toggle") {
     Flagged.parse[OwnsHelpAll](Seq("--help-all")) match
-      case Ok(v) => assertEquals(v, OwnsHelpAll(all = true))
-      case other => fail(s"expected the user option to parse, got $other")
+      case Result.Ok(v) => assertEquals(v, OwnsHelpAll(all = true))
+      case other        => fail(s"expected the user option to parse, got $other")
   }
