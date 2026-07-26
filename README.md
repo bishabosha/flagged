@@ -139,7 +139,7 @@ Annotations control both metadata for help-text, and fine-tune parser details:
 - `@hidden`: omit option from help, shown by `--help-all`,
 - `@group`: assign an option to a titled help section,
 - `@version`: add a `--version` flag, that will print the version. Data is sourced from either a literal argument (e.g. `@version("0.1.0")`), or bare `@version` reads a given `Versioned` instance when printed,
-- `@default`: annotate a subcommand case, parser will route here if no command token is detected.
+- `@default`: annotate one command of a group — a subcommand case, a `@run` method, or a `@run` object — parser will route here if no command token is detected.
 
 ### Subcommands
 
@@ -363,9 +363,11 @@ given Parser.Command[Fetch] = Parser.Command.derived[Fetch].emap(cfg =>
 ### Make a subcommand optional or default
 
 An `Option[E]`-typed command field makes the command optional, and a field default
-(`action: Action = Action.List`) works too. At the top level, `@default` on one enum
-case marks the command run when no command token is given, with the remaining
-arguments forwarded to it.
+(`action: Action = Action.List`) works too. `@default` on one command of a group —
+an enum case, a `@run` method, or a `@run` object — marks the command run when no
+command token is given, with the remaining arguments forwarded to it. Every group
+takes its own `@default`, so a group that is itself the default keeps forwarding down
+to its default; a second `@default` in the same group is a compile error.
 
 ### Handle results without exiting
 
