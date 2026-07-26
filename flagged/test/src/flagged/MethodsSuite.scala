@@ -36,6 +36,23 @@ object mixed:
   @run def go(x: Int): Int    = x + 1
   @cmd def other(y: Int): Int = y
 
+object defaulted:
+  @run
+  @default
+  def status(@short('s') short: Boolean = false): String = if short then "st" else "status"
+
+  @run
+  def build(target: String = "all"): String = s"build:$target"
+
+object defaultedNested:
+  @run
+  @default
+  object grp:
+    @run @default def go(x: Int = 3): Int = x
+    @run def stop(): Int                  = -1
+
+  @run def other(y: Int = 1): Int = y
+
 object guarded:
   var invocations = 0
 
@@ -138,6 +155,63 @@ class MethodsSuite extends munit.FunSuite:
   test("Parser.method on an object with several @run methods is a compile error") {
     val e = compileErrors("Parser.method(toolbox)")
     assert(e.contains("exactly one @run method"), e)
+  }
+
+  test("@default names the method run when no command token is given, with args forwarded") {
+    val p = Parser.methods(defaulted)
+    assertEquals(ok(p.parse(Nil)), "status")
+    assertEquals(ok(p.parse(Seq("-s"))), "st")
+    assertEquals(ok(p.parse(Seq("--short"))), "st")
+    assertEquals(ok(p.parse(Seq("build", "--target", "x"))), "build:x")
+    val help = Flagged.help[defaulted.type]
+    assert(help.contains("(default)"), help)
+    assert(help.contains("[<command>]"), help)
+  }
+
+  test("@default on a nested @run object defaults into that group") {
+    val p = Parser.methods(defaultedNested)
+    assertEquals(ok(p.parse(Nil)), 3)             // grp, then grp's own @default
+    assertEquals(ok(p.parse(Seq("--x", "9"))), 9) // forwarded through both levels
+    assertEquals(ok(p.parse(Seq("grp", "stop"))), -1)
+    assertEquals(ok(p.parse(Seq("other", "--y", "2"))), 2)
+  }
+
+  test("more than one @default method is a compile error") {
+    val e = compileErrors(
+      "object o:\n" +
+        "  @run @default def a(x: Int = 0): Int = x\n" +
+        "  @run @default def b(y: Int = 1): Int = y\n" +
+        "Parser.methods(o)"
+    )
+    assert(e.contains("only one @default command is supported"), e)
+  }
+
+  test("a @default method and a @default nested object together are a compile error") {
+    val e = compileErrors(
+      "object o:\n" +
+        "  @run @default def a(x: Int = 0): Int = x\n" +
+        "  @run @default object g:\n" +
+        "    @run def b(y: Int = 1): Int = y\n" +
+        "Parser.methods(o)"
+    )
+    assert(e.contains("only one @default command is supported"), e)
+  }
+
+  test("@default on a lone @run method is a compile error") {
+    val e = compileErrors(
+      "object o:\n  @run @default def only(x: Int = 0): Int = x\nParser.method(o)"
+    )
+    assert(e.contains("@default has no effect on a single @run method"), e)
+  }
+
+  test("@default on a non-@run member is ignored, like the member itself") {
+    val e = compileErrors(
+      "object o:\n" +
+        "  @run @default def a(x: Int = 0): Int = x\n" +
+        "  @cmd @default def b(y: Int = 1): Int = y\n" +
+        "Parser.methods(o)"
+    )
+    assertEquals(e, "")
   }
 
   test("meta.Reflectable annotations are mirrored, but only @run makes a command") {

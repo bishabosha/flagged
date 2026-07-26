@@ -24,6 +24,7 @@ import steps.result.Result
     inline if runMethodCount[r.Entries] + runObjectCount[r.Entries] == 0 then
       error("no @run methods or nested @run objects found in " + constValue[r.mirror.MirroredLabel])
     else
+      checkOneDefault[r.Entries]
       val eb = Vector.newBuilder[(String, TargetAnnots, SubEntry)]
       entriesInto[T, r.Entries](o, r.mirror, r.entries, 0, eb)
       val es = eb.result()
@@ -98,6 +99,61 @@ import steps.result.Result
       case _: EntriesResults.ScopeNode[?, ?, sr, re, ?] =>
         (inline if resultsAreRun[sr] then 1 else 0) + runObjectCount[re]
 
+  // ---- @default rules ---------------------------------------------------------
+  // The sum-level rules of [[Derive.checkSumRules]], restated over the entry tower: the enum path
+  // reads its per-case annotation slots from a `Mirror.SumOf`, which a `@run` object has no
+  // counterpart for. Only members that are commands are considered, so a `@default` on a
+  // non-`@run` member is as invisible here as the member itself.
+
+  /** Is `flagged.default` among the [[Ann]]-encoded annotations? */
+  private transparent inline def isDefault[Anns]: Boolean =
+    inline erasedValue[Anns] match
+      case _: EmptyTuple                        => false
+      case _: (Ann[flagged.default, ?, ?] *: _) => true
+      case _: (_ *: t)                          => isDefault[t]
+
+  /** Is the method behind an [[EntriesResults.MethodNode]] a `@default` command? */
+  private transparent inline def methodIsDefault[M]: Boolean =
+    inline erasedValue[M] match
+      case m: MethodMirror[?] =>
+        inline if isRun[m.MirroredSelfAnnotations] then isDefault[m.MirroredSelfAnnotations]
+        else false
+
+  /** Is the object behind an [[EntriesResults.ScopeNode]] a `@default` command? */
+  private transparent inline def resultsAreDefault[SR]: Boolean =
+    inline erasedValue[SR] match
+      case sr: MethodEntry[?] => mirrorIsDefault[sr.Mirror]
+
+  private transparent inline def mirrorIsDefault[SM]: Boolean =
+    inline erasedValue[SM] match
+      case sm: MethodsMirror[?] =>
+        inline if isRun[sm.MirroredSelfAnnotations] then isDefault[sm.MirroredSelfAnnotations]
+        else false
+
+  /** How many commands in the group carry `@default`. */
+  private transparent inline def defaultCount[ER]: Int =
+    inline erasedValue[ER] match
+      case _: EntriesResults.Empty                   => 0
+      case _: EntriesResults.MethodNode[?, m, ?, re] =>
+        (inline if methodIsDefault[m] then 1 else 0) + defaultCount[re]
+      case _: EntriesResults.ScopeNode[?, ?, sr, re, ?] =>
+        (inline if resultsAreDefault[sr] then 1 else 0) + defaultCount[re]
+
+  /** At most one command in the group may be the `@default` — [[Assemble.sum]] would otherwise
+    * silently take the first.
+    */
+  private inline def checkOneDefault[ER]: Unit =
+    inline if defaultCount[ER] > 1 then error("only one @default command is supported")
+    else ()
+
+  /** `@default` names the command to run when no command token is given; a lone `@run` method is
+    * the whole command, with no token to omit and no siblings to choose between.
+    */
+  private inline def checkNoDefault[Anns]: Unit =
+    inline if isDefault[Anns] then
+      error("@default has no effect on a single @run method (it is the only command)")
+    else ()
+
   /** The lone `@run` method entry; callers guarantee exactly one exists. */
   private inline def pickSingle[T, ER](o: T, g: MethodsMirror[T], i: Int): (Command, String) =
     inline erasedValue[ER] match
@@ -110,6 +166,7 @@ import steps.result.Result
       case _: EntriesResults.ScopeNode[?, ?, ?, re, ?] => pickSingle[T, re](o, g, i + 1)
 
   private inline def singleOf[T, M <: MethodMirror[T]](o: T, m: M): (Command, String) =
+    checkNoDefault[m.MirroredSelfAnnotations]
     val anns = Annots.targetAnnotsOf[m.MirroredSelfAnnotations]
     (methodCmd[T, M](o, m, anns), anns.name.getOrElse(Assemble.kebab(constValue[m.MirroredLabel])))
 
