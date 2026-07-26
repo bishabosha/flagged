@@ -22,6 +22,20 @@ object MethodMacros:
     private def isReflectable(s: Symbol): Boolean =
       s.annotations.exists(_.tpe.derivesFrom(reflectableSym))
 
+    /** Whether reaching `s` needs an enclosing instance. The mirror's invoker and default-argument
+      * getters select on the module symbol directly (`Ref(mod)`), a reference that carries no
+      * prefix, and they are emitted inside an anonymous class — so a module that is a *member* of a
+      * class or trait would erase to a `this` with no outer accessor (a compiler crash). A module
+      * nested in packages or other objects needs no prefix, and a module local to a term is
+      * captured lexically, since the mirror is summoned in that same scope.
+      */
+    private def needsOuter(s: Symbol): Boolean =
+      val owner = s.maybeOwner
+      if owner.isNoSymbol || owner.isPackageDef then false
+      else if owner.isDefDef || owner.isValDef then false // local to a term: captured
+      else if owner.isClassDef && !owner.flags.is(Flags.Module) then true
+      else needsOuter(owner)
+
     private def cast(e: Expr[Any], tpe: TypeRepr): Term =
       tpe.asType match
         case '[pt] => '{ $e.asInstanceOf[pt] }.asTerm
@@ -35,8 +49,10 @@ object MethodMacros:
         ((d.isDefDef && !d.isClassConstructor) || (d.isTerm && d.flags.is(Flags.Module)))
       }
 
-    /** Mirror one method of the module `mod` (a static object value symbol). */
-    private def methodMirror[T: Type](mod: Symbol, m: Symbol): (TypeRepr, TypeRepr, Expr[Any]) =
+    /** Mirror one method of the module `mod` (a static object value symbol): its refined
+      * [[MethodMirror]] type and the instance, cast to it.
+      */
+    private def methodMirror[T: Type](mod: Symbol, m: Symbol): (TypeRepr, Expr[Any]) =
       val mt = Ref(mod).tpe.memberType(m) match
         case mt: MethodType =>
           mt.resType match
@@ -56,12 +72,14 @@ object MethodMacros:
 
       // default getters live on the same object: `m$default$N`
       val getters: List[(Int, Term)] = params.zipWithIndex.flatMap { (p, i) =>
-        if p.flags.is(Flags.HasDefault) then
-          mod.moduleClass
-            .methodMember(s"${m.name}$$default$$${i + 1}")
-            .headOption
-            .map(g => i -> Ref(mod).select(g))
-        else None
+        Option.when(p.flags.is(Flags.HasDefault)):
+          mod.moduleClass.methodMember(s"${m.name}$$default$$${i + 1}").headOption match
+            case Some(g) => i -> Ref(mod).select(g)
+            // silently dropping it would turn an optional parameter into a required one
+            case None =>
+              report.errorAndAbort(
+                s"command method ${m.name}: no default-argument getter for parameter '${p.name}'"
+              )
       }
 
       def invokeBody(args: Expr[Array[Any]]): Expr[Any] =
@@ -132,11 +150,11 @@ object MethodMacros:
 
       val instance = '{
         new MethodMirror[T]:
-          def invoke(receiver: T, args: Array[Any]): Any = ${ invokeBody('args) }
-          def defaultArgument(index: Int): Any           = ${ argBody('index) }
-          def hasDefault(index: Int): Boolean            = ${ hasBody('index) }
+          def invoke(args: Array[Any]): Any    = ${ invokeBody('args) }
+          def defaultArgument(index: Int): Any = ${ argBody('index) }
+          def hasDefault(index: Int): Boolean  = ${ hasBody('index) }
       }
-      (refined, resType, cast(instance, refined).asExpr)
+      (refined, cast(instance, refined).asExpr)
 
     private def tagged(tag: TypeRepr, args: TypeRepr*): TypeRepr =
       tag match
@@ -161,7 +179,7 @@ object MethodMacros:
       // per member: the Entry tag type and, for methods, the mirror instance at that index
       val entries: List[(TypeRepr, Option[Expr[Any]])] = members.map { d =>
         if d.isDefDef then
-          val (refined, _, instance) = methodMirror[T](mod, d)
+          val (refined, instance) = methodMirror[T](mod, d)
           (tagged(methodTag, refined), Some(instance))
         else (tagged(scopeTag, Ref(d).tpe), None)
       }
@@ -207,6 +225,12 @@ object MethodMacros:
         report.errorAndAbort(
           s"Parser.method/methods requires an object; ${TypeRepr.of[T].show} is not one " +
             "(pass the object itself, e.g. Parser.methods(app))"
+        )
+      if needsOuter(mod) then
+        report.errorAndAbort(
+          s"Parser.method/methods requires an object reachable without an enclosing instance; " +
+            s"${mod.name} is a member of ${mod.owner.name} " +
+            "(commands are invoked without a receiver, so a per-instance object has none)"
         )
       val (refined, instance) = groupMirror[T](mod, mod.name)
       refined.asType match

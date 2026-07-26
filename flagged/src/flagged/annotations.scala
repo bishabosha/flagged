@@ -66,5 +66,9 @@ final case class greedy() extends StaticAnnotation derives Defaults
 /** Mark a method as a command for `Parser.method` / `Parser.methods`: its parameters become the
   * options and positionals, and parsing invokes it. On a nested object, marks it as a group of
   * subcommands.
+  *
+  * Commands are invoked without a receiver, so the enclosing object must be reachable without one —
+  * top-level, nested in other objects, or local to a method. An object declared inside a class or
+  * trait has a per-instance receiver and is rejected.
   */
 final case class run() extends meta.Reflectable derives Defaults

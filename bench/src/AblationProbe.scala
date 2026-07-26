@@ -27,8 +27,9 @@ object AblationProbe:
     "nothing (floor)" -> "  val x = Wide()",
     "mirror summon"   -> "  val x = summon[Mirror.ProductOf[Wide]]",
     "annot mirror" -> "  inline def p[A]: Any = summonFrom { case am: AnnotMirror.Product[A] => am }\n  val x = p[Wide]",
-    "annots extract" -> "  val x = Annots.productAnnots[Wide]",
-    "defaults"       -> "  val x = Defaults.derived[Wide]",
+    "annots extract" ->
+      "  inline def p[A]: Any = summonFrom { case am: AnnotMirror.Product[A] => Annots.targetAnnotsOf[am.MirroredSelfAnnotations] }\n  val x = p[Wide]",
+    "defaults" -> "  val x = Defaults.derived[Wide]",
     "labels" -> "  inline def p[A](using m: Mirror.ProductOf[A]): Any = Derive.labelsOf[m.MirroredElemLabels]\n  val x = p[Wide]",
     "field walk" ->
       """  inline def p[A](using m: Mirror.ProductOf[A]): Any = summonFrom {

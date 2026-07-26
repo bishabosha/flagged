@@ -8,10 +8,15 @@ import steps.result.Result.eval.ok
 import scala.collection.immutable.IntMap
 import scala.collection.mutable
 
-/** One case of a derived sum: either a singleton value or a nested command. */
+/** One case of a derived sum: a singleton value, a nested command, or a parser to take one from. */
 private[flagged] enum SubEntry:
   case Leaf(value: Any)
   case Node(parser: Parser[?])
+
+  /** An already-assembled command — [[DeriveMethods]] builds these directly, since a `Parser`
+    * wrapper would only be unwrapped again here, its `prog` discarded.
+    */
+  case Cmd(command: Command)
 
 /** Builds the runtime `Command` model as inline derivation walks the fields: the walk feeds a
   * [[Assemble.FieldsBuilder]] one `addField` call per field, which dispatches on the parser's
@@ -119,6 +124,7 @@ private[flagged] enum SubEntry:
       val cmd  = entries(i) match
         case SubEntry.Leaf(v) => Command.leaf(v, help)
         case SubEntry.Node(p) => p.command
+        case SubEntry.Cmd(c)  => c
       SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden, anns.aliases)
     }
     // kebab-derived command names can collide only at the value level (constant @name/alias
@@ -299,25 +305,6 @@ private[flagged] enum SubEntry:
         case t: Parser.Trailing[?] =>
           // at most one, and never next to positionals or subcommands: compile-checked
           trailing = TrailingSpec(i, anns.help.getOrElse(""), t, optional, default)
-
-    def result(
-        onType: TargetAnnots,
-        build: (Array[Any], Int) => Result[Any, String],
-        version: Option[() => String]
-    ): Command =
-      // Compatibility entry point for inline derivations compiled against the original
-      // value-returning builder protocol. Newly compiled derivations use `resultInto` below.
-      resultInto(
-        onType,
-        (arr, base, out, outIndex) =>
-          Result.task:
-            val input =
-              if base == 0 && arr.length == storage then arr
-              else arr.slice(base, base + storage)
-            out(outIndex) = build(input, n).ok
-        ,
-        version
-      )
 
     def resultInto(
         onType: TargetAnnots,

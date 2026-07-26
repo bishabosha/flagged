@@ -204,6 +204,31 @@ class MethodsSuite extends munit.FunSuite:
     assert(e.contains("@default has no effect on a single @run method"), e)
   }
 
+  test("duplicate constant command names are a compile error") {
+    val e = compileErrors(
+      "object o:\n" +
+        "  @run @name(\"x\") def a(p: Int = 0): Int = p\n" +
+        "  @run @name(\"x\") def b(q: Int = 1): Int = q\n" +
+        "Parser.methods(o)"
+    )
+    assert(e.contains("duplicate command name"), e)
+  }
+
+  test("an object nested in a class is rejected, not crashed on") {
+    // Ref(mod) carries no prefix, so mirroring a per-instance object used to reach erasure and
+    // fail an assertion there ("missing outer accessor"); it must be a diagnostic instead
+    val e = compileErrors(
+      "class Host:\n" +
+        "  object cmds:\n" +
+        "    @run def go(x: Int = 1): Int = x\n" +
+        "val h = new Host\n" +
+        "Parser.methods(h.cmds)"
+    )
+    // the mirror aborts inside implicit search, so only the summon failure is quoted back
+    assert(e.contains("No given instance of type flagged.runner.MethodEntry"), e)
+    assert(e.contains("macro expansion was stopped"), e)
+  }
+
   test("@default on a non-@run member is ignored, like the member itself") {
     val e = compileErrors(
       "object o:\n" +
@@ -216,18 +241,18 @@ class MethodsSuite extends munit.FunSuite:
 
   test("meta.Reflectable annotations are mirrored, but only @run makes a command") {
     val mm = summon[meta.MethodsMirror[customMarker.type]]
-    assertEquals(mm.method(0).invoke(customMarker, Array(4)), 8)
+    assertEquals(mm.method(0).invoke(Array(4)), 8)
     val e = compileErrors("Flagged.parse[customMarker.type](Nil)")
     assert(e.nonEmpty, "expected a compile error for an object with no @run members")
   }
 
   test("the mirror is one level deep: method(i) throws on a Scope entry") {
     val mm = summon[meta.MethodsMirror[toolbox.type]]
-    assertEquals(mm.method(0).invoke(toolbox, Array(1, 2)), 3)
+    assertEquals(mm.method(0).invoke(Array(1, 2)), 3)
     // entry 2 is the nested `remote` object: its mirror must be summoned separately
     intercept[NoSuchElementException](mm.method(2))
     val rm = summon[meta.MethodsMirror[toolbox.remote.type]]
-    assertEquals(rm.method(1).invoke(toolbox.remote, Array.empty[Any]), "pruned")
+    assertEquals(rm.method(1).invoke(Array.empty[Any]), "pruned")
   }
 
   test("non-@run mirrored members are invisible to the parser") {

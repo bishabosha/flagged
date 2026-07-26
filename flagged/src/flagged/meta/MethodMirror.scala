@@ -25,8 +25,10 @@ trait MethodMirror[T] extends Defaults[Any]:
   /** The method's result type. */
   type MirroredResult
 
-  /** Call the method with one parsed value per parameter. */
-  def invoke(receiver: T, args: Array[Any]): Any
+  /** Call the method with one parsed value per parameter. Takes no receiver: `T` is always a static
+    * object (enforced when the mirror is synthesized), so the method is selected on it directly.
+    */
+  def invoke(args: Array[Any]): Any
 
 object MethodMirror:
   /** Alias pattern: lets a match type capture through the `MirroredResult` member, which a
@@ -39,7 +41,11 @@ object MethodMirror:
     case WithResult[r] => r
 
   /** Alias pattern for the `MirroredSelfAnnotations` member, like [[WithResult]]. */
-  type WithAnnots[A] = MethodMirror[?] { type MirroredSelfAnnotations = A }
+  type WithAnnots[A <: Tuple] = MethodMirror[?] { type MirroredSelfAnnotations = A }
+
+  /** The annotations of a refined [[MethodMirror]] type. */
+  type AnnotsOf[M] <: Tuple = M match
+    case WithAnnots[a] => a
 
 /** `Mirror`-style witness for the command members of `T` (an object): its methods and, nested, its
   * member objects marked by a [[Reflectable]] annotation (`@run` in flagged), in declaration order.
@@ -72,18 +78,26 @@ sealed trait MethodsMirror[T]:
 object MethodsMirror:
   trait Of[T] extends MethodsMirror[T]
 
+  /** Alias pattern for the `MirroredSelfAnnotations` member, like [[MethodMirror.WithAnnots]]. */
+  type WithAnnots[A <: Tuple] = MethodsMirror[?] { type MirroredSelfAnnotations = A }
+
+  /** The annotations of a refined [[MethodsMirror]] type. */
+  type AnnotsOf[M] <: Tuple = M match
+    case WithAnnots[a] => a
+
   /** Tagged union describing one element of [[MethodsMirror.MirroredEntries]]. Purely a type-level
-    * tag: no values of it are ever constructed.
+    * tag — sealed traits rather than an enum, since no values of it are ever constructed.
     */
-  enum Entry[E]:
+  sealed trait Entry[E]
+  object Entry:
     /** A command method; `M` is the refined [[MethodMirror]] type, retrievable via [[method]]. Its
       * result type is `MethodMirror.ResultOf[M]`.
       */
-    case Method[M]() extends Entry[M]
+    sealed trait Method[M] extends Entry[M]
 
     /** A nested command object; `S` is the object's type — summon a `MethodsMirror[S]` to descend.
       */
-    case Scope[S]() extends Entry[S]
+    sealed trait Scope[S] extends Entry[S]
 
   /** Synthesize the mirror for `T`'s [[Reflectable]]-annotated members (macro-backed). Given as
     * `transparent inline` so the refined type members reach the summoning site.

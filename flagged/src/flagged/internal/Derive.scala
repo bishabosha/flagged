@@ -18,9 +18,8 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
   *
   * The only macro-backed pieces are [[Defaults]] (term-level: default values are arbitrary
   * expressions), [[flagged.meta.AnnotMirror]] (type-level: annotations reduced to singleton types,
-  * extracted here via [[flagged.meta.AnnotMirror.find]] into typed [[Annots]]), and
-  * [[flagged.meta.MethodsMirror]] (the method-command analogue of `Mirror`, consumed by
-  * [[DeriveMethods]]).
+  * folded into typed records by [[Annots]]), and [[flagged.meta.MethodsMirror]] (the method-command
+  * analogue of `Mirror`, consumed by [[DeriveMethods]]).
   */
 @publicInBinary private[flagged] object Derive:
 
