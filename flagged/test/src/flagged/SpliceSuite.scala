@@ -8,6 +8,22 @@ case class LogOpts(
 
 case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser.Command
 
+case class Token(@help("API token") token: String) derives Parser.Shared
+
+// the same group spliced into @run method parameters
+object pack:
+  @run def build(target: String = "all", logging: LogOpts = LogOpts()): String =
+    s"$target/${logging.quiet}/${logging.logLevel}"
+
+object tools:
+  @run def build(target: String = "all", logging: LogOpts = LogOpts()): String =
+    s"$target/${logging.quiet}/${logging.logLevel}"
+
+  @run def clean(logging: LogOpts = LogOpts()): String = s"clean/${logging.quiet}"
+
+object publish:
+  @run def push(remote: String = "origin", auth: Token): String = s"$remote:${auth.token}"
+
 class SpliceSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
@@ -58,6 +74,31 @@ class SpliceSuite extends munit.FunSuite:
       ok(Flagged.parse[Outer](Seq("--a", "10", "--b", "20", "--c", "30"))),
       Outer(30, Mid(20, Inner(10)))
     )
+  }
+
+  test("splicing works in @run method parameters") {
+    // the group's options flatten into the method's own, at both shapes: a lone @run method
+    // parsed flat, and a method selected from a group
+    assertEquals(ok(Parser.method(pack).parse(Seq("--target", "x", "-q"))), "x/true/info")
+    assertEquals(ok(Parser.method(pack).parse(Nil)), "all/false/info")
+    val g = Parser.methods(tools)
+    assertEquals(ok(g.parse(Seq("build", "--log-level", "debug"))), "all/false/debug")
+    assertEquals(ok(g.parse(Seq("clean", "-q"))), "clean/true")
+  }
+
+  test("a spliced group's options show in a @run method's help") {
+    Parser.methods(tools).parse(Seq("build", "--help")) match
+      case Err(ParseError.Help(t)) =>
+        assert(t.contains("-q, --quiet"), t)
+        assert(t.contains("--log-level <string>"), t)
+        assert(t.contains("--target <string>"), t)
+      case other => fail(s"expected help, got $other")
+  }
+
+  test("a spliced group's required options are enforced on a @run method") {
+    val m = err(Parser.method(publish).parse(Nil))
+    assert(m.contains("--token"), m)
+    assertEquals(ok(Parser.method(publish).parse(Seq("--token", "t0"))), "origin:t0")
   }
 
   test("splicing works inside subcommand cases") {
