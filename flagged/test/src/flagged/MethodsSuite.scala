@@ -204,6 +204,21 @@ class MethodsSuite extends munit.FunSuite:
     assert(e.contains("@default has no effect on a single @run method"), e)
   }
 
+  test("an object nested in a class is rejected, not crashed on") {
+    // Ref(mod) carries no prefix, so mirroring a per-instance object used to reach erasure and
+    // fail an assertion there ("missing outer accessor"); it must be a diagnostic instead
+    val e = compileErrors(
+      "class Host:\n" +
+        "  object cmds:\n" +
+        "    @run def go(x: Int = 1): Int = x\n" +
+        "val h = new Host\n" +
+        "Parser.methods(h.cmds)"
+    )
+    // the mirror aborts inside implicit search, so only the summon failure is quoted back
+    assert(e.contains("No given instance of type flagged.runner.MethodEntry"), e)
+    assert(e.contains("macro expansion was stopped"), e)
+  }
+
   test("@default on a non-@run member is ignored, like the member itself") {
     val e = compileErrors(
       "object o:\n" +

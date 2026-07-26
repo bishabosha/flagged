@@ -22,6 +22,20 @@ object MethodMacros:
     private def isReflectable(s: Symbol): Boolean =
       s.annotations.exists(_.tpe.derivesFrom(reflectableSym))
 
+    /** Whether reaching `s` needs an enclosing instance. The mirror's invoker and default-argument
+      * getters select on the module symbol directly (`Ref(mod)`), a reference that carries no
+      * prefix, and they are emitted inside an anonymous class — so a module that is a *member* of a
+      * class or trait would erase to a `this` with no outer accessor (a compiler crash). A module
+      * nested in packages or other objects needs no prefix, and a module local to a term is
+      * captured lexically, since the mirror is summoned in that same scope.
+      */
+    private def needsOuter(s: Symbol): Boolean =
+      val owner = s.maybeOwner
+      if owner.isNoSymbol || owner.isPackageDef then false
+      else if owner.isDefDef || owner.isValDef then false // local to a term: captured
+      else if owner.isClassDef && !owner.flags.is(Flags.Module) then true
+      else needsOuter(owner)
+
     private def cast(e: Expr[Any], tpe: TypeRepr): Term =
       tpe.asType match
         case '[pt] => '{ $e.asInstanceOf[pt] }.asTerm
@@ -207,6 +221,12 @@ object MethodMacros:
         report.errorAndAbort(
           s"Parser.method/methods requires an object; ${TypeRepr.of[T].show} is not one " +
             "(pass the object itself, e.g. Parser.methods(app))"
+        )
+      if needsOuter(mod) then
+        report.errorAndAbort(
+          s"Parser.method/methods requires an object reachable without an enclosing instance; " +
+            s"${mod.name} is a member of ${mod.owner.name} " +
+            "(commands are invoked without a receiver, so a per-instance object has none)"
         )
       val (refined, instance) = groupMirror[T](mod, mod.name)
       refined.asType match
