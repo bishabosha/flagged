@@ -18,10 +18,10 @@ import steps.result.Result
   * in the node rather than repeating any implicit search. Only members marked `@run` exactly become
   * commands; other [[flagged.meta.Reflectable]] markers are visible to the mirror but skipped here.
   *
-  * Questions about the tower — is this member a command, how many are there — are match types
-  * rather than inline-match recursion, like [[Derive.HasAnnT]]: each folds once in the (cached)
-  * type domain instead of re-expanding per entry at every call site that asks. Only the walks that
-  * build terms ([[pickSingle]], [[entriesInto]]) stay inline.
+  * Questions about the tower — is this member a command, how many are there, which slots do they
+  * carry — are match types rather than inline-match recursion, like [[Derive.HasAnnT]]: each folds
+  * once in the (cached) type domain instead of re-expanding per entry at every call site that asks.
+  * Only the walks that build terms ([[pickSingle]], [[entriesInto]]) stay inline.
   */
 @publicInBinary private[flagged] object DeriveMethods:
 

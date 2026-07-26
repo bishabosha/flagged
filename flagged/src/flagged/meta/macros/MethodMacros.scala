@@ -49,8 +49,10 @@ object MethodMacros:
         ((d.isDefDef && !d.isClassConstructor) || (d.isTerm && d.flags.is(Flags.Module)))
       }
 
-    /** Mirror one method of the module `mod` (a static object value symbol). */
-    private def methodMirror[T: Type](mod: Symbol, m: Symbol): (TypeRepr, TypeRepr, Expr[Any]) =
+    /** Mirror one method of the module `mod` (a static object value symbol): its refined
+      * [[MethodMirror]] type and the instance, cast to it.
+      */
+    private def methodMirror[T: Type](mod: Symbol, m: Symbol): (TypeRepr, Expr[Any]) =
       val mt = Ref(mod).tpe.memberType(m) match
         case mt: MethodType =>
           mt.resType match
@@ -152,7 +154,7 @@ object MethodMacros:
           def defaultArgument(index: Int): Any = ${ argBody('index) }
           def hasDefault(index: Int): Boolean  = ${ hasBody('index) }
       }
-      (refined, resType, cast(instance, refined).asExpr)
+      (refined, cast(instance, refined).asExpr)
 
     private def tagged(tag: TypeRepr, args: TypeRepr*): TypeRepr =
       tag match
@@ -177,7 +179,7 @@ object MethodMacros:
       // per member: the Entry tag type and, for methods, the mirror instance at that index
       val entries: List[(TypeRepr, Option[Expr[Any]])] = members.map { d =>
         if d.isDefDef then
-          val (refined, _, instance) = methodMirror[T](mod, d)
+          val (refined, instance) = methodMirror[T](mod, d)
           (tagged(methodTag, refined), Some(instance))
         else (tagged(scopeTag, Ref(d).tpe), None)
       }
