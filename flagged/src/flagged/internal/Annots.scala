@@ -40,47 +40,24 @@ private[flagged] final case class FieldAnnots @publicInBinary() (
 @publicInBinary private[flagged] object FieldAnnots:
   val empty: FieldAnnots = FieldAnnots(None, MaybeChar.empty, None, false, false)
 
-/** Runtime carrier for extracted annotations, built by `Derive.productAnnots` / `Derive.sumAnnots`.
-  * Shaped like the type they describe: products carry per-field slots, sums per-case slots.
+/** Runtime carrier for annotations extracted at compile time. Only sums need one: a product's
+  * fields are walked in [[Derive]], which extracts each slot as it reaches the field
+  * ([[Annots.fieldAnnotsOf]]) and hands it straight to the builder, whereas a sum's cases are
+  * assembled together.
   */
-private[flagged] enum Annots[A]:
-  /** Annotations of a case class: on the type itself and per constructor field. An empty `perField`
-    * on a class with fields means no field carries one (the extraction shares `Vector.empty`) —
-    * index through [[fieldAnnots]], never `perField` directly.
-    */
-  case Product(onType: TargetAnnots, perField: IndexedSeq[FieldAnnots])
+@publicInBinary private[flagged] object Annots:
 
   /** Annotations of an enum / sealed trait: on the type itself and per case; `perCase` empty on an
     * inhabited sum means no case carries one — index through [[caseAnnots]].
     */
-  case Sum(onType: TargetAnnots, perCase: IndexedSeq[TargetAnnots])
-
-  def onType: TargetAnnots
-
-@publicInBinary private[flagged] object Annots:
-
-  extension (p: Annots.Product[?])
-    def fieldAnnots(i: Int): FieldAnnots =
-      if p.perField.isEmpty then FieldAnnots.empty else p.perField(i)
+  final case class Sum[A](onType: TargetAnnots, perCase: IndexedSeq[TargetAnnots])
 
   extension (s: Annots.Sum[?])
     def caseAnnots(i: Int): TargetAnnots =
       if s.perCase.isEmpty then TargetAnnots.empty else s.perCase(i)
 
-  def makeProduct[A](onType: TargetAnnots, perField: IndexedSeq[FieldAnnots]): Annots.Product[A] =
-    Annots.Product(onType, perField)
-
   def makeSum[A](onType: TargetAnnots, perCase: IndexedSeq[TargetAnnots]): Annots.Sum[A] =
     Annots.Sum(onType, perCase)
-
-  /** Extract flagged's annotations for a product into typed records. */
-  inline def productAnnots[A]: Annots.Product[A] =
-    summonFrom:
-      case am: AnnotMirror.Product[A] =>
-        makeProduct[A](
-          targetAnnotsOf[am.MirroredSelfAnnotations],
-          fieldAnnotsEach[am.MirroredAnnotations]
-        )
 
   /** Extract flagged's annotations for a sum into typed records. */
   inline def sumAnnots[A]: Annots.Sum[A] =
@@ -251,7 +228,7 @@ private[flagged] enum Annots[A]:
       case _: (_ *: t) =>
         collectField[t](names, short, help, group, positional, hidden, split, greedy)
 
-  // both walks halve the slot tuple (inline depth O(log n), matching Derive.walk) — annotation
+  // the walk halves the slot tuple (inline depth O(log n), matching Derive.walk) — annotation
   // slots hold only literal constant types, which survive the destructuring binders
 
   type Half[T <: Tuple] = Tuple.Size[T] / 2
@@ -265,26 +242,6 @@ private[flagged] enum Annots[A]:
       case _: EmptyTuple        => true
       case _: (EmptyTuple *: t) => allEmpty[t]
       case _: (_ *: _)          => false
-
-  inline def fieldAnnotsEach[Slots]: IndexedSeq[FieldAnnots] =
-    inline if allEmpty[Slots] then Vector.empty
-    else
-      val b = Vector.newBuilder[FieldAnnots]
-      fieldAnnotsInto[Slots](b)
-      b.result()
-
-  inline def fieldAnnotsInto[Slots](b: scala.collection.mutable.Growable[FieldAnnots]): Unit =
-    inline erasedValue[Slots] match
-      case _: EmptyTuple                   => ()
-      case _: (a *: EmptyTuple)            => b += fieldAnnotsOf[a]
-      case _: (a *: b0 *: EmptyTuple)      => b += fieldAnnotsOf[a] += fieldAnnotsOf[b0]
-      case _: (a *: b0 *: c *: EmptyTuple) =>
-        b += fieldAnnotsOf[a] += fieldAnnotsOf[b0] += fieldAnnotsOf[c]
-      case _: (a *: b0 *: c *: d *: EmptyTuple) =>
-        b += fieldAnnotsOf[a] += fieldAnnotsOf[b0] += fieldAnnotsOf[c] += fieldAnnotsOf[d]
-      case _: (h *: t) =>
-        fieldAnnotsInto[Tuple.Take[h *: t, Half[h *: t]]](b)
-        fieldAnnotsInto[Tuple.Drop[h *: t, Half[h *: t]]](b)
 
   inline def targetAnnotsEach[Slots]: IndexedSeq[TargetAnnots] =
     inline if allEmpty[Slots] then Vector.empty

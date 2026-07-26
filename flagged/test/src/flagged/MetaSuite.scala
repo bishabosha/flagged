@@ -12,6 +12,21 @@ final case class tagged(label: String = "none", level: Int = 1)
 
 class MetaSuite extends munit.FunSuite:
 
+  // the derivation extracts one slot at a time, as the field walk reaches each field; these
+  // collect the same per-field records for a whole class so they can be asserted together
+  inline def selfAnnotsOf[A]: TargetAnnots =
+    scala.compiletime.summonFrom:
+      case am: AnnotMirror.Product[A] => Annots.targetAnnotsOf[am.MirroredSelfAnnotations]
+
+  inline def fieldAnnotsOf[A]: IndexedSeq[FieldAnnots] =
+    scala.compiletime.summonFrom:
+      case am: AnnotMirror.Product[A] => eachSlot[am.MirroredAnnotations]
+
+  inline def eachSlot[Slots]: IndexedSeq[FieldAnnots] =
+    inline scala.compiletime.erasedValue[Slots] match
+      case _: EmptyTuple => Vector.empty
+      case _: (h *: t)   => Annots.fieldAnnotsOf[h] +: eachSlot[t]
+
   test("find extracts a typed annotation from a mirrored slot at compile time") {
     type Slot =
       Ann[short, 'v' *: EmptyTuple, false *: EmptyTuple] *:
@@ -82,10 +97,9 @@ class MetaSuite extends munit.FunSuite:
     @help("a greeter")
     case class G(@short('n') @help("who") name: String = "world", quiet: Boolean = false)
 
-    val a = Annots.productAnnots[G]
-    assertEquals(a.onType, TargetAnnots(None, Some("a greeter")))
+    assertEquals(selfAnnotsOf[G], TargetAnnots(None, Some("a greeter")))
     assertEquals(
-      a.perField,
+      fieldAnnotsOf[G],
       Vector(
         FieldAnnots(None, MaybeChar('n'), Some("who"), positional = false),
         FieldAnnots.empty
@@ -93,11 +107,17 @@ class MetaSuite extends munit.FunSuite:
     )
   }
 
-  test("all-unannotated slots share Vector.empty, read back as all-defaults") {
+  test("an unannotated slot reads back as all-defaults") {
     case class P(a: Int = 0, b: String = "")
-    val a = Annots.productAnnots[P]
-    assert(a.perField.isEmpty)
-    assertEquals(a.fieldAnnots(1), FieldAnnots.empty)
+    assertEquals(fieldAnnotsOf[P], Vector(FieldAnnots.empty, FieldAnnots.empty))
+  }
+
+  test("all-unannotated sum cases share Vector.empty, read back as all-defaults") {
+    enum Plain:
+      case A, B
+    val a = Annots.sumAnnots[Plain]
+    assert(a.perCase.isEmpty)
+    assertEquals(a.caseAnnots(1), TargetAnnots.empty)
   }
 
   test("annotation extraction for an enum captures per-case annotations") {
@@ -119,10 +139,9 @@ class MetaSuite extends munit.FunSuite:
     val ann = summon[AnnotMirror.Product[Old]]
     summon[ann.MirroredSelfAnnotations =:= EmptyTuple] // no @targetName in the self slot
 
-    val oldAnnots = Annots.productAnnots[Old]
-    assertEquals(oldAnnots.onType, TargetAnnots.empty)
+    assertEquals(selfAnnotsOf[Old], TargetAnnots.empty)
     assertEquals(
-      oldAnnots.perField,
+      fieldAnnotsOf[Old],
       Vector(FieldAnnots(None, MaybeChar('x'), None, positional = false))
     )
   }
