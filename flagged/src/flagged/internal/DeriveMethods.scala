@@ -1,11 +1,12 @@
 package flagged.internal
 
 import scala.compiletime.*
+import scala.compiletime.ops.int.+
 import scala.annotation.publicInBinary
 import flagged.Parser
-import flagged.meta.{Ann, MethodMirror, MethodsMirror}
+import flagged.meta.{MethodMirror, MethodsMirror}
 import flagged.runner.MethodEntry
-import flagged.runner.MethodEntry.EntriesResults
+import flagged.runner.MethodEntry.{EntriesResults, HasRun}
 import steps.result.Result
 
 /** Inline layer over [[MethodEntry]]: a method is a product whose construction is invocation, a
@@ -16,12 +17,17 @@ import steps.result.Result
   * [[MethodEntry.EntriesResults]] tower, and descending into a scope reuses the nested tower stored
   * in the node rather than repeating any implicit search. Only members marked `@run` exactly become
   * commands; other [[flagged.meta.Reflectable]] markers are visible to the mirror but skipped here.
+  *
+  * Questions about the tower — is this member a command, how many are there — are match types
+  * rather than inline-match recursion, like [[Derive.HasAnnT]]: each folds once in the (cached)
+  * type domain instead of re-expanding per entry at every call site that asks. Only the walks that
+  * build terms ([[pickSingle]], [[entriesInto]]) stay inline.
   */
 @publicInBinary private[flagged] object DeriveMethods:
 
   /** The group of `T`'s `@run` members as a subcommand sum. */
   inline def group[T, R <: MethodEntry[T]](r: R): Command =
-    inline if runMethodCount[r.Entries] + runObjectCount[r.Entries] == 0 then
+    inline if commandCount[r.Entries] == 0 then
       error("no @run methods or nested @run objects found in " + constValue[r.mirror.MirroredLabel])
     else
       checkOneDefault[r.Entries]
@@ -40,7 +46,7 @@ import steps.result.Result
     * whose call sites stay unchanged when a second command is added.
     */
   inline def parser[T, R <: MethodEntry[T], Out](r: R): Parser[Out] =
-    inline if runMethodCount[r.Entries] == 1 && runObjectCount[r.Entries] == 0 then
+    inline if isLoneMethod[r.Entries] then
       val (cmd, prog) = pickSingle[T, r.Entries](r.mirror, 0)
       Parser.make[Out](cmd, prog)
     else
@@ -54,113 +60,92 @@ import steps.result.Result
 
   /** The single `@run` method of `T` as a whole command: `(command, prog name)`. */
   inline def single[T, R <: MethodEntry[T]](r: R): (Command, String) =
-    inline if runMethodCount[r.Entries] == 1 && runObjectCount[r.Entries] == 0 then
-      pickSingle[T, r.Entries](r.mirror, 0)
-    else inline if runMethodCount[r.Entries] == 0 && runObjectCount[r.Entries] == 1 then
-      error("Parser.method requires a single @run method, not a nested object; use Parser.methods")
-    else inline if runMethodCount[r.Entries] + runObjectCount[r.Entries] == 0 then
+    inline if isLoneMethod[r.Entries] then pickSingle[T, r.Entries](r.mirror, 0)
+    else inline if commandCount[r.Entries] == 0 then
       error("no @run methods or nested @run objects found in " + constValue[r.mirror.MirroredLabel])
+    else inline if constValue[RunMethods[r.Entries]] == 0 then
+      error("Parser.method requires a single @run method, not a nested object; use Parser.methods")
     else error("Parser.method requires exactly one @run method; use Parser.methods for several")
 
-  /** Is `flagged.run` itself among the [[Ann]]-encoded annotations? Other [[Reflectable]] markers
-    * do not count.
-    */
-  private transparent inline def isRun[Anns]: Boolean =
-    inline erasedValue[Anns] match
-      case _: EmptyTuple                    => false
-      case _: (Ann[flagged.run, ?, ?] *: _) => true
-      case _: (_ *: t)                      => isRun[t]
+  // ---- tower queries ----------------------------------------------------------
+  // One match type per question, each a fold over the entry tower. Scrutinees are the node types
+  // themselves — never an unreduced computation — so reductions cache and the arithmetic folds on
+  // literals (the cheap regime measured in `bench.RuleCostProbe`).
 
   /** Is the method behind an [[EntriesResults.MethodNode]] marked `@run`? */
-  private transparent inline def methodIsRun[M]: Boolean =
-    inline erasedValue[M] match
-      case m: MethodMirror[?] => isRun[m.MirroredSelfAnnotations]
+  private type MethodIsRun[M] = HasRun[MethodMirror.AnnotsOf[M]]
 
-  /** Is the tower stored in an [[EntriesResults.ScopeNode]] for an `@run` object? */
-  private transparent inline def resultsAreRun[SR]: Boolean =
-    inline erasedValue[SR] match
-      case sr: MethodEntry[?] => mirrorIsRun[sr.Mirror]
+  /** Is the object whose tower an [[EntriesResults.ScopeNode]] holds marked `@run`? */
+  private type ScopeIsRun[R] = HasRun[MethodEntry.SelfAnnotsOf[R]]
 
-  private transparent inline def mirrorIsRun[SM]: Boolean =
-    inline erasedValue[SM] match
-      case sm: MethodsMirror[?] => isRun[sm.MirroredSelfAnnotations]
+  private type OneIf[B <: Boolean] <: Int = B match
+    case true  => 1
+    case false => 0
 
-  private transparent inline def runMethodCount[ER]: Int =
-    inline erasedValue[ER] match
-      case _: EntriesResults.Empty                   => 0
-      case _: EntriesResults.MethodNode[?, m, ?, re] =>
-        (inline if methodIsRun[m] then 1 else 0) + runMethodCount[re]
-      case _: EntriesResults.ScopeNode[?, ?, ?, re, ?] => runMethodCount[re]
+  private type RunMethods[ER] <: Int = ER match
+    case EntriesResults.Empty                     => 0
+    case EntriesResults.MethodNode[?, m, ?, re]   => OneIf[MethodIsRun[m]] + RunMethods[re]
+    case EntriesResults.ScopeNode[?, ?, ?, re, ?] => RunMethods[re]
 
-  private transparent inline def runObjectCount[ER]: Int =
-    inline erasedValue[ER] match
-      case _: EntriesResults.Empty                      => 0
-      case _: EntriesResults.MethodNode[?, ?, ?, re]    => runObjectCount[re]
-      case _: EntriesResults.ScopeNode[?, ?, sr, re, ?] =>
-        (inline if resultsAreRun[sr] then 1 else 0) + runObjectCount[re]
+  private type RunScopes[ER] <: Int = ER match
+    case EntriesResults.Empty                      => 0
+    case EntriesResults.MethodNode[?, ?, ?, re]    => RunScopes[re]
+    case EntriesResults.ScopeNode[?, ?, sr, re, ?] => OneIf[ScopeIsRun[sr]] + RunScopes[re]
+
+  // The counts are folded once each, in the type domain; the trivial comparisons on them stay in
+  // the term domain, where two literals fold directly — a match type would have to reduce the
+  // whole fold again as an (unmemoized) scrutinee.
+
+  /** How many of `T`'s members are commands at all. */
+  private inline def commandCount[ER]: Int =
+    constValue[RunMethods[ER]] + constValue[RunScopes[ER]]
+
+  /** Whether the whole group is one `@run` method — then it *is* the command, parsed flat. */
+  private inline def isLoneMethod[ER]: Boolean =
+    constValue[RunMethods[ER]] == 1 && constValue[RunScopes[ER]] == 0
 
   // ---- @default rules ---------------------------------------------------------
   // The sum-level rules of [[Derive.checkSumRules]], restated over the entry tower: the enum path
   // reads its per-case annotation slots from a `Mirror.SumOf`, which a `@run` object has no
-  // counterpart for. Only members that are commands are considered, so a `@default` on a
-  // non-`@run` member is as invisible here as the member itself.
+  // counterpart for. Only members that are commands are considered, so a `@default` on a non-`@run`
+  // member is as invisible here as the member itself.
 
-  /** Is `flagged.default` among the [[Ann]]-encoded annotations? */
-  private transparent inline def isDefault[Anns]: Boolean =
-    inline erasedValue[Anns] match
-      case _: EmptyTuple                        => false
-      case _: (Ann[flagged.default, ?, ?] *: _) => true
-      case _: (_ *: t)                          => isDefault[t]
-
-  /** Is the method behind an [[EntriesResults.MethodNode]] a `@default` command? */
-  private transparent inline def methodIsDefault[M]: Boolean =
-    inline erasedValue[M] match
-      case m: MethodMirror[?] =>
-        inline if isRun[m.MirroredSelfAnnotations] then isDefault[m.MirroredSelfAnnotations]
-        else false
-
-  /** Is the object behind an [[EntriesResults.ScopeNode]] a `@default` command? */
-  private transparent inline def resultsAreDefault[SR]: Boolean =
-    inline erasedValue[SR] match
-      case sr: MethodEntry[?] => mirrorIsDefault[sr.Mirror]
-
-  private transparent inline def mirrorIsDefault[SM]: Boolean =
-    inline erasedValue[SM] match
-      case sm: MethodsMirror[?] =>
-        inline if isRun[sm.MirroredSelfAnnotations] then isDefault[sm.MirroredSelfAnnotations]
-        else false
+  private type IsDefaultCommand[Anns <: Tuple] <: Boolean = HasRun[Anns] match
+    case true  => Derive.HasAnnT[flagged.default, Anns]
+    case false => false
 
   /** How many commands in the group carry `@default`. */
-  private transparent inline def defaultCount[ER]: Int =
-    inline erasedValue[ER] match
-      case _: EntriesResults.Empty                   => 0
-      case _: EntriesResults.MethodNode[?, m, ?, re] =>
-        (inline if methodIsDefault[m] then 1 else 0) + defaultCount[re]
-      case _: EntriesResults.ScopeNode[?, ?, sr, re, ?] =>
-        (inline if resultsAreDefault[sr] then 1 else 0) + defaultCount[re]
+  private type DefaultCount[ER] <: Int = ER match
+    case EntriesResults.Empty                   => 0
+    case EntriesResults.MethodNode[?, m, ?, re] =>
+      OneIf[IsDefaultCommand[MethodMirror.AnnotsOf[m]]] + DefaultCount[re]
+    case EntriesResults.ScopeNode[?, ?, sr, re, ?] =>
+      OneIf[IsDefaultCommand[MethodEntry.SelfAnnotsOf[sr]]] + DefaultCount[re]
 
   /** At most one command in the group may be the `@default` — [[Assemble.sum]] would otherwise
     * silently take the first.
     */
   private inline def checkOneDefault[ER]: Unit =
-    inline if defaultCount[ER] > 1 then error("only one @default command is supported")
+    inline if constValue[DefaultCount[ER]] > 1 then error("only one @default command is supported")
     else ()
 
   /** `@default` names the command to run when no command token is given; a lone `@run` method is
     * the whole command, with no token to omit and no siblings to choose between.
     */
   private inline def checkNoDefault[Anns]: Unit =
-    inline if isDefault[Anns] then
+    inline if constValue[Derive.HasAnnT[flagged.default, Anns]] then
       error("@default has no effect on a single @run method (it is the only command)")
     else ()
+
+  // ---- walks ------------------------------------------------------------------
 
   /** The lone `@run` method entry; callers guarantee exactly one exists. */
   private inline def pickSingle[T, ER](g: MethodsMirror[T], i: Int): (Command, String) =
     inline erasedValue[ER] match
       case _: EntriesResults.Empty =>
-        error("pickSingle: no @run method (guarded by runMethodCount)")
+        error("pickSingle: no @run method (guarded by isLoneMethod)")
       case _: EntriesResults.MethodNode[?, m, ?, re] =>
-        inline if methodIsRun[m] then
+        inline if constValue[MethodIsRun[m]] then
           singleOf[T, m & MethodMirror[T]](g.method(i).asInstanceOf[m & MethodMirror[T]])
         else pickSingle[T, re](g, i + 1)
       case _: EntriesResults.ScopeNode[?, ?, ?, re, ?] => pickSingle[T, re](g, i + 1)
@@ -170,6 +155,9 @@ import steps.result.Result
     val anns = Annots.targetAnnotsOf[m.MirroredSelfAnnotations]
     (methodCmd[T, M](m, anns), anns.name.getOrElse(Assemble.kebab(constValue[m.MirroredLabel])))
 
+  /** One `(label, annotations, command)` per `@run` member, in declaration order — the three
+    * parallel columns [[Assemble.sum]] consumes.
+    */
   private inline def entriesInto[T, ER](
       g: MethodsMirror[T],
       er: ER,
@@ -182,7 +170,7 @@ import steps.result.Result
         val node = er.asInstanceOf[
           EntriesResults.MethodNode[s, m & MethodMirror[s], t & Tuple, EntriesResults[t & Tuple]]
         ]
-        inline if methodIsRun[m] then
+        inline if constValue[MethodIsRun[m]] then
           b += methodEntry[T, m & MethodMirror[T]](g.method(i).asInstanceOf[m & MethodMirror[T]])
         entriesInto[T, re](g, node.rest.asInstanceOf[re], i + 1, b)
       case _: EntriesResults.ScopeNode[s, t, sr, re, oo] =>
@@ -205,7 +193,7 @@ import steps.result.Result
       sr: SR,
       b: scala.collection.mutable.Growable[(String, TargetAnnots, Command)]
   ): Unit =
-    inline if isRun[sr.mirror.MirroredSelfAnnotations] then
+    inline if constValue[ScopeIsRun[SR]] then
       b += ((
         constValue[sr.mirror.MirroredLabel],
         Annots.targetAnnotsOf[sr.mirror.MirroredSelfAnnotations],
@@ -216,10 +204,7 @@ import steps.result.Result
     val anns = Annots.targetAnnotsOf[m.MirroredSelfAnnotations]
     (constValue[m.MirroredLabel], anns, methodCmd[T, M](m, anns))
 
-  private inline def methodCmd[T, M <: MethodMirror[T]](
-      m: M,
-      onMethod: TargetAnnots
-  ): Command =
+  private inline def methodCmd[T, M <: MethodMirror[T]](m: M, onMethod: TargetAnnots): Command =
     Derive
       .fieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, m.MirroredAnnotations](m)
       .resultInto(

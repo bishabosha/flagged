@@ -47,6 +47,16 @@ object MethodEntry:
     ) =
     Impl[T, er.Out, mm.type, er.type](mm, er)
 
+  /** Alias pattern for the `Mirror` member, like [[MethodMirror.WithAnnots]]. */
+  type WithMirror[M] = MethodEntry[?] { type Mirror = M }
+
+  /** The mirror type of a refined [[MethodEntry]] type. */
+  type MirrorOf[R] = R match
+    case WithMirror[m] => m
+
+  /** The [[Ann]]-encoded annotations on the object a [[MethodEntry]] describes. */
+  type SelfAnnotsOf[R] = MethodsMirror.AnnotsOf[MirrorOf[R]]
+
   /** Is `flagged.run` itself among the [[Ann]]-encoded annotations? Other
     * [[flagged.meta.Reflectable]] markers do not count.
     */
