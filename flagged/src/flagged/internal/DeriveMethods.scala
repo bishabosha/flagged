@@ -25,13 +25,13 @@ import steps.result.Result
       error("no @run methods or nested @run objects found in " + constValue[r.mirror.MirroredLabel])
     else
       checkOneDefault[r.Entries]
-      val eb = Vector.newBuilder[(String, TargetAnnots, SubEntry)]
+      val eb = Vector.newBuilder[(String, TargetAnnots, Command)]
       entriesInto[T, r.Entries](r.mirror, r.entries, 0, eb)
       val es = eb.result()
       Assemble.sum(
         es.map(_(0)),
         Annots.makeSum[Any](Annots.targetAnnotsOf[r.mirror.MirroredSelfAnnotations], es.map(_(1))),
-        es.map(_(2)),
+        es.map(e => SubEntry.Cmd(e(2))),
         Derive.versionOf[T, r.mirror.MirroredSelfAnnotations]
       )
 
@@ -174,7 +174,7 @@ import steps.result.Result
       g: MethodsMirror[T],
       er: ER,
       i: Int,
-      b: scala.collection.mutable.Growable[(String, TargetAnnots, SubEntry)]
+      b: scala.collection.mutable.Growable[(String, TargetAnnots, Command)]
   ): Unit =
     inline erasedValue[ER] match
       case _: EntriesResults.Empty                   => ()
@@ -203,25 +203,18 @@ import steps.result.Result
     */
   private inline def scopeEntryInto[S, SR <: MethodEntry[S]](
       sr: SR,
-      b: scala.collection.mutable.Growable[(String, TargetAnnots, SubEntry)]
+      b: scala.collection.mutable.Growable[(String, TargetAnnots, Command)]
   ): Unit =
     inline if isRun[sr.mirror.MirroredSelfAnnotations] then
-      val anns = Annots.targetAnnotsOf[sr.mirror.MirroredSelfAnnotations]
-      val cmd  = group[S, SR](sr)
-      val name = anns.name.getOrElse(Assemble.kebab(constValue[sr.mirror.MirroredLabel]))
       b += ((
         constValue[sr.mirror.MirroredLabel],
-        anns,
-        SubEntry.Node(Parser.makeGroup[Any](cmd, name))
+        Annots.targetAnnotsOf[sr.mirror.MirroredSelfAnnotations],
+        group[S, SR](sr)
       ))
 
-  private inline def methodEntry[T, M <: MethodMirror[T]](
-      m: M
-  ): (String, TargetAnnots, SubEntry) =
+  private inline def methodEntry[T, M <: MethodMirror[T]](m: M): (String, TargetAnnots, Command) =
     val anns = Annots.targetAnnotsOf[m.MirroredSelfAnnotations]
-    val cmd  = methodCmd[T, M](m, anns)
-    val name = anns.name.getOrElse(Assemble.kebab(constValue[m.MirroredLabel]))
-    (constValue[m.MirroredLabel], anns, SubEntry.Node(Parser.make[Any](cmd, name)))
+    (constValue[m.MirroredLabel], anns, methodCmd[T, M](m, anns))
 
   private inline def methodCmd[T, M <: MethodMirror[T]](
       m: M,
@@ -231,12 +224,13 @@ import steps.result.Result
       .fieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, m.MirroredAnnotations](m)
       .resultInto(
         onMethod,
-        (arr, base, out, outIndex) =>
+        // the base is only ever non-zero for a spliced child, and a method command is never one
+        // (`Parser.Shared` has its own derivation), so the storage array is passed through as-is:
+        // `invoke` reads args(0) until the parameter count, and any spliced children's slots — plus
+        // the root frame's result slot — sit past that.
+        (arr, _, out, outIndex) =>
           Result.task:
-            val input =
-              if base == 0 then arr
-              else arr.slice(base, base + constValue[Tuple.Size[m.MirroredElemTypes]])
-            out(outIndex) = m.invoke(input)
+            out(outIndex) = m.invoke(arr)
         ,
         Derive.versionOf[T, m.MirroredSelfAnnotations]
       )
