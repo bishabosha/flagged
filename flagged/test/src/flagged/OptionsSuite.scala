@@ -318,7 +318,7 @@ class OptionsSuite extends munit.FunSuite:
 
   test("a shape-erased instance is rejected statically") {
     val e = compileErrors(
-      """given Parser[Byte] = Parser.of[Byte]("b")(s => Result.Err(("no"))
+      """given Parser[Byte] = Parser.of[Byte]("b")(s => Result.Err("no"))
          case class C(b: Byte = 0) derives Parser.Command"""
     )
     assert(e.contains("not statically known"), e)
