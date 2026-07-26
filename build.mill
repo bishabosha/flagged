@@ -78,8 +78,8 @@ object flagged extends Module:
   object native extends FlaggedModule, BaseNativeModule, PublishSettings, JvmNativeSources:
     object test extends FlaggedTests, ScalaNativeTests
 
-/** Puts flagged on the run classpath as its packaged jar instead of a directory of class files,
-  * so benchmarks see the library the way a project resolving it from a Maven repository would —
+/** Puts flagged on the run classpath as its packaged jar instead of a directory of class files, so
+  * benchmarks see the library the way a project resolving it from a Maven repository would —
   * mainargs and case-app are already jars from the coursier cache. CompileBench hands this
   * classpath to the dotty driver, so it also governs where the compiler reads flagged's TASTy.
   */
@@ -108,11 +108,11 @@ object `bench-portable` extends Module:
     def moduleDeps                   = Seq(flagged.jsWasm)
 
   object native extends BenchPortableModule, BaseNativeModule:
-    def moduleDeps = Seq(flagged.native)
+    def moduleDeps                           = Seq(flagged.native)
     override def releaseMode: T[ReleaseMode] = Task { ReleaseMode.ReleaseFast }
 
-  /** The recommended Native release configuration measured as "Native (max)" in
-    * `bench/results.md`: release-full, thin LTO, no GC (sound for a parse-once-and-exit CLI).
+  /** The recommended Native release configuration measured as "Native (max)" in `bench/results.md`:
+    * release-full, thin LTO, no GC (sound for a parse-once-and-exit CLI).
     */
   object nativeMax extends BenchPortableModule, BaseNativeModule:
     override def platformCrossSuffix         = "native"
@@ -124,7 +124,7 @@ object `bench-portable` extends Module:
 object bench extends BaseModule, JmhModule, FlaggedFromJar:
   def jmhCoreVersion = "1.37"
   def moduleDeps     = Seq(`bench-portable`.jvm)
-  def mvnDeps = super.mvnDeps() ++ Seq(
+  def mvnDeps        = super.mvnDeps() ++ Seq(
     mvn"org.scala-lang::scala3-compiler:${Versions.scala}",
     // realistic-scenario runtime rows only: builder/reflection libraries with no
     // derivation to measure at compile time (picocli is Java, JVM-only)

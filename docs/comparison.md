@@ -1,35 +1,33 @@
 # Comparison with other CLI parsing libraries
 
-Comparison against the two Scala derivation libraries flagged is most directly an alternative
-to — mainargs (0.7.7–0.7.8) and case-app (2.x) — and the most-used non-derivation libraries:
-scopt (4.1.0), scallop (5.1.0), and picocli (4.7.6, the de-facto Java standard).
+This document compares the features of Flagged to:
+- mainargs (0.7.7–0.7.8)
+- case-app (2.x)
+- scopt (4.1.0)
+- scallop (5.1.0)
+- and picocli (4.7.6, the de-facto Java standard).
 
-Sources: the mainargs and case-app entries are based on their documentation and test suites,
-and overlapping behaviors are pinned down in `flagged/test/src/flagged/ParitySuite.scala` —
-each test names the library whose documented behavior it was checked against. The scopt,
-scallop, and picocli entries are based on their documentation plus empirical spot-checks of
-the syntax behaviors (the same probes that back the `realistic` benchmark encodings); they are
-not pinned as tests. JMH benchmarks comparing derivation compile time, runtime parser
-construction, the one-shot construct-and-parse cost, and parse latency/allocation live in `bench/` (see `bench/README.md`, current numbers in `bench/results.md`); all six libraries meet in the
-`realistic` runtime scenario.
+Comparisons to mainargs, case-app, scopt, scallop, and picocli entries are based on their documentation, but also concrete tests (the `realistic` scenario tests the same schema accross all libraries). `flagged/test/src/flagged/ParitySuite.scala` also documents specific behavior.
+
+JMH benchmarks comparing derivation compile time, runtime parser construction, the one-shot construct-and-parse cost, and parse latency/allocation live in `bench/` (see `bench/README.md`, current numbers in `bench/results.md`).
 
 ## The libraries
 
-| Library | Definition model | Validation | Scala / platforms |
-| --- | --- | --- | --- |
-| flagged | case class / enum `derives`, `@run` command methods (`Mirror` + inline, three minimal macros) | compile time | 3; JVM, JS, Native |
-| mainargs | `@main` methods or case class (macros) | some compile, most runtime | 2.12–3; JVM, JS, Native |
-| case-app | case class (shapeless on Scala 2, macros on 3) | runtime | 2.12–3; JVM, JS, Native |
-| scopt | config class + `OParser` builder, hand-wired | runtime | 2.11–3; JVM, JS, Native |
-| scallop | `ScallopConf` subclass DSL, coupled to parsing (built and `verify()`d per argument list) | runtime, at `verify()` | 2.12–3; JVM, JS, Native |
-| picocli | annotated Java-first classes, runtime reflection | runtime, at model build | Java 8+ (usable from Scala); JVM only (GraalVM native-image via codegen) |
+All the libraries support generation of help text, and mapping of command line arguments to values
+according to a schema. They differ in how to construct the schema, when validation of the schema is performed, and how to declare various metadata needed for help-text.
+
+| Library | Overview |
+| --- | --- |
+| flagged | Type class model, automatic derivation of option parser for case-class/enum/`@run` annotated methods. Compile time validation of the schema, except to check for name collisions |
+| mainargs | Type class model, automatic derivation of option parser for case class / `@main` annotated methods. Automatic assembly of subcommands (1-level, methods only) |
+| case-app | Type class model, automatic derivation of option parser for case class. Mixin traits used to assemble subcommands, override features. |
+| scopt | Type class model (for values only), options parser constructed with builder pattern. Arbitrary nesting of subcommands supported. Validation at runtime. |
+| scallop | Type class model (for values only), options parser build via mutable DSL. Arbitrary nesting of subcommands supported. Validation at runtime. |
+| picocli | annotated Java-first classes, runtime reflection and runtime validation. Custom converters declared via annotation and loaded with reflection. |
 
 ## Feature matrix
 
-The **Others** column names the libraries that have the feature and how it is spelled there;
-a library not named does not have it.
-
-| Feature | flagged | Others |
+| Feature | Supported by Flagged? | And other libraries? |
 | --- | --- | --- |
 | `--name value` / `--name=value` | yes / yes | all (scopt also `--name:value`) |
 | Short option values `-s value` / `-svalue` / `-s=value` | all three forms | mainargs, picocli: all three; scopt: no attached form; scallop: no `=` form; case-app: separate only |

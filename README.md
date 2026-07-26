@@ -1,6 +1,6 @@
 # Flagged
 
-Command-line argument parsing and schema validation for Scala 3. Supports derivation of Parsers and automatic help-text from case class/enum or methods. 
+Command-line argument parsing and schema validation for Scala 3. Supports derivation of Parsers and automatic help-text from case class/enum or methods.
 
 ## Why a new library?
 
@@ -114,7 +114,9 @@ The field's `Parser` instance decides its shape:
 | `x: A` | required option `--x <a>` |
 | `x: A = default` | optional, default shown in help |
 | `x: Option[A]` | optional, `None` when absent |
-| `x: List[A]` (any collection with a `Factory`) | repeatable |
+| `x: Iterable[A]` | `--x a --x b` repeatable option with `A` as value |
+| `@split(',') x: Iterable[A]` | `--x a,b --x c` repeatable option with `A` as value, token splits on separator char. |
+| `@greedy x: Iterable[A]` | `--x a b c --x d` repeatable option that greedily consumes arguments as `A`. |
 | `x: Map[K, V]` | repeatable `--x key=value` entries |
 | `x: (A, B)` (any tuple of `Value` types, or a case class deriving `Parser.Product`) | fixed multi-token value: `--x 1 2` |
 | `x: E` (enum deriving `Parser.CommandGroup`) | nested subcommands |
@@ -123,15 +125,21 @@ The field's `Parser` instance decides its shape:
 | `x: Trailing` | the raw arguments after `--`, verbatim |
 | `@positional x: A` | positional argument (same rules) |
 
-Annotations fine-tune the rest: `@name` (long-name override and aliases), `@short`,
-`@help`, `@positional`, `@hidden` (omitted from help, shown by `--help-all`),
-`@group` (titled help sections), `@split` (divide a repeated option's value at a
-separator, `,` by default: `--env A,B,C`), `@greedy` (a repeated option consumes the
-following free tokens: `--nums 10 20 99`; compile error if the command also declares
-positional or subcommand fields, which would make the grammar ambiguous), `@version`
-(adds `--version`: `@version("0.1.0")` prints the literal, bare `@version` reads a
-given `Versioned` instance when printed), and `@default` (the command run when no
-command token is given).
+Annotations control both metadata for help-text, and fine-tune parser details:
+
+#### Parser Tuning
+- `@positional`: parse a field as an unnamed argument,
+- `@split` (divide a repeated option's value at a separator, `,` by default: `--env A,B,C`),
+- `@greedy` (a repeated option consumes the following free tokens: `--nums 10 20 99`; compile error if the command also declares positional or subcommand fields, which would make the grammar ambiguous),
+
+#### Metadata
+- `@name("...")`: long-name override and provide aliases,
+- `@short('x')`: provide a short-name,
+- `@help("...")`: provide a description,
+- `@hidden`: omit option from help, shown by `--help-all`,
+- `@group`: assign an option to a titled help section,
+- `@version`: add a `--version` flag, that will print the version. Data is sourced from either a literal argument (e.g. `@version("0.1.0")`), or bare `@version` reads a given `Versioned` instance when printed,
+- `@default`: annotate a subcommand case, parser will route here if no command token is detected.
 
 ### Subcommands
 
