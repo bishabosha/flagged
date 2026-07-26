@@ -64,13 +64,6 @@ sealed trait Parser[A]:
 
   final def map[B](f: A => B): Parser[B] = emap(a => Ok(f(a)))
 
-  /** Engine protocol: parse one token into `out(i)` — one element for repeated parsers, the
-    * explicit `--flag=value` form for valued flags. Returns the shared [[Result.done]] on success —
-    * the hot path allocates nothing. Abstract: every shape implements its own reading, so coverage
-    * is checked by the compiler rather than a cast.
-    */
-  private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String]
-
   /** The command grammar: command shapes directly; value shapes as a command line with one
     * positional argument.
     */
@@ -112,6 +105,8 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     private var n         = 0
     private var hasFailed = false
 
+    type Elem
+
     final def size: Int = n
 
     /** Whether any offered element failed to parse (the failure was reported when offered). */
@@ -122,21 +117,24 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
       r match
         case _: Err[?] => hasFailed = true
         case _         =>
-          append(out(i))
+          append(out(i).asInstanceOf[Elem])
           n += 1
       r
 
     protected def read(s: String, out: Array[Any], i: Int): Result[Unit, String]
 
     /** Called with `size` still at the pre-insertion count. */
-    protected def append(v: Any): Unit
+    protected def append(v: Elem): Unit
     def finishInto(out: Array[Any], i: Int): Result[Unit, String]
 
-  object Collector:
-    class WrapperCollector[A, B](inner: Collector, f: A => Result[B, String]) extends Collector:
+  private[flagged] object Collector:
+    type Of[E] = Collector { type Elem = E }
+    class WrapperCollector[E, A, B](inner: Collector.Of[E], f: A => Result[B, String])
+        extends Collector:
+      type Elem = E
       // the inner offer both parses and accumulates, so this wrapper's append adds nothing
       protected def read(s: String, out: Array[Any], i: Int) = inner.read(s, out, i)
-      protected def append(v: Any)                           = inner.append(v)
+      protected def append(v: Elem)                          = inner.append(v)
       def finishInto(out: Array[Any], i: Int)                =
         Result.task:
           inner.finishInto(out, i).check
@@ -147,8 +145,9 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
       elem: Value[E],
       b: scala.collection.mutable.Builder[E, Any]
   ) extends Collector:
+    type Elem = E
     protected def read(s: String, out: Array[Any], i: Int) = elem.readInto(s, out, i)
-    protected def append(v: Any)                           = b += v.asInstanceOf[E]
+    protected def append(v: Elem)                          = b += v
     def finishInto(out: Array[Any], i: Int)                =
       Result.task:
         out(i) = b.result()
@@ -164,14 +163,22 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     Result.task:
       out(i) = r.ok
 
-  /** One token per occurrence. */
-  sealed trait Value[A] extends Parser[A]:
-    self =>
+  /** The shapes that parse one token in place: a [[Value]] occurrence, or the explicit
+    * `--flag=value` form of a [[ValuedFlag]]. Declaring the read here rather than on [[Parser]]
+    * keeps it to its implementors — the engine's one polymorphic call site
+    * ([[internal.Mode.Single]]) holds exactly these two shapes, so coverage is checked by the
+    * compiler rather than a cast.
+    */
+  sealed trait SingleToken[A] extends Parser[A]:
 
     /** Engine protocol: parse `s` into `out(i)`; the shared [[Result.done]] on success (built-in
       * instances write the slot directly — no `Ok` per token).
       */
-    override private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String]
+    private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String]
+
+  /** One token per occurrence. */
+  sealed trait Value[A] extends SingleToken[A]:
+    self =>
 
     def emap[B](f: A => Result[B, String]): Value[B] = new Value[B]:
       def typeName                                                               = self.typeName
@@ -209,11 +216,6 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     /** Whether this flag accepts the explicit `--flag=value` form ([[ValuedFlag]] does). */
     private[flagged] def takesValue: Boolean = false
 
-    /** A flag takes no token; reading one is an error ([[ValuedFlag]] overrides). */
-    private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-      Result.task:
-        eval.raise(s"'$s': this flag does not take a value")
-
     /** Engine protocol: build from the mention count into `out(i)`; the shared [[Result.done]] on
       * success. Built-in instances write the slot directly — an `Ok` appears only behind
       * [[Parser.flag]]-supplied functions.
@@ -223,12 +225,9 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
   /** A flag that additionally accepts the explicit `--flag=value` form (and is therefore usable
     * positionally and inside `Option`).
     */
-  sealed trait ValuedFlag[A] extends Flag[A]:
+  sealed trait ValuedFlag[A] extends Flag[A], SingleToken[A]:
     self =>
     override private[flagged] def takesValue: Boolean = true
-
-    /** Engine protocol: parse the explicit `--flag=value` form into `out(i)`. */
-    override private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String]
 
     override def emap[B](f: A => Result[B, String]): ValuedFlag[B] = new ValuedFlag[B]:
       private[flagged] def countInto(n: Int, out: Array[Any], i: Int) =
@@ -248,25 +247,16 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
   sealed trait Repeated[A] extends Parser[A]:
     self =>
     type Elem
-    def element: Value[Elem]
-    final def typeName: String = element.typeName
 
     /** Engine protocol: a fresh accumulator for one parse. Collection instances append straight to
       * the collection's builder — elements are materialised exactly once; `Parser.repeated`
       * combinators collect an `IndexedSeq` for their combining function.
       */
-    private[flagged] def collector(): Collector
-
-    /** One token reads as a single element, built immediately. */
-    private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-      Result.task:
-        val c = collector()
-        c.offer(s, out, i).check
-        c.finishInto(out, i).check
+    private[flagged] def collector(): Collector.Of[Elem]
 
     def emap[B](f: A => Result[B, String]): Repeated[B] = new Repeated[B]:
       type Elem = self.Elem
-      def element                      = self.element
+      def typeName: String             = self.typeName
       private[flagged] def collector() = new Collector.WrapperCollector(self.collector(), f)
 
   /** A value spanning a fixed number of consecutive tokens, one per element: `point: (Int, Int)`
@@ -298,11 +288,6 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
 
     /** The pre-bracketed help metavar: `<x> <y>`. */
     private[flagged] final def helpMetavar: String = metavars.map(m => s"<$m>").mkString(" ")
-
-    /** A product spans several tokens; a single-token read is an error. */
-    private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-      Result.task:
-        eval.raise(s"'$s': expected $arity values")
 
     def emap[B](f: A => Result[B, String]): Product[B] = new Product[B]:
       private[flagged] def elements                                              = self.elements
@@ -357,10 +342,6 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
         i: Int
     ): Result[Unit, String]
 
-    /** One token builds as a single trailing argument. */
-    private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-      buildInto(Vector(s), out, i)
-
   /** A single command's grammar: named options, positionals, trailing, splices. As a field of
     * another command, its options are spliced in.
     */
@@ -368,11 +349,6 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     private[flagged] def impl: flagged.internal.Command
     def prog: String
     final def typeName: String = prog
-
-    /** A command has no single-token reading. */
-    private[flagged] def readInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-      Result.task:
-        eval.raise(s"'$s': '$prog' is a command parser, not a single value")
 
     def emap[B](f: A => Result[B, String]): Command[B] = make(emapImpl(f), prog)
     def withProg(name: String): Command[A]             = make(impl, name)
@@ -460,13 +436,14 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
   ): Repeated[A] =
     new Repeated[A]:
       type Elem = E
-      def element                      = elem
+      def typeName: String             = elem.typeName
       private[flagged] def collector() = new Collector:
-        private val b                                          = ArraySeq.untagged.newBuilder[Any]
+        type Elem = E
+        private val b                                          = ArraySeq.untagged.newBuilder[E]
         protected def read(s: String, out: Array[Any], i: Int) = elem.readInto(s, out, i)
-        protected def append(v: Any)                           = b += v
+        protected def append(v: Elem)                          = b += v
         def finishInto(out: Array[Any], i: Int)                =
-          intoSlot(combine(b.result().asInstanceOf[IndexedSeq[E]]), out, i)
+          intoSlot(combine(b.result()), out, i)
 
   /** Opt `A` into trailing shape: it is built from the raw arguments after `--`. */
   def trailing[A](combine: IndexedSeq[String] => Result[A, String]): Trailing[A] = new Trailing[A]:
@@ -536,20 +513,20 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
 
   given [A] => (elem: Value[A]) => Repeated[List[A]]:
     type Elem = A
-    def element                      = elem
+    def typeName: String             = elem.typeName
     private[flagged] def collector() = BuilderCollector(elem, List.newBuilder[A])
 
   given [A] => (elem: Value[A]) => Repeated[Vector[A]]:
     type Elem = A
-    def element                      = elem
+    def typeName: String             = elem.typeName
     private[flagged] def collector() = BuilderCollector(elem, Vector.newBuilder[A])
 
   given [A] => (elem: Value[A]) => Repeated[Seq[A]]:
     type Elem = A
-    def element                      = elem
+    def typeName: String             = elem.typeName
     private[flagged] def collector() = BuilderCollector(elem, ArraySeq.untagged.newBuilder[A])
 
-  private final class PairValue[K, V](k: Value[K], v: Value[V]) extends Value[(K, V)]:
+  private final class PairToken[K, V](k: Value[K], v: Value[V]):
     def typeName = s"${k.typeName}=${v.typeName}"
 
     /** Parse into `out(i)` through caller-owned pair scratch (at least 2 slots). */
@@ -562,20 +539,18 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
             v.readInto(s.drop(eq + 1), scratch, 1).check
             out(i) = (scratch(0).asInstanceOf[K], scratch(1).asInstanceOf[V])
 
-    override private[flagged] def readInto(s: String, out: Array[Any], i: Int) =
-      readInto(s, new Array[Any](2), out, i)
-
   /** Each occurrence is one `key=value` entry, split at the first `=`; later entries win. */
   given [K, V] => (k: Value[K], v: Value[V]) => Repeated[Map[K, V]]:
     type Elem = (K, V)
-    private val pair                 = PairValue(k, v)
-    def element: Value[Elem]         = pair
+    private val pair                 = PairToken(k, v)
+    def typeName: String             = pair.typeName
     private[flagged] def collector() = new Collector:
+      type Elem = (K, V)
       private val b     = Map.newBuilder[K, V]
       private val slots = new Array[Any](2) // pair scratch, reused across entries
 
       protected def read(s: String, out: Array[Any], i: Int) = pair.readInto(s, slots, out, i)
-      protected def append(v: Any)                           = b += v.asInstanceOf[Elem]
+      protected def append(v: Elem)                          = b += v
       def finishInto(out: Array[Any], i: Int)                =
         Result.task:
           out(i) = b.result()
@@ -655,5 +630,5 @@ sealed trait ParserLowPriority:
   // Value summon then uses
   given [A, C] => (factory: Factory[A, C], elem: Parser.Value[A]) => Parser.Repeated[C]:
     type Elem = A
-    def element                      = elem
+    def typeName: String             = elem.typeName
     private[flagged] def collector() = Parser.BuilderCollector(elem, factory.newBuilder)

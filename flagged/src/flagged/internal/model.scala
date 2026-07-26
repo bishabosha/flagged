@@ -33,7 +33,7 @@ private[flagged] enum Mode:
   /** Option taking one value. If `optional` the field is an `Option[_]` and the parsed value is
     * wrapped in `Some`.
     */
-  case Single(parser: flagged.Parser[?], optional: Boolean)
+  case Single(parser: flagged.Parser.SingleToken[?], optional: Boolean)
 
   /** Option spanning a fixed number of consecutive tokens, one per product element; parsed eagerly
     * at the occurrence, so repetition is last-wins by overwrite. If `optional` the field is an

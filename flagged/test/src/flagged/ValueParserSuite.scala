@@ -19,7 +19,7 @@ class ValueParserSuite extends munit.FunSuite:
     case other => fail(s"expected success, got $other")
 
   /** Parse a single token through the engine's slot protocol, boxed for assertions. */
-  def read[A](s: String)(using p: Parser[A]): Result[A, String] =
+  def read[A](s: String)(using p: Parser.SingleToken[A]): Result[A, String] =
     val out = new Array[Any](1)
     p.readInto(s, out, 0).map(_ => out(0).asInstanceOf[A])
 

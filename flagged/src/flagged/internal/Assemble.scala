@@ -67,10 +67,10 @@ private[flagged] enum SubEntry:
   /** The command view of a value-shaped parser: one positional argument. */
   def singleValueCommand(p: Parser[?]): Command =
     val mode = p match
-      case _: Parser.Value[?]      => Mode.Single(p, false)
-      case _: Parser.ValuedFlag[?] => Mode.Single(p, false)
-      case pr: Parser.Product[?]   => Mode.Product(pr, false)
-      case _: Parser.Flag[?]       =>
+      case v: Parser.Value[?]       => Mode.Single(v, false)
+      case vf: Parser.ValuedFlag[?] => Mode.Single(vf, false)
+      case pr: Parser.Product[?]    => Mode.Product(pr, false)
+      case _: Parser.Flag[?]        =>
         invalid("a flag parser without a value parser cannot be run standalone")
       case r: Parser.Repeated[?] =>
         Mode.Repeated(r)
