@@ -83,7 +83,7 @@ private[flagged] enum SubEntry:
           IArray.empty,
           None,
           Some(spec),
-          Vector.empty,
+          IArray.empty,
           (arr, base, out, i) =>
             Result.task:
               out(i) = arr(base)
@@ -99,7 +99,7 @@ private[flagged] enum SubEntry:
       IArray(spec),
       None,
       None,
-      Vector.empty,
+      IArray.empty,
       (arr, base, out, i) =>
         Result.task:
           out(i) = arr(base)
@@ -136,7 +136,7 @@ private[flagged] enum SubEntry:
       IArray.empty,
       Some(SubGroup(0, false, None, cases, defaultCase)),
       None,
-      Vector.empty,
+      IArray.empty,
       (arr, base, out, i) =>
         Result.task:
           out(i) = arr(base)
@@ -159,13 +159,13 @@ private[flagged] enum SubEntry:
   final class FieldsBuilder private[Assemble] (n: Int, defaults: Defaults[?]):
     // the long lookup the finished Command parses with, built as fields arrive — duplicate
     // detection is the map insert itself
-    private var lookup: java.util.HashMap[String, OptSpec]    = null
-    private var opts: mutable.ArrayBuffer[OptSpec]            = null
-    private var shorts: IntMap[OptSpec]                       = IntMap.empty
-    private var poss: mutable.ArrayBuffer[PosSpec]            = null
-    private var spls: mutable.Builder[Splice, Vector[Splice]] = null
-    private var sub: SubGroup                                 = null
-    private var trailing: TrailingSpec                        = null
+    private var lookup: java.util.HashMap[String, OptSpec]      = null
+    private var opts: mutable.Builder[OptSpec, IArray[OptSpec]] = null
+    private var shorts: IntMap[OptSpec]                         = IntMap.empty
+    private var poss: mutable.Builder[PosSpec, IArray[PosSpec]] = null
+    private var spls: mutable.Builder[Splice, IArray[Splice]]   = null
+    private var sub: SubGroup                                   = null
+    private var trailing: TrailingSpec                          = null
     private var storage         = n // spliced children's specs live past the parent's own slots
     private var index           = 0
     private var optionalPosSeen = false
@@ -179,7 +179,7 @@ private[flagged] enum SubEntry:
       if lookup.put(key, spec) != null then invalid(s"duplicate option name '$key'${origin(from)}")
 
     private def addOpt(spec: OptSpec, from: String): Unit =
-      if opts == null then opts = mutable.ArrayBuffer.empty
+      if opts == null then opts = IArray.newBuilder[OptSpec]
       opts += spec
       putName(spec.longDisplay, spec, from)
       var ai = 0
@@ -224,7 +224,7 @@ private[flagged] enum SubEntry:
               s"positional '${anns.name.getOrElse(kebab(label))}': required positionals must come before optional ones"
             )
         else optionalPosSeen = true
-        if poss == null then poss = mutable.ArrayBuffer.empty
+        if poss == null then poss = IArray.newBuilder[PosSpec]
         poss += PosSpec(
           anns.name.getOrElse(kebab(label)),
           anns.help.getOrElse(""),
@@ -264,7 +264,7 @@ private[flagged] enum SubEntry:
               from = label
             )
           }
-          if spls == null then spls = Vector.newBuilder
+          if spls == null then spls = IArray.newBuilder[Splice]
           spls += Splice(i, storage, inner, optional, default)
           storage += inner.arity
 
@@ -327,15 +327,15 @@ private[flagged] enum SubEntry:
       // `@version` contributes an implicit hidden option. A null spec keeps its parsing built-in,
       // while registering its name through the same insertion that diagnoses field collisions.
       if version.nonEmpty then putName("--version", null, null)
-      val allOpts    = if opts == null then Array.empty[OptSpec] else opts.toArray
-      val allPos     = if poss == null then Array.empty[PosSpec] else poss.toArray
-      val allSplices = if spls == null then Vector.empty[Splice] else spls.result()
+      val allOpts    = if opts == null then IArray.empty[OptSpec] else opts.result()
+      val allPos     = if poss == null then IArray.empty[PosSpec] else poss.result()
+      val allSplices = if spls == null then IArray.empty[Splice] else spls.result()
 
       // `build` receives the whole storage plus the parent's own field count — no trimming
       Command(
         onType.help.getOrElse(""),
-        IArray.unsafeFromArray(allOpts),
-        IArray.unsafeFromArray(allPos),
+        allOpts,
+        allPos,
         if sub == null then None else Some(sub),
         if trailing == null then None else Some(trailing),
         allSplices,

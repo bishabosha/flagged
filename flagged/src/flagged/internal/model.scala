@@ -23,6 +23,7 @@ private[flagged] final class ArrayProduct @publicInBinary() (
   def canEqual(that: Any): Boolean = false
   def productArity: Int            = n
   def productElement(i: Int): Any  = arr(offset + i)
+
 private[flagged] enum Mode:
   /** Flag: takes no token; built from the occurrence count (a [[flagged.Parser.ValuedFlag]]
     * additionally handles the explicit `--flag=value` form). If `optional` the field is an
@@ -152,7 +153,7 @@ private[flagged] final case class Command(
     positionals: IArray[PosSpec],
     sub: Option[SubGroup],
     trailing: Option[TrailingSpec],
-    splices: IndexedSeq[Splice],
+    splices: IArray[Splice],
     // Destination-oriented so nested commands and splices write into their parent storage without
     // allocating value-bearing Results or slicing their input arrays.
     build: (Array[Any], Int, Array[Any], Int) => Result[Unit, String],
@@ -226,7 +227,7 @@ private[flagged] object Command:
       IArray.empty,
       None,
       None,
-      Vector.empty,
+      IArray.empty,
       (_, _, out, i) =>
         Result.task:
           out(i) = value

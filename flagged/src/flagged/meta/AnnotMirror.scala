@@ -114,6 +114,16 @@ object AnnotMirror:
               resolveInner[e1, a1, d1](d.defaultArgument),
               resolveInner[e2, a2, d2](d.defaultArgument)
             )
+          case _: (
+                  e1 *: e2 *: e3 *: EmptyTuple,
+                  a1 *: a2 *: a3 *: EmptyTuple,
+                  d1 *: d2 *: d3 *: EmptyTuple
+              ) =>
+            Tuple3(
+              resolveInner[e1, a1, d1](d.defaultArgument),
+              resolveInner[e2, a2, d2](d.defaultArgument),
+              resolveInner[e3, a3, d3](d.defaultArgument)
+            )
           case _ =>
             buildTuple(constValue[Tuple.Size[Elems]])({ append =>
               resolveMany[Elems, Args, Defaulted](append, d.defaultArgument)
