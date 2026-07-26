@@ -111,9 +111,15 @@ private[flagged] object Engine:
     var selectedSub: SubCase = null
     var selectedFrom         = 0
 
-    val subGroup: SubGroup              = command.sub.orNull
-    private val defaultSubCase: SubCase =
-      if subGroup == null then null else subGroup.defaultCase.orNull
+    val subGroup: SubGroup | Null = command.sub match
+      case Some(sub) => sub
+      case _         => null
+    private val defaultSubCase: SubCase | Null =
+      if subGroup == null then null
+      else
+        subGroup.defaultCase match
+          case Some(c) => c
+          case _       => null
 
     private val shortLookup = command.shortLookup
     private val posSpecs    = command.positionals
