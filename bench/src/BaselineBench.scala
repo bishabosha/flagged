@@ -35,8 +35,8 @@ class BaselineBench:
   @Setup
   def validate(): Unit =
     def fOk(r: flagged.ParseResult[?]): Boolean = r match
-      case flagged.Ok(_) => true
-      case _             => false
+      case flagged.Result.Ok(_) => true
+      case _                    => false
     val checks = Seq(
       "empty_hand"             -> BaselineDefs.naive(emptyList).isRight,
       "simple_hand"            -> BaselineDefs.naive(simpleList).isRight,

@@ -60,7 +60,7 @@ object RuntimeCompare:
     if failing.nonEmpty then sys.error(s"scenarios do not parse: ${failing.mkString(", ")}")
 
   private def succeeded(r: Any): Boolean = r match
-    case flagged.Ok(_)              => true
+    case flagged.Result.Ok(_)       => true
     case mainargs.Result.Success(_) => true
     case Right(_)                   => true
     case _                          => false

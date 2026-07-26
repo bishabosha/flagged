@@ -45,13 +45,13 @@ case class GreedyTrailing(
 class MultiValueSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
-    case Ok(a)                         => a
-    case Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
-    case Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
+    case Result.Ok(a)                         => a
+    case Result.Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
+    case Result.Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
 
   def err[A](r: ParseResult[A]): String = r match
-    case Err(ParseError.Failure(m, _)) => m
-    case other                         => fail(s"expected failure, got $other")
+    case Result.Err(ParseError.Failure(m, _)) => m
+    case other                                => fail(s"expected failure, got $other")
 
   // ---- products ----------------------------------------------------------------
 

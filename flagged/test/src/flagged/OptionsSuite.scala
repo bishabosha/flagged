@@ -37,13 +37,13 @@ case class VarargPositionals(
 class OptionsSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
-    case Ok(a)                         => a
-    case Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
-    case Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
+    case Result.Ok(a)                         => a
+    case Result.Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
+    case Result.Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
 
   def err[A](r: ParseResult[A]): String = r match
-    case Err(ParseError.Failure(m, _)) => m
-    case other                         => fail(s"expected failure, got $other")
+    case Result.Err(ParseError.Failure(m, _)) => m
+    case other                                => fail(s"expected failure, got $other")
 
   test("all defaults") {
     assertEquals(ok(Flagged.parse[Basic](Nil)), Basic())
@@ -144,7 +144,7 @@ class OptionsSuite extends munit.FunSuite:
       ok(Flagged.parse[Collections](many)).file,
       (1 to 9).map(_.toString).toList
     )
-    given Parser.Repeated[String] = Parser.repeated[String, String](l => Ok(l.mkString(",")))
+    given Parser.Repeated[String] = Parser.repeated[String, String](l => Result.Ok(l.mkString(",")))
     case class Joined(file: String = "") derives Parser.Command
     assertEquals(
       ok(Flagged.parse[Joined](many)).file,
@@ -185,7 +185,7 @@ class OptionsSuite extends munit.FunSuite:
 
   test("the k=v Map instance wins over the Factory fallback even with a tuple Value in scope") {
     given Parser.Value[(String, Int)] =
-      Parser.of("pair")(s => Ok((s, 0))) // would parse without '=' if it were used
+      Parser.of("pair")(s => Result.Ok((s, 0))) // would parse without '=' if it were used
     case class M(define: Map[String, Int] = Map.empty) derives Parser.Command
     assertEquals(
       ok(Flagged.parse[M](Seq("--define", "a=1", "--define", "b=2"))),
@@ -388,7 +388,7 @@ class OptionsSuite extends munit.FunSuite:
   test("custom trailing parsers can require arguments") {
     case class Cmdline(parts: IndexedSeq[String])
     given Parser.Trailing[Cmdline] = Parser.trailing(l =>
-      if l.isEmpty then Err("expected a command after '--'") else Ok(Cmdline(l))
+      if l.isEmpty then Result.Err("expected a command after '--'") else Result.Ok(Cmdline(l))
     )
     case class Run(image: String = "img", cmd: Cmdline) derives Parser.Command
     assertEquals(ok(Flagged.parse[Run](Seq("--", "echo", "hi"))).cmd, Cmdline(Vector("echo", "hi")))
@@ -408,7 +408,7 @@ class OptionsSuite extends munit.FunSuite:
     case class Exec(@help("Command to run in the container") rest: Trailing = Trailing())
         derives Parser.Command
     Flagged.parse[Exec](Seq("--help")) match
-      case Err(ParseError.Help(t)) =>
+      case Result.Err(ParseError.Help(t)) =>
         assert(t.contains("[-- <args>]"), t)
         assert(t.contains("Command to run in the container"), t)
       case other => fail(s"expected help, got $other")

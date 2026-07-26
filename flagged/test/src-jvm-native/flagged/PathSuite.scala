@@ -11,12 +11,12 @@ class PathSuite extends munit.FunSuite:
 
   test("built-in path reader") {
     Flagged.parse[PathConfig](Seq("--path", "/tmp/x")) match
-      case Ok(cfg) => assertEquals(cfg.path, Paths.get("/tmp/x"))
-      case other   => fail(s"expected success, got $other")
+      case Result.Ok(cfg) => assertEquals(cfg.path, Paths.get("/tmp/x"))
+      case other          => fail(s"expected success, got $other")
   }
 
   test("path metavar appears in help") {
     Flagged.parse[PathConfig](Seq("--help")) match
-      case Err(ParseError.Help(t)) => assert(t.contains("--path <path>"), t)
-      case other                   => fail(s"expected help, got $other")
+      case Result.Err(ParseError.Help(t)) => assert(t.contains("--path <path>"), t)
+      case other                          => fail(s"expected help, got $other")
   }

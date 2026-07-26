@@ -4,7 +4,6 @@ package flagged
   * `import flagged.*` is enough to pattern-match parse results.
   */
 export steps.result.Result
-export steps.result.Result.{Ok, Err}
 
 /** The error channel of a parse: either the user asked for help, or the arguments were invalid.
   */

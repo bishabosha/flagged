@@ -61,8 +61,8 @@ private[flagged] object Engine:
           val out      = if parent == null then frame.values else parent.values
           val outIndex = if parent == null then frame.resultIndex else frame.parentOutIndex
           frame.command.finishInto(frame.values, frame, 0, out, outIndex) match
-            case Err(msg) => eval.raise(ParseError.Failure(msg, frame.hint))
-            case _        => ()
+            case Result.Err(msg) => eval.raise(ParseError.Failure(msg, frame.hint))
+            case _               => ()
           if parent != null && frame.parentOptional then out(outIndex) = Some(out(outIndex))
           frame = parent
       .map(_ => root.values(root.resultIndex))
@@ -200,8 +200,8 @@ private[flagged] object Engine:
         c = parser.collector()
         reps(spec.index) = c
       c.offer(raw, values, spec.index) match
-        case Err(msg) => report(s"invalid value for '$display': $msg")
-        case _        => ()
+        case Result.Err(msg) => report(s"invalid value for '$display': $msg")
+        case _               => ()
 
     private def addSplitElems(
         spec: SlotSpec,
@@ -235,15 +235,15 @@ private[flagged] object Engine:
           k = ar
         else
           parser.elements(k).readInto(tok, scratch, k) match
-            case Err(msg) =>
+            case Result.Err(msg) =>
               report(s"invalid value for '$display': $msg")
               failed = true
             case _ => ()
           k += 1
       if !failed then
         parser.buildInto(scratch, values, spec.index) match
-          case Err(msg) => report(s"invalid value for '$display': $msg")
-          case _        => ()
+          case Result.Err(msg) => report(s"invalid value for '$display': $msg")
+          case _               => ()
 
     private def offerValue(spec: SlotSpec, raw: String, display: String): Unit =
       mention(spec)
@@ -305,8 +305,8 @@ private[flagged] object Engine:
           case Mode.Single(parser, _) =>
             mention(spec)
             parser.readInto(token, values, spec.index) match
-              case Err(msg) => report(s"invalid value for '${spec.display}': $msg")
-              case _        => ()
+              case Result.Err(msg) => report(s"invalid value for '${spec.display}': $msg")
+              case _               => ()
             posIdx += 1
           case Mode.Flag(_, _) =>
             offerValue(spec, token, spec.display)
@@ -334,8 +334,8 @@ private[flagged] object Engine:
           command.trailing match
             case Some(spec) =>
               spec.buildInto(args.drop(idx), values, spec.index) match
-                case Err(msg) => report(s"invalid arguments after '--': $msg")
-                case _        => trailSeen = true
+                case Result.Err(msg) => report(s"invalid arguments after '--': $msg")
+                case _               => trailSeen = true
               idx = args.length
             case None => noMoreOpts = true
         else if token.startsWith("--") then
@@ -410,8 +410,8 @@ private[flagged] object Engine:
 
     private def reportInvalid(result: Result[Unit, String], display: String): Unit =
       result match
-        case Err(msg) => report(s"invalid value for '$display': $msg")
-        case _        => ()
+        case Result.Err(msg) => report(s"invalid value for '$display': $msg")
+        case _               => ()
 
     private def finishFlag(
         spec: SlotSpec,
@@ -419,8 +419,8 @@ private[flagged] object Engine:
         display: String
     ): Unit =
       parser.countInto(flagCounts(spec.index), values, spec.index) match
-        case Err(msg) => report(s"flag '$display': $msg")
-        case _        => ()
+        case Result.Err(msg) => report(s"flag '$display': $msg")
+        case _               => ()
 
     /** False means a required slot is missing. */
     private def finishSlot(spec: SlotSpec): Boolean =
@@ -524,8 +524,8 @@ private[flagged] object Engine:
                 if spec.optional then values(spec.index) = None
                 else
                   spec.buildInto(Vector.empty, values, spec.index) match
-                    case Err(msg) => report(s"missing arguments after '--': $msg")
-                    case _        => ()
+                    case Result.Err(msg) => report(s"missing arguments after '--': $msg")
+                    case _               => ()
         case None => ()
 
       if subGroup != null && selectedSub == null && !subErrored then

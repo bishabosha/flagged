@@ -65,13 +65,13 @@ object guarded:
 class MethodsSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
-    case Ok(a)                         => a
-    case Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
-    case Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
+    case Result.Ok(a)                         => a
+    case Result.Err(ParseError.Help(t))       => fail(s"expected success, got help:\n$t")
+    case Result.Err(ParseError.Failure(m, _)) => fail(s"expected success, got failure: $m")
 
   def err[A](r: ParseResult[A]): String = r match
-    case Err(ParseError.Failure(m, _)) => m
-    case other                         => fail(s"expected failure, got $other")
+    case Result.Err(ParseError.Failure(m, _)) => m
+    case other                                => fail(s"expected failure, got $other")
 
   val single = Parser.method(calc)
   val multi  = Parser.methods(toolbox)
@@ -131,7 +131,7 @@ class MethodsSuite extends munit.FunSuite:
 
   test("group help lists methods with @help text") {
     multi.parse(Seq("--help")) match
-      case Err(ParseError.Help(t)) =>
+      case Result.Err(ParseError.Help(t)) =>
         assert(t.contains("add") && t.contains("Adds two numbers"), t)
         assert(t.contains("rm"), t)
         assert(t.contains("remote"), t)
@@ -140,7 +140,7 @@ class MethodsSuite extends munit.FunSuite:
 
   test("method help shows parameter options with defaults") {
     single.parse(Seq("--help")) match
-      case Err(ParseError.Help(t)) =>
+      case Result.Err(ParseError.Help(t)) =>
         assert(t.contains("Usage: scale"), t)
         assert(t.contains("-n, --num <int>"), t)
         assert(t.contains("default: 2"), t)
@@ -242,7 +242,7 @@ class MethodsSuite extends munit.FunSuite:
   }
 
   test("a Parser given takes precedence over @run derivation") {
-    given Parser.Value[calc.type] = Parser.of("calc")(_ => Ok(calc))
+    given Parser.Value[calc.type] = Parser.of("calc")(_ => Result.Ok(calc))
     assertEquals(ok(Flagged.parse[calc.type](Seq("anything"))), calc)
   }
 
@@ -254,8 +254,8 @@ class MethodsSuite extends munit.FunSuite:
 
   test("Flagged.parse accepts a prog override for an @run object") {
     Flagged.parse[calc.type](Seq("--help"), "myscale") match
-      case Err(ParseError.Help(t)) => assert(t.contains("Usage: myscale"), t)
-      case other                   => fail(s"expected help, got $other")
+      case Result.Err(ParseError.Help(t)) => assert(t.contains("Usage: myscale"), t)
+      case other                          => fail(s"expected help, got $other")
   }
 
   test("Flagged.parseOrExit returns the invoked method's result") {

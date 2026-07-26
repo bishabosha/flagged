@@ -62,7 +62,7 @@ sealed trait Parser[A]:
     */
   def emap[B](f: A => Result[B, String]): Parser[B]
 
-  final def map[B](f: A => B): Parser[B] = emap(a => Ok(f(a)))
+  final def map[B](f: A => B): Parser[B] = emap(a => Result.Ok(f(a)))
 
   /** The command grammar: command shapes directly; value shapes as a command line with one
     * positional argument.
@@ -113,13 +113,14 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     final def failed: Boolean = hasFailed
 
     final def offer(s: String, out: Array[Any], i: Int): Result[Unit, String] =
-      val r = read(s, out, i)
-      r match
-        case _: Err[?] => hasFailed = true
-        case _         =>
+      read(s, out, i) match
+        case err: Result.Err[?] =>
+          hasFailed = true
+          err
+        case ok =>
           append(out(i).asInstanceOf[Elem])
           n += 1
-      r
+          ok
 
     protected def read(s: String, out: Array[Any], i: Int): Result[Unit, String]
 

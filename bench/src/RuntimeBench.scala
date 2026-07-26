@@ -49,8 +49,8 @@ class RuntimeBench:
   @Setup
   def validate(): Unit =
     def fOk(r: flagged.ParseResult[?]): Boolean = r match
-      case flagged.Ok(_) => true
-      case _             => false
+      case flagged.Result.Ok(_) => true
+      case _                    => false
     def mOk(r: mainargs.Result[?]): Boolean = r match
       case mainargs.Result.Success(_) => true
       case _                          => false

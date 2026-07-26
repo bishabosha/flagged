@@ -11,8 +11,8 @@ case class JvmConfig(
 class PlatformJvmSuite extends munit.FunSuite:
 
   def ok[A](r: ParseResult[A]): A = r match
-    case Ok(a) => a
-    case other => fail(s"expected success, got $other")
+    case Result.Ok(a) => a
+    case other        => fail(s"expected success, got $other")
 
   test("built-in readers: date-time types") {
     val cfg = ok(
@@ -24,12 +24,12 @@ class PlatformJvmSuite extends munit.FunSuite:
 
   test("invalid path and date values are reported with the reader's type name") {
     Flagged.parse[JvmConfig](Seq("--day", "not-a-date")) match
-      case Err(ParseError.Failure(m, _)) => assert(m.contains("not a valid date"), m)
-      case other                         => fail(s"expected failure, got $other")
+      case Result.Err(ParseError.Failure(m, _)) => assert(m.contains("not a valid date"), m)
+      case other                                => fail(s"expected failure, got $other")
   }
 
   test("date metavar appears in help") {
     Flagged.parse[JvmConfig](Seq("--help")) match
-      case Err(ParseError.Help(t)) => assert(t.contains("--day <date>"), t)
-      case other                   => fail(s"expected help, got $other")
+      case Result.Err(ParseError.Help(t)) => assert(t.contains("--day <date>"), t)
+      case other                          => fail(s"expected help, got $other")
   }

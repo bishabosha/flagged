@@ -239,7 +239,7 @@ type:
 ```scala
 given Parser.Value[Port] = Parser.of[Port]("port")(s =>
   s.toIntOption.filter(p => p > 0 && p < 65536) match
-    case Some(p) => Ok(Port(p))
+    case Some(p) => Result.Ok(Port(p))
     case None    => Err(s"'$s' is not a valid port"))
 ```
 
@@ -337,7 +337,7 @@ expressible (it is also invoked empty when the argument is absent):
 
 ```scala
 given Parser.Repeated[NonEmpty] = Parser.repeated[Int, NonEmpty](l =>
-  if l.isEmpty then Err("expected at least one occurrence") else Ok(NonEmpty(l.toList)))
+  if l.isEmpty then Result.Err("expected at least one occurrence") else Result.Ok(NonEmpty(l.toList)))
 ```
 
 `Parser.flag` does the same for flags, building the value from the occurrence count
@@ -345,7 +345,7 @@ given Parser.Repeated[NonEmpty] = Parser.repeated[Int, NonEmpty](l =>
 
 ```scala
 given Parser.Flag[Verbosity] = Parser.flag(n =>
-  if n <= 3 then Ok(Verbosity(n)) else Err(s"at most 3 occurrences (got $n)"))
+  if n <= 3 then Result.Ok(Verbosity(n)) else Result.Err(s"at most 3 occurrences (got $n)"))
 ```
 
 ### Validate across fields
@@ -357,7 +357,7 @@ value, so cross-field rules report through the normal error channel:
 case class Fetch(url: String, tls: Boolean = false, certFile: Option[Path] = None)
 
 given Parser.Command[Fetch] = Parser.Command.derived[Fetch].emap(cfg =>
-  if cfg.tls && cfg.certFile.isEmpty then Err("--tls requires --cert-file") else Ok(cfg))
+  if cfg.tls && cfg.certFile.isEmpty then Result.Err("--tls requires --cert-file") else Result.Ok(cfg))
 ```
 
 ### Make a subcommand optional or default
@@ -376,9 +376,9 @@ value instead of exiting:
 
 ```scala
 Flagged.parse[Greet](Seq("--name", "Jamie")) match
-  case Ok(cfg)                            => run(cfg)
-  case Err(ParseError.Help(text))         => println(text)
-  case Err(ParseError.Failure(msg, hint)) => logger.error(msg)
+  case Result.Ok(cfg)                            => run(cfg)
+  case Result.Err(ParseError.Help(text))         => println(text)
+  case Result.Err(ParseError.Failure(msg, hint)) => logger.error(msg)
 ```
 
 `import flagged.*` brings `Result`, `Ok`, and `Err` into scope, and the full steps
