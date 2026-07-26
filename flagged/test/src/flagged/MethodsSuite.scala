@@ -204,6 +204,16 @@ class MethodsSuite extends munit.FunSuite:
     assert(e.contains("@default has no effect on a single @run method"), e)
   }
 
+  test("duplicate constant command names are a compile error") {
+    val e = compileErrors(
+      "object o:\n" +
+        "  @run @name(\"x\") def a(p: Int = 0): Int = p\n" +
+        "  @run @name(\"x\") def b(q: Int = 1): Int = q\n" +
+        "Parser.methods(o)"
+    )
+    assert(e.contains("duplicate command name"), e)
+  }
+
   test("an object nested in a class is rejected, not crashed on") {
     // Ref(mod) carries no prefix, so mirroring a per-instance object used to reach erasure and
     // fail an assertion there ("missing outer accessor"); it must be a diagnostic instead

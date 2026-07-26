@@ -30,7 +30,7 @@ import steps.result.Result
     inline if commandCount[r.Entries] == 0 then
       error("no @run methods or nested @run objects found in " + constValue[r.mirror.MirroredLabel])
     else
-      checkOneDefault[r.Entries]
+      checkSumRules[r.Entries]
       val eb = Vector.newBuilder[(String, TargetAnnots, Command)]
       entriesInto[T, r.Entries](r.mirror, r.entries, 0, eb)
       val es = eb.result()
@@ -104,30 +104,30 @@ import steps.result.Result
   private inline def isLoneMethod[ER]: Boolean =
     constValue[RunMethods[ER]] == 1 && constValue[RunScopes[ER]] == 0
 
-  // ---- @default rules ---------------------------------------------------------
+  // ---- sum-level rules --------------------------------------------------------
   // The sum-level rules of [[Derive.checkSumRules]], restated over the entry tower: the enum path
   // reads its per-case annotation slots from a `Mirror.SumOf`, which a `@run` object has no
-  // counterpart for. Only members that are commands are considered, so a `@default` on a non-`@run`
-  // member is as invisible here as the member itself.
+  // counterpart for. Only members that are commands are considered, so annotations on a non-`@run`
+  // member are as invisible here as the member itself.
 
-  private type IsDefaultCommand[Anns <: Tuple] <: Boolean = HasRun[Anns] match
-    case true  => Derive.HasAnnT[flagged.default, Anns]
-    case false => false
-
-  /** How many commands in the group carry `@default`. */
-  private type DefaultCount[ER] <: Int = ER match
-    case EntriesResults.Empty                   => 0
-    case EntriesResults.MethodNode[?, m, ?, re] =>
-      OneIf[IsDefaultCommand[MethodMirror.AnnotsOf[m]]] + DefaultCount[re]
-    case EntriesResults.ScopeNode[?, ?, sr, re, ?] =>
-      OneIf[IsDefaultCommand[MethodEntry.SelfAnnotsOf[sr]]] + DefaultCount[re]
-
-  /** At most one command in the group may be the `@default` — [[Assemble.sum]] would otherwise
-    * silently take the first.
+  /** The annotation slots of the group's commands, in declaration order — the tuple the enum path
+    * gets from `AnnotMirror.Sum#MirroredAnnotations`.
     */
-  private inline def checkOneDefault[ER]: Unit =
-    inline if constValue[DefaultCount[ER]] > 1 then error("only one @default command is supported")
-    else ()
+  private type CommandSlots[ER] <: Tuple = ER match
+    case EntriesResults.Empty                   => EmptyTuple
+    case EntriesResults.MethodNode[?, m, ?, re] =>
+      ConsIfRun[MethodMirror.AnnotsOf[m], CommandSlots[re]]
+    case EntriesResults.ScopeNode[?, ?, sr, re, ?] =>
+      ConsIfRun[MethodEntry.SelfAnnotsOf[sr], CommandSlots[re]]
+
+  private type ConsIfRun[Anns <: Tuple, T <: Tuple] <: Tuple = HasRun[Anns] match
+    case true  => Anns *: T
+    case false => T
+
+  /** At most one `@default` command, and no duplicate constant command names — the same two rules
+    * [[Derive.checkSumRules]] enforces on an enum, over the same shape of slot tuple.
+    */
+  private inline def checkSumRules[ER]: Unit = Derive.checkSumRules[CommandSlots[ER]]
 
   /** `@default` names the command to run when no command token is given; a lone `@run` method is
     * the whole command, with no token to omit and no siblings to choose between.
