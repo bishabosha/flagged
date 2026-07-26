@@ -148,9 +148,9 @@ object MethodMacros:
 
       val instance = '{
         new MethodMirror[T]:
-          def invoke(receiver: T, args: Array[Any]): Any = ${ invokeBody('args) }
-          def defaultArgument(index: Int): Any           = ${ argBody('index) }
-          def hasDefault(index: Int): Boolean            = ${ hasBody('index) }
+          def invoke(args: Array[Any]): Any    = ${ invokeBody('args) }
+          def defaultArgument(index: Int): Any = ${ argBody('index) }
+          def hasDefault(index: Int): Boolean  = ${ hasBody('index) }
       }
       (refined, resType, cast(instance, refined).asExpr)
 

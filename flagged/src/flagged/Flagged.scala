@@ -76,16 +76,14 @@ object Flagged:
       def parser: Parser[O] = p()
 
     /** `@run` methods: the result union comes from the recursively summoned [[runner.MethodEntry]]
-      * tower; the mirror pins down the module instance, so `ValueOf` recovers it.
+      * tower. `ValueOf` is the cheap gate — it fails implicit search for a non-singleton `T` before
+      * the mirror macro is expanded, so those call sites get this trait's `implicitNotFound`
+      * message rather than a macro abort. The value itself is not needed: commands are static
+      * object methods.
       */
-    inline given [T] => (v: ValueOf[T]) => (r: runner.MethodEntry[T])
+    inline given [T] => (ValueOf[T]) => (r: runner.MethodEntry[T])
       => (Entry[T] { type Out = r.Out }) =
-      MethodsEntry[T, r.Out](() =>
-        internal.DeriveMethods.parser[T, r.type, r.Out](
-          v.value,
-          r
-        )
-      )
+      MethodsEntry[T, r.Out](() => internal.DeriveMethods.parser[T, r.type, r.Out](r))
 
   object Entry extends EntryLowPriority:
     given [A] => (p: Parser[A]) => (Entry[A] { type Out = A }) =

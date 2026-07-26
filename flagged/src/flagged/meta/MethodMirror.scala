@@ -25,8 +25,10 @@ trait MethodMirror[T] extends Defaults[Any]:
   /** The method's result type. */
   type MirroredResult
 
-  /** Call the method with one parsed value per parameter. */
-  def invoke(receiver: T, args: Array[Any]): Any
+  /** Call the method with one parsed value per parameter. Takes no receiver: `T` is always a static
+    * object (enforced when the mirror is synthesized), so the method is selected on it directly.
+    */
+  def invoke(args: Array[Any]): Any
 
 object MethodMirror:
   /** Alias pattern: lets a match type capture through the `MirroredResult` member, which a
