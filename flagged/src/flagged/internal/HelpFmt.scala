@@ -1,5 +1,8 @@
 package flagged.internal
 
+import language.experimental.captureChecking
+import language.experimental.separationChecking
+
 /** Renders `--help` screens and usage lines. */
 private[flagged] object HelpFmt:
 
@@ -31,7 +34,7 @@ private[flagged] object HelpFmt:
       b ++= table(cases.map { c =>
         val default = if g.defaultCase.exists(_.name == c.name) then " (default)" else ""
         val hidden  = if showHidden && c.hidden then " (hidden)" else ""
-        c.name -> s"${c.help}$default$hidden".stripLeading()
+        (c.name, s"${c.help}$default$hidden".stripLeading())
       })
       b += '\n'
     }
@@ -39,13 +42,13 @@ private[flagged] object HelpFmt:
     if cmd.positionals.nonEmpty then
       b ++= "\nArguments:\n"
       b ++= table(
-        cmd.positionals.toSeq.map(p => s"<${p.name}>" -> withExtras(p.help, posExtras(p)))
+        cmd.positionals.toSeq.map(p => (s"<${p.name}>", withExtras(p.help, posExtras(p))))
       )
       b += '\n'
 
     cmd.trailing.filter(_.help.nonEmpty).foreach { t =>
       b ++= "\nArguments after --:\n"
-      b ++= table(Seq("-- <args>" -> t.help))
+      b ++= table(Seq(("-- <args>", t.help)))
       b += '\n'
     }
 
@@ -53,15 +56,15 @@ private[flagged] object HelpFmt:
     val visible                 = if showHidden then allOpts else allOpts.filterNot(_.hidden)
     val (ungrouped, inSections) = visible.partition(_.group.isEmpty)
     val hasHidden          = cmd.opts.exists(_.hidden) || cmd.sub.exists(_.cases.exists(_.hidden))
-    def optRow(o: OptSpec) = optLeft(o) -> withExtras(o.help, optExtras(o, showHidden))
+    def optRow(o: OptSpec) = (optLeft(o), withExtras(o.help, optExtras(o, showHidden)))
 
     b ++= "\nOptions:\n"
     val optRows =
       ungrouped.map(optRow) ++
-        Seq("-h, --help" -> "Show this message and exit") ++
-        (if hasHidden then Seq("    --help-all" -> "Show this message with hidden options and exit")
+        Seq(("-h, --help", "Show this message and exit")) ++
+        (if hasHidden then Seq(("    --help-all", "Show this message with hidden options and exit"))
          else Seq.empty) ++
-        cmd.version.map(_ => "    --version" -> "Show version and exit")
+        cmd.version.map(_ => ("    --version", "Show version and exit"))
     b ++= table(optRows)
     b += '\n'
 

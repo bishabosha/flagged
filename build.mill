@@ -58,6 +58,79 @@ trait PublishSettings extends PublishModule, mill.util.VcsVersionModule:
 trait JvmNativeSources extends JavaModule:
   override def sourcesFolders = super.sourcesFolders ++ Seq(os.sub / "src-jvm-native")
 
+/** Rewrites the capture-checked sources into their unchecked equivalent, compiled and published by
+  * [[flagged.stable]]. The checked modules are the single source of truth and verify the mutation
+  * discipline; the stable variant must carry no experimental API in bytecode or TASTy, so this
+  * strips the experimental language imports, `update` modifiers, capture annotations (`^`,
+  * `^{...}`), `consume` modifiers, the `caps.Mutable` parents, and `@untrackedCaptures`; rewrites
+  * pure function arrows (`->`) to `=>`; and turns the identity wrappers `caps.freeze` and
+  * `caps.unsafe.unsafeAssumeSeparate` into `locally`. Any capture-checking construct it does not
+  * recognise fails the build rather than leaking into the published artifact.
+  */
+object Uncheck:
+  private def wholeFile(s: String): String =
+    var t = s
+    t = t.replaceAll(raw",\s*caps\.Mutable", "")
+    t = t.replaceAll(raw"\s+extends\s+caps\.Mutable(?=\s*:)", "")
+    t = t.replaceAll(raw"caps\.unsafe\s*\.\s*unsafeAssumeSeparate\(", "locally(")
+    t = t.replaceAll(raw"caps\.freeze\(", "locally(")
+    t
+
+  private val forbidden =
+    raw"(?:caps\.|\^\{|\s->\s|\b(?:update|consume)\s+def\b|language\.experimental\.(?:captureChecking|separationChecking))".r
+
+  // capture-checking imports are dropped (blanked, keeping line numbers stable): everything a
+  // checked file could import from `scala.caps` is stripped or rewritten by the rules below, and
+  // in-code capture-checking constructs must be spelled `caps.`-qualified for the rules to see
+  // them — an unqualified spelling survives conversion and is caught by the uncheck-plugin at
+  // stable-compile time instead
+  private val droppedImport =
+    raw"import\s+(?:language\.experimental\.(?:captureChecking|separationChecking)|(?:scala\.)?caps\b.*)".r
+
+  private def codeLine(c0: String): String =
+    var c = c0
+    c = c.replaceAll(raw"@scala\.caps\.unsafe\.untrackedCaptures\s+", "")
+    c = c.replaceAll(raw"\^\{[^}]*\}", "")
+    c = c.replaceAll(raw"(?<=[\w\)\]])\^(?![\w])", "")
+    c = c.replace(" -> ", " => ")
+    c = c.replaceAll(raw"\bupdate\s+(?=def\b)", "")
+    c = c.replaceAll(raw"\bconsume\s+(?=def\b)", "")
+    // parameter form: `def f(consume x: T)` — a parameter *named* consume (`consume: T`) has no
+    // whitespace after the word, so it is left alone
+    c = c.replaceAll(raw"\bconsume\s+(?=`?\w+\s*:)", "")
+    c
+
+  /** Files that do not enable capture checking pass through unchanged — in particular their
+    * term-level `->` tuple builders. Checked sources must avoid the `->` tuple builder (use a
+    * tuple literal), since in those files `->` is rewritten as the pure function arrow.
+    */
+  def convert(path: String, text: String): String =
+    if !text.contains("import language.experimental.captureChecking") then return text
+    wholeFile(text).linesWithSeparators.zipWithIndex
+      .map { case (line, i) =>
+        val trimmed = line.trim
+        if trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*") then line
+        else if droppedImport.matches(trimmed) then line.takeRight(if line.endsWith("\r\n") then 2 else 1)
+        else
+          val cut  = line.indexOf(" // ")
+          val code = if cut < 0 then line else line.take(cut)
+          val tail = if cut < 0 then "" else line.drop(cut)
+          val out  = codeLine(code)
+          forbidden.findFirstIn(out).foreach { m =>
+            sys.error(s"Uncheck: unconverted capture-checking construct '$m' at $path:${i + 1}")
+          }
+          out + tail
+      }
+      .mkString
+
+/** Compiles the [[flagged.uncheck.UncheckPlugin]] compiler plugin: the semantic guard applied to
+  * every `flagged.stable` compilation. The textual [[Uncheck]] rewrite is best-effort; the plugin
+  * rejects whatever it might miss (aliased imports, fully-qualified references, inferred types,
+  * `retains` annotations, `update`-flagged methods) at the resolved-symbol level.
+  */
+object `uncheck-plugin` extends BaseModule:
+  def compileMvnDeps = Seq(mvn"org.scala-lang::scala3-compiler:${Versions.scala}")
+
 object flagged extends Module:
   trait FlaggedModule extends BaseModule, PlatformScalaModule:
     def mvnDeps = Seq(mvn"ch.epfl.lamp::steps::0.2.1")
@@ -66,17 +139,73 @@ object flagged extends Module:
     trait FlaggedTests extends ScalaTests, TestModule.Munit:
       def munitVersion = Versions.munit
 
-  object jvm extends FlaggedModule, PublishSettings, JvmNativeSources:
+  object jvm extends FlaggedModule, JvmNativeSources:
     object test extends FlaggedTests
 
-  object js extends FlaggedModule, BaseJsModule, PublishSettings:
+  object js extends FlaggedModule, BaseJsModule:
     object test extends FlaggedTests, ScalaJSTests
 
   object jsWasm extends FlaggedModule, BaseJsWasmModule:
     override def platformCrossSuffix = "js"
 
-  object native extends FlaggedModule, BaseNativeModule, PublishSettings, JvmNativeSources:
+  object native extends FlaggedModule, BaseNativeModule, JvmNativeSources:
     object test extends FlaggedTests, ScalaNativeTests
+
+  /** The published library: the checked twin's sources, mechanically rewritten by [[Uncheck]] and
+    * compiled without any experimental feature. Runs the same test suites as the checked modules.
+    */
+  object stable extends Module:
+    trait StableModule extends BaseModule, PublishSettings:
+      def artifactName = "flagged"
+      def mvnDeps      = Seq(mvn"ch.epfl.lamp::steps::0.2.1")
+
+      override def scalacOptions = Task {
+        super.scalacOptions() :+ s"-Xplugin:${`uncheck-plugin`.jar().path}"
+      }
+
+      /** The checked twin whose source folders this module rewrites. */
+      def checked: ScalaModule
+
+      override def sources = Task {
+        checked.sources().zipWithIndex.map { case (ref, i) =>
+          val dest = Task.dest / i.toString
+          if os.exists(ref.path) then
+            for p <- os.walk(ref.path) if os.isFile(p) && p.ext == "scala" do
+              val rel = p.relativeTo(ref.path)
+              os.write(
+                dest / rel,
+                Uncheck.convert(p.toString, os.read(p)),
+                createFolders = true
+              )
+          PathRef(dest)
+        }
+      }
+
+      /** Runs the checked twin's test sources against the rewritten library. */
+      trait StableTests extends ScalaTests, TestModule.Munit:
+        def munitVersion = Versions.munit
+        def checkedTest: ScalaModule
+        override def sources = Task { checkedTest.sources() }
+
+        // the guard also covers inline expansion: library inline bodies are re-typechecked here
+        override def scalacOptions = Task {
+          super.scalacOptions() :+ s"-Xplugin:${`uncheck-plugin`.jar().path}"
+        }
+
+    object jvm extends StableModule:
+      def checked = flagged.jvm
+      object test extends StableTests:
+        def checkedTest = flagged.jvm.test
+
+    object js extends StableModule, BaseJsModule:
+      def checked = flagged.js
+      object test extends StableTests, ScalaJSTests:
+        def checkedTest = flagged.js.test
+
+    object native extends StableModule, BaseNativeModule:
+      def checked = flagged.native
+      object test extends StableTests, ScalaNativeTests:
+        def checkedTest = flagged.native.test
 
 /** Puts flagged on the run classpath as its packaged jar instead of a directory of class files, so
   * benchmarks see the library the way a project resolving it from a Maven repository would —
@@ -86,8 +215,10 @@ object flagged extends Module:
 trait FlaggedFromJar extends JavaModule:
   override def runClasspath = Task {
     val local =
-      (flagged.jvm.localRunClasspath() ++ flagged.jvm.compileResources()).map(_.path).toSet
-    super.runClasspath().filterNot(ref => local(ref.path)) :+ flagged.jvm.jar()
+      (flagged.stable.jvm.localRunClasspath() ++ flagged.stable.jvm.compileResources())
+        .map(_.path)
+        .toSet
+    super.runClasspath().filterNot(ref => local(ref.path)) :+ flagged.stable.jvm.jar()
   }
 
 object `bench-portable` extends Module:
@@ -98,17 +229,17 @@ object `bench-portable` extends Module:
     )
 
   object jvm extends BenchPortableModule, FlaggedFromJar:
-    def moduleDeps = Seq(flagged.jvm)
+    def moduleDeps = Seq(flagged.stable.jvm)
 
   object js extends BenchPortableModule, BaseJsModule:
-    def moduleDeps = Seq(flagged.js)
+    def moduleDeps = Seq(flagged.stable.js)
 
   object jsWasm extends BenchPortableModule, BaseJsWasmModule:
     override def platformCrossSuffix = "js"
     def moduleDeps                   = Seq(flagged.jsWasm)
 
   object native extends BenchPortableModule, BaseNativeModule:
-    def moduleDeps                           = Seq(flagged.native)
+    def moduleDeps                           = Seq(flagged.stable.native)
     override def releaseMode: T[ReleaseMode] = Task { ReleaseMode.ReleaseFast }
 
   /** The recommended Native release configuration measured as "Native (max)" in `bench/results.md`:
@@ -116,7 +247,7 @@ object `bench-portable` extends Module:
     */
   object nativeMax extends BenchPortableModule, BaseNativeModule:
     override def platformCrossSuffix         = "native"
-    def moduleDeps                           = Seq(flagged.native)
+    def moduleDeps                           = Seq(flagged.stable.native)
     override def releaseMode: T[ReleaseMode] = Task { ReleaseMode.ReleaseFull }
     override def nativeLTO: T[LTO]           = Task { LTO.Thin }
     override def nativeGC: T[String]         = Task { "none" }
@@ -134,4 +265,4 @@ object bench extends BaseModule, JmhModule, FlaggedFromJar:
   )
 
 object examples extends BaseModule:
-  def moduleDeps = Seq(flagged.jvm)
+  def moduleDeps = Seq(flagged.stable.jvm)

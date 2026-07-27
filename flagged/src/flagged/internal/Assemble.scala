@@ -1,5 +1,8 @@
 package flagged.internal
 
+import language.experimental.captureChecking
+import language.experimental.separationChecking
+
 import flagged.Parser
 import flagged.meta.Defaults
 import scala.annotation.publicInBinary
@@ -84,14 +87,14 @@ private[flagged] enum SubEntry:
           TrailingSpec(0, "", t, false, None)
         return Command(
           "",
-          IArray.empty,
-          IArray.empty,
+          Command.noOpts,
+          Command.noPos,
           None,
           Some(spec),
-          IArray.empty,
-          (arr, base, out, i) =>
+          Command.noSplices,
+          (arr, base, i) =>
             Result.task:
-              out(i) = arr(base)
+              arr(i) = arr(base)
           ,
           1
         )
@@ -100,14 +103,14 @@ private[flagged] enum SubEntry:
     val spec = PosSpec("value", "", p.typeName, 0, mode, None)
     Command(
       "",
-      IArray.empty,
-      IArray(spec),
+      Command.noOpts,
+      caps.freeze(Array(spec)),
       None,
       None,
-      IArray.empty,
-      (arr, base, out, i) =>
+      Command.noSplices,
+      (arr, base, i) =>
         Result.task:
-          out(i) = arr(base)
+          arr(i) = arr(base)
       ,
       1
     )
@@ -116,7 +119,7 @@ private[flagged] enum SubEntry:
       caseLabels: IndexedSeq[String],
       annots: Annots.Sum[?],
       entries: IndexedSeq[SubEntry],
-      version: Option[() => String]
+      version: Option[() -> String]
   ): Command =
     val cases = Vector.tabulate(entries.length) { i =>
       val anns = annots.caseAnnots(i)
@@ -138,14 +141,14 @@ private[flagged] enum SubEntry:
       if i < 0 then None else Some(cases(i))
     Command(
       annots.onType.help.getOrElse(""),
-      IArray.empty,
-      IArray.empty,
+      Command.noOpts,
+      Command.noPos,
       Some(SubGroup(0, false, None, cases, defaultCase)),
       None,
-      IArray.empty,
-      (arr, base, out, i) =>
+      Command.noSplices,
+      (arr, base, i) =>
         Result.task:
-          out(i) = arr(base)
+          arr(i) = arr(base)
       ,
       1,
       version
@@ -153,7 +156,7 @@ private[flagged] enum SubEntry:
 
   // ---- product assembly -------------------------------------------------------
 
-  def fieldsBuilder(n: Int, defaults: Defaults[?]): FieldsBuilder = FieldsBuilder(n, defaults)
+  def fieldsBuilder(n: Int, defaults: Defaults[?]): FieldsBuilder^ = FieldsBuilder(n, defaults)
 
   /** The runtime half of product derivation, fused: the inline field walk calls [[addField]] once
     * per field in declaration order, and each call resolves the field's role from its parser's
@@ -162,14 +165,23 @@ private[flagged] enum SubEntry:
     * `Derive`; only value-level rules (reserved/duplicate names via kebab-cased labels, positional
     * ordering) are checked here. [[result]] closes the command.
     */
-  final class FieldsBuilder private[Assemble] (n: Int, defaults: Defaults[?]):
+  final class FieldsBuilder private[Assemble] (n: Int, defaults: Defaults[?])
+      extends caps.Mutable:
     // the long lookup the finished Command parses with, built as fields arrive — duplicate
     // detection is the map insert itself
     private var lookup: java.util.HashMap[String, OptSpec]      = null
-    private var opts: mutable.Builder[OptSpec, IArray[OptSpec]] = null
-    private var shorts: IntMap[OptSpec]                         = IntMap.empty
-    private var poss: mutable.Builder[PosSpec, IArray[PosSpec]] = null
-    private var spls: mutable.Builder[Splice, IArray[Splice]]   = null
+    // spec staging: lazily allocated at the field-count bound, copied once to exact size in
+    // `resultInto` — the same single grow-free copy an ArrayBuilder would make, but the staging
+    // array stays exclusive to this builder, so the copy can be frozen into pure spec storage
+    // (`ArrayBuilder.result()` is typed `^{any.rd}` because it may alias the builder's internal
+    // buffer, which `caps.freeze` rightly refuses to consume)
+    private var opts: Array[OptSpec]^ = null
+    private var optsN                 = 0
+    private var shorts: IntMap[OptSpec] = IntMap.empty
+    private var poss: Array[PosSpec]^ = null
+    private var possN                 = 0
+    private var spls: Array[Splice]^ = null
+    private var splsN                = 0
     private var sub: SubGroup                                   = null
     private var trailing: TrailingSpec                          = null
     private var storage         = n // spliced children's specs live past the parent's own slots
@@ -180,13 +192,20 @@ private[flagged] enum SubEntry:
       if from == null then "" else s" (from options group '$from')"
 
     /** Register `spec` under `key` (`--`-prefixed); the insert doubles as duplicate detection. */
-    private def putName(key: String, spec: OptSpec, from: String): Unit =
+    private update def putName(key: String, spec: OptSpec, from: String): Unit =
       if lookup == null then lookup = new java.util.HashMap
       if lookup.put(key, spec) != null then invalid(s"duplicate option name '$key'${origin(from)}")
 
-    private def addOpt(spec: OptSpec, from: String): Unit =
-      if opts == null then opts = IArray.newBuilder[OptSpec]
-      opts += spec
+    private update def addOpt(spec: OptSpec, from: String): Unit =
+      // unlike positionals and splices, opts can outnumber the parent's own fields: a spliced
+      // group contributes all of its options while occupying a single field slot
+      if opts == null then opts = new Array[OptSpec](if n < 4 then 4 else n)
+      else if optsN == opts.length then
+        val grown: Array[OptSpec]^ = new Array[OptSpec](opts.length * 2)
+        Array.copy(opts, 0, grown, 0, optsN)
+        opts = grown
+      opts(optsN) = spec
+      optsN += 1
       putName(spec.longDisplay, spec, from)
       var ai = 0
       while ai < spec.aliases.length do
@@ -197,7 +216,7 @@ private[flagged] enum SubEntry:
         if shorts.contains(spec.short) then invalid(s"duplicate short option '-$c'${origin(from)}")
         shorts = shorts.updated(spec.short, spec)
 
-    def addField(label: String, parser: Parser[?], optional: Boolean, anns: FieldAnnots): Unit =
+    update def addField(label: String, parser: Parser[?], optional: Boolean, anns: FieldAnnots): Unit =
       val i = index
       index += 1
       val default =
@@ -230,8 +249,8 @@ private[flagged] enum SubEntry:
               s"positional '${anns.name.getOrElse(kebab(label))}': required positionals must come before optional ones"
             )
         else optionalPosSeen = true
-        if poss == null then poss = IArray.newBuilder[PosSpec]
-        poss += PosSpec(
+        if poss == null then poss = new Array[PosSpec](n)
+        poss(possN) = PosSpec(
           anns.name.getOrElse(kebab(label)),
           anns.help.getOrElse(""),
           metavar,
@@ -239,6 +258,7 @@ private[flagged] enum SubEntry:
           mode,
           default
         )
+        possN += 1
       def requiredPos = !(optional || default.nonEmpty)
 
       parser match
@@ -270,8 +290,9 @@ private[flagged] enum SubEntry:
               from = label
             )
           }
-          if spls == null then spls = IArray.newBuilder[Splice]
-          spls += Splice(i, storage, inner, optional, default)
+          if spls == null then spls = new Array[Splice](n)
+          spls(splsN) = Splice(i, storage, inner, optional, default)
+          splsN += 1
           storage += inner.arity
 
         case c: Parser.Command[?] =>
@@ -306,17 +327,17 @@ private[flagged] enum SubEntry:
           // at most one, and never next to positionals or subcommands: compile-checked
           trailing = TrailingSpec(i, anns.help.getOrElse(""), t, optional, default)
 
-    def resultInto(
+    update def resultInto(
         onType: TargetAnnots,
-        build: (Array[Any], Int, Array[Any], Int) => Result[Unit, String],
-        version: Option[() => String]
+        build: (Array[Any]^, Int, Int) -> Result[Unit, String],
+        version: Option[() -> String]
     ): Command =
       // `@version` contributes an implicit hidden option. A null spec keeps its parsing built-in,
       // while registering its name through the same insertion that diagnoses field collisions.
       if version.nonEmpty then putName("--version", null, null)
-      val allOpts    = if opts == null then IArray.empty[OptSpec] else opts.result()
-      val allPos     = if poss == null then IArray.empty[PosSpec] else poss.result()
-      val allSplices = if spls == null then IArray.empty[Splice] else spls.result()
+      val allOpts    = if opts == null then Command.noOpts else caps.freeze(opts.take(optsN))
+      val allPos     = if poss == null then Command.noPos else caps.freeze(poss.take(possN))
+      val allSplices = if spls == null then Command.noSplices else caps.freeze(spls.take(splsN))
 
       // `build` receives the whole storage plus the parent's own field count — no trimming
       Command(

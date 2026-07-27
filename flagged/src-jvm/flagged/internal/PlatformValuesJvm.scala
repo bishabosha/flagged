@@ -1,5 +1,8 @@
 package flagged.internal
 
+import language.experimental.captureChecking
+import language.experimental.separationChecking
+
 import java.nio.file.Path
 import java.time.{Instant, LocalDate, LocalDateTime, LocalTime}
 import java.time.format.DateTimeParseException
@@ -16,7 +19,7 @@ private[flagged] trait PlatformValues:
 
   given Parser.Value[Path] = path
 
-  private def temporal[A](name: String)(f: String => A): Parser.Value[A] =
+  private def temporal[A](name: String)(f: String -> A): Parser.Value[A] =
     Parser.of(name): s =>
       Result:
         try f(s.trim)

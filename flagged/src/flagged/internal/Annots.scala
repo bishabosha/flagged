@@ -1,5 +1,8 @@
 package flagged.internal
 
+import language.experimental.captureChecking
+import language.experimental.separationChecking
+
 import compiletime.{summonFrom, summonInline, erasedValue, constValue}
 import compiletime.ops.int./
 import flagged.meta.{Ann, AnnotMirror, Defaults}

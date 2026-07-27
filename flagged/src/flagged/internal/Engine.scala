@@ -1,5 +1,8 @@
 package flagged.internal
 
+import language.experimental.captureChecking
+import language.experimental.separationChecking
+
 import flagged.{ParseError, ParseResult}
 import steps.result.Result
 import steps.result.Result.{Err, eval}
@@ -27,11 +30,11 @@ private[flagged] object Engine:
       args: IndexedSeq[String],
       from: Int
   ): ParseResult[Any] =
-    val root = Frame(cmd, prog, path, args, from, null, null, -1, false)
+    val root: Frame^ = Frame(cmd, prog, path, args, from, null, null, -1, false)
     Result
       .task:
-        var frame = root
-        var leaf  = false
+        var frame: Frame^ = root
+        var leaf          = false
 
         // Validate the complete selected path before evaluating a default or building a command.
         while !leaf do
@@ -53,18 +56,18 @@ private[flagged] object Engine:
               group.optional
             )
 
-        // A child writes straight into its parent's subcommand slot. The root reserves one extra
-        // value slot for its result, avoiding a separate one-element output array.
+        // Every frame builds into its own spare result slot — `finishInto` takes one storage
+        // array, so there is nothing for separation checking to distinguish — and the value is
+        // then copied to the parent's subcommand slot in two sequential single-array statements.
         while frame != null do
           frame.materializeDefaults()
-          val parent   = frame.parent
-          val out      = if parent == null then frame.values else parent.values
-          val outIndex = if parent == null then frame.resultIndex else frame.parentOutIndex
-          frame.command.finishInto(frame.values, frame, 0, out, outIndex) match
+          frame.command.finishInto(frame.values, frame.skips, 0, frame.resultIndex) match
             case Result.Err(msg) => eval.raise(ParseError.Failure(msg, frame.hint))
             case _               => ()
-          if parent != null && frame.parentOptional then out(outIndex) = Some(out(outIndex))
-          frame = parent
+          if frame.parent != null then
+            val v = frame.values(frame.resultIndex)
+            frame.parent.values(frame.parentOutIndex) = if frame.parentOptional then Some(v) else v
+          frame = frame.parent
       .map(_ => root.values(root.resultIndex))
 
   /** All mutable state for one command level. Methods deliberately use ordinary returns and
@@ -76,29 +79,27 @@ private[flagged] object Engine:
       rootPath: IndexedSeq[String],
       args: IndexedSeq[String],
       from: Int,
-      val parent: Frame,
+      val parent: Frame^,
       pathName: String,
       val parentOutIndex: Int,
       val parentOptional: Boolean
-  ) extends Mentions:
+  ) extends Mentions, caps.Mutable:
     private val n = command.arity
 
-    // Only the root needs an additional destination for its built value. Child values land in the
-    // parent's existing subcommand slot.
-    val resultIndex: Int   = n
-    val values: Array[Any] =
-      new Array[Any](n + (if parent == null then 1 else 0))
+    // one spare slot past the fields: this command's built value lands at `resultIndex`
+    val resultIndex: Int    = n
+    val values: Array[Any]^ = new Array[Any](n + 1)
     private var seen0: Long           = 0L
-    private val seenMore: Array[Long] =
+    private val seenMore: Array[Long]^ =
       if n <= 64 then null else new Array[Long]((n + 63) >>> 6)
     // Occurrence counts matter only for flags and are allocated on their first occurrence.
-    private var flagCounts: Array[Int] = null
+    private var flagCounts: Array[Int]^ = null
 
     // Raw last-wins values stage directly in `values`; only their spelling needs side storage.
-    private var lastDisp: Array[String] = null
+    private var lastDisp: Array[String]^ = null
 
     // Allocated on the first repeated occurrence.
-    private var reps: Array[flagged.Parser.Collector] = null
+    private var reps: Array[flagged.Parser.Collector[?]^]^ = null
 
     private var errors: mutable.ArrayBuffer[String] = null
     private var subErrored                          = false
@@ -141,7 +142,7 @@ private[flagged] object Engine:
     private def failure: ParseError.Failure =
       ParseError.Failure(errors.mkString("\n"), hint)
 
-    private def report(msg: String): Unit =
+    private update def report(msg: String): Unit =
       if errors == null then errors = mutable.ArrayBuffer.empty[String]
       errors += msg
 
@@ -149,11 +150,11 @@ private[flagged] object Engine:
       if seenMore == null then (seen0 & (1L << index)) != 0
       else (seenMore(index >>> 6) & (1L << (index & 63))) != 0
 
-    private def markSeen(index: Int): Unit =
+    private update def markSeen(index: Int): Unit =
       if seenMore == null then seen0 |= 1L << index
       else seenMore(index >>> 6) |= 1L << (index & 63)
 
-    private def mention(spec: SlotSpec): Unit =
+    private update def mention(spec: SlotSpec): Unit =
       markSeen(spec.index)
       spec.mode match
         case Mode.Flag(_, _) =>
@@ -161,7 +162,7 @@ private[flagged] object Engine:
           flagCounts(spec.index) += 1
         case _ => ()
 
-    private def stage(spec: SlotSpec, raw: String, display: String): Unit =
+    private update def stage(spec: SlotSpec, raw: String, display: String): Unit =
       if lastDisp == null then lastDisp = new Array[String](n)
       values(spec.index) = raw
       lastDisp(spec.index) = display
@@ -181,7 +182,7 @@ private[flagged] object Engine:
       s.length > 1 && s.startsWith("-") && !isNegativeNumber(s)
 
     /** Null after reporting when the value is missing. */
-    private def takeValue(display: String): String =
+    private update def takeValue(display: String): String =
       if idx < args.length then
         val v = args(idx)
         if !looksLikeOption(v) then
@@ -194,22 +195,19 @@ private[flagged] object Engine:
       case Mode.Flag(_, _) => true
       case _               => false
 
-    private def addElem(
+    private update def addElem(
         spec: SlotSpec,
         parser: flagged.Parser.Repeated[?],
         raw: String,
         display: String
     ): Unit =
-      if reps == null then reps = new Array[flagged.Parser.Collector](n)
-      var c = reps(spec.index)
-      if c == null then
-        c = parser.collector()
-        reps(spec.index) = c
-      c.offer(raw, values, spec.index) match
+      if reps == null then reps = new Array[flagged.Parser.Collector[?]^](n)
+      if reps(spec.index) == null then reps(spec.index) = parser.collector()
+      reps(spec.index).offer(raw, values, spec.index) match
         case Result.Err(msg) => report(s"invalid value for '$display': $msg")
         case _               => ()
 
-    private def addSplitElems(
+    private update def addSplitElems(
         spec: SlotSpec,
         parser: flagged.Parser.Repeated[?],
         raw: String,
@@ -223,7 +221,7 @@ private[flagged] object Engine:
         addElem(spec, parser, raw.substring(start, end), display)
         start = end + 1
 
-    private def offerProduct(
+    private update def offerProduct(
         spec: SlotSpec,
         parser: flagged.Parser.Product[?],
         display: String,
@@ -251,7 +249,7 @@ private[flagged] object Engine:
           case Result.Err(msg) => report(s"invalid value for '$display': $msg")
           case _               => ()
 
-    private def offerValue(spec: SlotSpec, raw: String, display: String): Unit =
+    private update def offerValue(spec: SlotSpec, raw: String, display: String): Unit =
       mention(spec)
       spec.mode match
         case Mode.Repeated(parser, sep, _) =>
@@ -263,7 +261,7 @@ private[flagged] object Engine:
           report(s"flag '$display' does not take a value")
         case _ => stage(spec, raw, display)
 
-    private def offerBare(spec: SlotSpec): Unit =
+    private update def offerBare(spec: SlotSpec): Unit =
       mention(spec)
       values(spec.index) = null
 
@@ -275,12 +273,12 @@ private[flagged] object Engine:
         i += 1
       null
 
-    private def selectSub(commandCase: SubCase, fromIndex: Int): Unit =
+    private update def selectSub(commandCase: SubCase, fromIndex: Int): Unit =
       selectedSub = commandCase
       selectedFrom = fromIndex
       idx = args.length
 
-    private def handleFree(token: String): Unit =
+    private update def handleFree(token: String): Unit =
       if subGroup != null then
         val commandCase = findCase(subGroup, token)
         if commandCase != null then selectSub(commandCase, idx)
@@ -322,7 +320,7 @@ private[flagged] object Engine:
       token == "-" || !token.startsWith("-") ||
         (isNegativeNumber(token) && shortSpec(token(1)) == null)
 
-    private def consumeGreedy(spec: OptSpec): Unit = spec.mode match
+    private update def consumeGreedy(spec: OptSpec): Unit = spec.mode match
       case Mode.Repeated(_, _, true) =>
         while idx < args.length && isFreeToken(args(idx)) do
           offerValue(spec, args(idx), spec.longDisplay)
@@ -330,7 +328,7 @@ private[flagged] object Engine:
       case _ => ()
 
     /** Route tokens. Help/version are returned for the engine's lexical task to raise. */
-    private def route(): ParseError =
+    private update def route(): ParseError =
       while idx < args.length do
         val token = args(idx)
         idx += 1
@@ -414,12 +412,12 @@ private[flagged] object Engine:
               stop = true
       null
 
-    private def reportInvalid(result: Result[Unit, String], display: String): Unit =
+    private update def reportInvalid(result: Result[Unit, String], display: String): Unit =
       result match
         case Result.Err(msg) => report(s"invalid value for '$display': $msg")
         case _               => ()
 
-    private def finishFlag(
+    private update def finishFlag(
         spec: SlotSpec,
         parser: flagged.Parser.Flag[?],
         display: String
@@ -429,7 +427,7 @@ private[flagged] object Engine:
         case _               => ()
 
     /** False means a required slot is missing. */
-    private def finishSlot(spec: SlotSpec): Boolean =
+    private update def finishSlot(spec: SlotSpec): Boolean =
       val index   = spec.index
       val display = spec.display
       spec.mode match
@@ -474,13 +472,12 @@ private[flagged] object Engine:
               case Some(_) => ()
               case None    =>
                 reportInvalid(parser.collector().finishInto(values, index), display)
-          else
-            val collector = reps(index)
-            if !collector.failed then reportInvalid(collector.finishInto(values, index), display)
+          else if !reps(index).failed then
+            reportInvalid(reps(index).finishInto(values, index), display)
           true
 
     private def markAbsent(
-        splices: IndexedSeq[Splice],
+        splices: Array[Splice]^{},
         base: Int,
         initial: mutable.BitSet
     ): mutable.BitSet =
@@ -490,12 +487,13 @@ private[flagged] object Engine:
         val splice = splices(i)
         if splice.skipped(this, base) then
           if absent == null then absent = mutable.BitSet.empty
+          absent.add(base + splice.slot)
           absent.addAll((base + splice.offset) until (base + splice.offset + splice.command.arity))
         else absent = markAbsent(splice.command.splices, base + splice.offset, absent)
         i += 1
       absent
 
-    private def validate(): ParseError =
+    private update def validate(): ParseError =
       val absent =
         if command.splices.isEmpty then null else markAbsent(command.splices, 0, null)
       skipIdx = if absent == null then Set.empty else absent
@@ -546,12 +544,15 @@ private[flagged] object Engine:
 
       if errors == null then null else failure
 
-    def routeAndValidate(): ParseError =
+    update def routeAndValidate(): ParseError =
       val terminal = route()
       if terminal != null then terminal else validate()
 
+    /** `base`-relative destination slots of skipped splices, for [[Command.finishInto]]. */
+    def skips: collection.Set[Int] = skipIdx
+
     /** Safe only after the full selected command chain has validated. */
-    def materializeDefaults(): Unit =
+    update def materializeDefaults(): Unit =
       if subGroup != null && selectedSub == null then
         values(subGroup.index) = subGroup.default match
           case Some(default) => default()

@@ -1,5 +1,8 @@
 package flagged.internal
 
+import language.experimental.captureChecking
+import language.experimental.separationChecking
+
 import flagged.Parser
 import steps.result.Result
 import steps.result.Result.eval
@@ -17,7 +20,7 @@ private[flagged] object Runtime:
   private def notABool(s: String): String =
     s"'${s.trim}' is not a valid bool (expected true/false)"
 
-  def parseBoolInto(s: String, out: Array[Any], i: Int): Result[Unit, String] =
+  def parseBoolInto(s: String, out: Array[Any]^, i: Int): Result[Unit, String] =
     Result.task:
       val b = boolOf(s)
       if b < 0 then eval.raise(notABool(s))
@@ -39,7 +42,9 @@ private[flagged] object Runtime:
   /** Closest candidate within edit distance 2, for "did you mean" hints. */
   def suggest(input: String, candidates: Iterable[String]): Option[String] =
     candidates
-      .map(c => c -> levenshtein(input.toLowerCase, c.toLowerCase))
+      // tuple literal rather than `->`: in capture-checked sources `->` is the pure function
+      // arrow, and the Uncheck rewrite treats it as such
+      .map(c => (c, levenshtein(input.toLowerCase, c.toLowerCase)))
       .filter((c, d) => d <= 2 && d < c.length)
       .minByOption(_(1))
       .map(_(0))
