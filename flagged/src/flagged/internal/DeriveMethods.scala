@@ -213,9 +213,9 @@ import steps.result.Result
         // (`Parser.Shared` has its own derivation), so the storage array is passed through as-is:
         // `invoke` reads args(0) until the parameter count, and any spliced children's slots — plus
         // the root frame's result slot — sit past that.
-        (arr, _, out, outIndex) =>
+        (arr, _, outIndex) =>
           Result.task:
-            out(outIndex) = m.invoke(arr)
+            arr(outIndex) = m.invoke(arr)
         ,
         Derive.versionOf[T, m.MirroredSelfAnnotations]
       )

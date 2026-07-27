@@ -26,7 +26,9 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
   // ---- parsers ----------------------------------------------------------------
 
   /** [[ArrayProduct]] behind a term: inline expansions can reference this method but not the
-    * private class itself.
+    * private class itself. This unchecked compilation unit is also what carries the borrow
+    * assumption capture checking cannot express: the returned `Product` aliases the engine's live
+    * storage array, but is consumed by `Mirror#fromProduct` before the engine writes again.
     */
   @publicInBinary private[flagged] def arrayProduct(arr: Array[Any], n: Int): Product =
     ArrayProduct(arr, n)
@@ -47,9 +49,9 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
           Defaults.derived[A]
         ).resultInto(
           onType,
-          (arr, base, out, outIndex) =>
+          (arr, base, outIndex) =>
             steps.result.Result.task:
-              out(outIndex) = m.fromProduct(
+              arr(outIndex) = m.fromProduct(
                 arrayProductAt(arr, base, constValue[Tuple.Size[m.MirroredElemTypes]])
               )
           ,
@@ -71,9 +73,9 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
             Defaults.derived[A]
           ).resultInto(
             onType,
-            (arr, base, out, outIndex) =>
+            (arr, base, outIndex) =>
               steps.result.Result.task:
-                out(outIndex) = m.fromProduct(
+                arr(outIndex) = m.fromProduct(
                   arrayProductAt(arr, base, constValue[Tuple.Size[m.MirroredElemTypes]])
                 )
             ,

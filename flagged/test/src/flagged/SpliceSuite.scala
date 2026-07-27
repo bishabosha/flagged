@@ -46,6 +46,21 @@ class SpliceSuite extends munit.FunSuite:
     assertEquals(ok(Flagged.parse[Serve](Nil)), Serve(8080, LogOpts()))
   }
 
+  test("a spliced group can contribute more options than the parent has fields") {
+    case class Wide(
+        alpha: Int = 1,
+        beta: Int = 2,
+        gamma: Int = 3,
+        delta: Int = 4,
+        epsilon: Int = 5
+    ) derives Parser.Shared
+    case class App(wide: Wide = Wide(), name: String = "x") derives Parser.Command
+    assertEquals(
+      ok(Flagged.parse[App](Seq("--alpha", "10", "--epsilon", "50", "--name", "hi"))),
+      App(Wide(alpha = 10, epsilon = 50), "hi")
+    )
+  }
+
   test("spliced options appear in the parent's help") {
     Flagged.parse[Serve](Seq("--help")) match
       case Result.Err(ParseError.Help(t)) =>

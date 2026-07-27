@@ -2,6 +2,17 @@
 
 Command-line argument parsing and schema validation for Scala 3. Supports derivation of Parsers and automatic help-text from case class/enum or methods.
 
+## Derived sources
+
+The library sources on this branch are mechanically derived from the capture-checked sources on
+the [`mutable-spec`](https://github.com/bishabosha/flagged/tree/mutable-spec) branch, where the
+parser engine and other mutable internals are verified under the experimental `captureChecking`
+and `separationChecking` language modes. The `Uncheck` rewrite in that branch's `build.mill`
+strips the capture-checking surface — the language imports, `update`/`consume` modifiers, capture
+annotations (`^`, `^{...}`, `->`), and `caps.*` calls — producing the equivalent unchecked code
+here, so the published artifacts carry no dependency on experimental standard-library API. Make
+source changes on `mutable-spec` and re-derive them rather than editing these files directly.
+
 ## Why a new library?
 
 I created Flagged to be a candidate library for the [Scala Toolkit](https://github.com/scala/toolkit).

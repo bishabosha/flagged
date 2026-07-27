@@ -133,15 +133,9 @@ object AnnotMirror:
   private[AnnotMirror] def buildTuple[T, A](size: Int)(
       build: (append: Any => Unit) => Unit
   ): Tuple =
-    val buf     = new Array[AnyRef](size)
-    val indexer = new (Any => Unit) {
-      var i                   = 0
-      def apply(x: Any): Unit =
-        buf(i) = x.asInstanceOf[AnyRef]
-        i += 1
-    }
-    build(indexer)
-    Tuple.fromIArray(IArray.unsafeFromArray(buf))
+    val buf = new scala.collection.mutable.ArrayBuffer[AnyRef](size)
+    build(x => buf += x.asInstanceOf[AnyRef])
+    Tuple.fromArray(locally(buf.toArray))
 
   private inline def resolveMany[Elems, Args, D](
       inline append: Any => Unit,
