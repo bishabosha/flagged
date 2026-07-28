@@ -3,6 +3,8 @@ package flagged.meta
 import language.experimental.captureChecking
 import language.experimental.separationChecking
 
+import flagged.internal.{frozen, frozenIArray}
+
 import scala.annotation.Annotation
 import scala.compiletime.*
 import scala.deriving.Mirror
@@ -138,7 +140,7 @@ object AnnotMirror:
   ): Tuple =
     val buf = new scala.collection.mutable.ArrayBuffer[AnyRef](size)
     build(x => buf += x.asInstanceOf[AnyRef])
-    Tuple.fromArray(caps.freeze(buf.toArray))
+    Tuple.fromIArray(frozenIArray(frozen(buf.toArray)))
 
   private inline def resolveMany[Elems, Args, D](
       inline append: Any => Unit,

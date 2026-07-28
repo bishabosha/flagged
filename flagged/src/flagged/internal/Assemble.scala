@@ -104,7 +104,7 @@ private[flagged] enum SubEntry:
     Command(
       "",
       Command.noOpts,
-      caps.freeze(Array(spec)),
+      frozen(Array(spec)),
       None,
       None,
       Command.noSplices,
@@ -335,9 +335,9 @@ private[flagged] enum SubEntry:
       // `@version` contributes an implicit hidden option. A null spec keeps its parsing built-in,
       // while registering its name through the same insertion that diagnoses field collisions.
       if version.nonEmpty then putName("--version", null, null)
-      val allOpts    = if opts == null then Command.noOpts else caps.freeze(opts.take(optsN))
-      val allPos     = if poss == null then Command.noPos else caps.freeze(poss.take(possN))
-      val allSplices = if spls == null then Command.noSplices else caps.freeze(spls.take(splsN))
+      val allOpts    = if opts == null then Command.noOpts else frozen(opts.take(optsN))
+      val allPos     = if poss == null then Command.noPos else frozen(poss.take(possN))
+      val allSplices = if spls == null then Command.noSplices else frozen(spls.take(splsN))
 
       // `build` receives the whole storage plus the parent's own field count — no trimming
       Command(

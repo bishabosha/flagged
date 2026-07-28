@@ -73,7 +73,12 @@ object Uncheck:
     t = t.replaceAll(raw",\s*caps\.Mutable", "")
     t = t.replaceAll(raw"\s+extends\s+caps\.Mutable(?=\s*:)", "")
     t = t.replaceAll(raw"caps\.unsafe\s*\.\s*unsafeAssumeSeparate\(", "locally(")
-    t = t.replaceAll(raw"caps\.freeze\(", "locally(")
+    // the `frozen` indirection: its body `caps.freeze(x)` reduces to the argument itself (simple
+    // paths only — a complex direct `caps.freeze` argument trips the guard; call `frozen` instead)
+    t = t.replaceAll(raw"caps\.freeze\(([\w.]+)\)", "$1")
+    // `frozen`'s domain: a Mutable object is an ordinary AnyRef once the marker trait is
+    // stripped, so the derived signature must accept any reference, not just arrays
+    t = t.replaceAll(raw"caps\.Mutable\s*\|\s*Array\[\?\]", "AnyRef")
     t
 
   private val forbidden =
@@ -271,8 +276,9 @@ object examples extends BaseModule:
   * reuses it if it already exists), replaces the flagged source folders with the [[Uncheck]]
   * rewrite of the current working tree's checked sources, carries the test sources over
   * unconverted, strips the capture-checked-only region from `.scalafmt.conf`, adds the README
-  * derivation notice, reformats the result, and commits. The current checkout is untouched — all
-  * work happens in a temporary git worktree.
+  * derivation notice, reformats the result, and commits. If the branch is already checked out in
+  * another (clean) worktree, the commit is made there so that checkout stays in sync; otherwise
+  * all work happens in a temporary git worktree and the current checkout is untouched.
   */
 def deriveStable(
     branch: String = "mutable-spec-stable",
@@ -299,13 +305,36 @@ def deriveStable(
 
   // outside the repository: under out/ the derived scalafmt config's own `**/out/**`
   // exclusion would skip every file during the reformat step
-  val wt     = os.temp.dir(prefix = "flagged-derive") / "worktree"
-  val exists =
-    os.proc("git", "rev-parse", "--verify", "--quiet", branch)
-      .call(cwd = repo, check = false)
-      .exitCode == 0
-  if exists then git("worktree", "add", wt.toString, branch)
-  else git("worktree", "add", wt.toString, "-b", branch, base)
+  if branch == sourceBranch then
+    sys.error(s"refusing to derive onto the currently checked-out branch '$branch'")
+
+  // stale registrations (e.g. an interrupted run whose temp dir is gone) block `worktree add`
+  git("worktree", "prune")
+  val checkedOutAt: Option[os.Path] =
+    git("worktree", "list", "--porcelain").out
+      .text()
+      .split("\n\n")
+      .find(_.linesIterator.exists(_ == s"branch refs/heads/$branch"))
+      .map(block => os.Path(block.linesIterator.next().stripPrefix("worktree ")))
+
+  // when the branch is already checked out somewhere, commit on top of it in that worktree —
+  // updating the ref behind a checkout would desync it — but only if it is clean
+  val (wt, temporary) = checkedOutAt match
+    case Some(at) =>
+      if os.proc("git", "status", "--porcelain").call(cwd = at).out.trim().nonEmpty then
+        sys.error(
+          s"branch '$branch' is checked out at $at with uncommitted changes — commit or stash them first"
+        )
+      (at, false)
+    case None =>
+      val wt     = os.temp.dir(prefix = "flagged-derive") / "worktree"
+      val exists =
+        os.proc("git", "rev-parse", "--verify", "--quiet", branch)
+          .call(cwd = repo, check = false)
+          .exitCode == 0
+      if exists then git("worktree", "add", wt.toString, branch)
+      else git("worktree", "add", wt.toString, "-b", branch, base)
+      (wt, true)
   try
     for (name, gen) <- generated do
       val target = wt / "flagged" / name
@@ -377,6 +406,7 @@ def deriveStable(
       val sha = os.proc("git", "rev-parse", "--short", "HEAD").call(cwd = wt).out.trim()
       s"derived $branch@$sha from $fromRev (base $base)"
   finally
-    os.proc("git", "worktree", "remove", "--force", wt.toString).call(cwd = repo, check = false)
-    os.remove.all(wt / os.up)
+    if temporary then
+      os.proc("git", "worktree", "remove", "--force", wt.toString).call(cwd = repo, check = false)
+      os.remove.all(wt / os.up)
 }

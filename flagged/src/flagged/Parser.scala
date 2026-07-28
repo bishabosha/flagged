@@ -8,7 +8,7 @@ import java.util.UUID
 import scala.collection.Factory
 import scala.collection.immutable.ArraySeq
 import scala.deriving.Mirror
-import flagged.internal.{Assemble, Engine, HelpFmt}
+import flagged.internal.{frozen, Assemble, Engine, HelpFmt}
 import scala.annotation.{nowarn, publicInBinary}
 import Result.eval, eval.{check, ok}
 import scala.caps.any
@@ -398,8 +398,8 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
 
   private[flagged] def enumeratedOf[A](name: String, pairs: Vector[(String, A)]): Enumerated[A] =
     new Enumerated[A]:
-      private val names  = caps.freeze(pairs.map(_(0)).toArray)
-      private val values = caps.freeze(pairs.map(_(1)).toArray[Any])
+      private val names  = frozen(pairs.map(_(0)).toArray)
+      private val values = frozen(pairs.map(_(1)).toArray[Any])
 
       /** Index of the matching name, or -1. */
       private def indexOf(s: String): Int =
