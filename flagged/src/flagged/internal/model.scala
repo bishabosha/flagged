@@ -9,6 +9,23 @@ import scala.collection.immutable.IntMap
   * inline expansions reach the pieces they need through `@publicInBinary` terms.
   */
 
+/** [[scala.caps.freeze]] behind an inlined indirection: the capture-checked branch delegates to
+  * `caps.freeze`, and the Uncheck rewrite reduces the body to its argument, so derived branches
+  * keep identical call sites with no reference to the experimental API. Pass a freshly built value:
+  * `caps.freeze`'s capture-stripping reaches through the transparent inline only for unbound
+  * temporaries, not already-bound locals.
+  */
+private[flagged] transparent inline def frozen(inline x: AnyRef): AnyRef =
+  x
+
+/** A pure [[IArray]] from a pure array. `IArray.unsafeFromArray`'s result is always fresh under
+  * separation checking and cannot flow into pure positions such as `Tuple.fromIArray`'s parameter;
+  * this cast is capture-free — argument and result are both pure and the two types are
+  * erased-identical.
+  */
+private[flagged] inline def frozenIArray[T](x: Array[T]): IArray[T] =
+  x.asInstanceOf[IArray[T]]
+
 /** Exposes the engine's value array as the `Product` a `Mirror#fromProduct` consumes — the
   * generated constructor call reads `productElement(n)` only, so no tuple is built or copied. The
   * arity is explicit: under splices the array is the whole storage (the spliced children's slots
@@ -221,9 +238,9 @@ private[flagged] object Command:
 
   // frozen shared empties: `caps.freeze` consumes the fresh array and strips its capture set,
   // so the spec storage is pure (and therefore read-only) from assembly onward
-  private[internal] val noOpts: Array[OptSpec]   = locally(Array.empty[OptSpec])
-  private[internal] val noPos: Array[PosSpec]    = locally(Array.empty[PosSpec])
-  private[internal] val noSplices: Array[Splice] = locally(Array.empty[Splice])
+  private[internal] val noOpts: Array[OptSpec]   = frozen(Array.empty[OptSpec])
+  private[internal] val noPos: Array[PosSpec]    = frozen(Array.empty[PosSpec])
+  private[internal] val noSplices: Array[Splice] = frozen(Array.empty[Splice])
 
   /** A command with no parameters that always produces `value` (parameterless enum case / case
     * object).

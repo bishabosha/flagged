@@ -11,7 +11,8 @@ and `separationChecking` language modes. The `Uncheck` rewrite in that branch's 
 strips the capture-checking surface — the language imports, `update`/`consume` modifiers, capture
 annotations (`^`, `^{...}`, `->`), and `caps.*` calls — producing the equivalent unchecked code
 here, so the published artifacts carry no dependency on experimental standard-library API. Make
-source changes on `mutable-spec` and re-derive them rather than editing these files directly.
+source changes on `mutable-spec` and re-derive them with `mill deriveStable` rather than editing
+these files directly.
 
 ## Why a new library?
 

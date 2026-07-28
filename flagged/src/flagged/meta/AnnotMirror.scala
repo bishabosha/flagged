@@ -1,5 +1,7 @@
 package flagged.meta
 
+import flagged.internal.{frozen, frozenIArray}
+
 import scala.annotation.Annotation
 import scala.compiletime.*
 import scala.deriving.Mirror
@@ -135,7 +137,7 @@ object AnnotMirror:
   ): Tuple =
     val buf = new scala.collection.mutable.ArrayBuffer[AnyRef](size)
     build(x => buf += x.asInstanceOf[AnyRef])
-    Tuple.fromArray(locally(buf.toArray))
+    Tuple.fromIArray(frozenIArray(frozen(buf.toArray)))
 
   private inline def resolveMany[Elems, Args, D](
       inline append: Any => Unit,
