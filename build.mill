@@ -1,7 +1,15 @@
-//| mvnDeps: ["com.lihaoyi::mill-contrib-jmh:1.1.7"]
+//| mvnDeps: [
+//|   "com.github.lolgab::mill-mima::0.2.2",
+//|   "com.lihaoyi::mill-contrib-jmh:1.1.7"
+//| ]
 //| bspScriptIgnore: ["**/.scala-build/"]
+
+// TASTy-MiMa and tasty-query are deliberately absent above: `tastyMima.mill` builds them from the
+// `submodules/` checkouts on demand and loads them reflectively, so only `checkCompatibility`
+// needs those checkouts.
 package build
 
+import com.github.lolgab.mill.mima.Mima
 import mill.*
 import mill.javalib.publish.{Developer, License, PomSettings, VersionControl}
 import mill.scalalib.*
@@ -16,6 +24,8 @@ object Versions:
   val munit       = "1.1.1"
   val scalaJs     = "1.22.0"
   val scalaNative = "0.5.12"
+  // the most recently published release, checked for compatibility by MiMa and TASTy-MiMa
+  val previous    = "1.0.0-RC2"
 
 trait BaseModule extends ScalaModule:
   def scalaVersion  = Versions.scala
@@ -54,6 +64,29 @@ trait PublishSettings extends PublishModule, mill.util.VcsVersionModule:
     )
   )
 
+/** Checks a published platform against [[Versions.previous]]: MiMa for the class files, TASTy-MiMa
+  * for the TASTy signatures. Run with `mill flagged.<platform>.checkCompatibility`.
+  */
+trait CompatSettings extends TastyMimaModule:
+  override def mimaPreviousVersions: T[Seq[String]] = Task {
+    Seq(Versions.previous)
+  }
+
+  // `flagged.internal` is `private[flagged]` throughout, exposed in binary only via
+  // `@publicInBinary` for inlined macro expansions — not part of the public API
+  override def tastyMimaArtifactPrivatePackages: T[Seq[String]] = Task {
+    Seq("flagged.internal")
+  }
+
+  // tasty-query cannot reduce `MethodContrib`: substituting into a match type whose case binds a
+  // capture (`case MethodMirror.WithAnnots[anns] =>`) hands `TypeMaps.mapOver` a `WildcardTypeArg`
+  // where it requires a `Type`, and the resulting ClassCastException is reported as an internal
+  // error. That is an upstream limitation rather than anything about this project's API, so the
+  // one symbol goes unchecked; drop the filter once tasty-query handles it.
+  override def tastyMimaProblemFilters: Seq[String] = Seq(
+    "InternalError: flagged.runner.MethodEntry.MethodContrib"
+  )
+
 /** Adds the `src-jvm-native` folder holding sources shared by the JVM and Native platforms. */
 trait JvmNativeSources extends JavaModule:
   override def sourcesFolders = super.sourcesFolders ++ Seq(os.sub / "src-jvm-native")
@@ -66,16 +99,17 @@ object flagged extends Module:
     trait FlaggedTests extends ScalaTests, TestModule.Munit:
       def munitVersion = Versions.munit
 
-  object jvm extends FlaggedModule, PublishSettings, JvmNativeSources:
+  object jvm extends FlaggedModule, PublishSettings, JvmNativeSources, CompatSettings:
     object test extends FlaggedTests
 
-  object js extends FlaggedModule, BaseJsModule, PublishSettings:
+  object js extends FlaggedModule, BaseJsModule, PublishSettings, CompatSettings:
     object test extends FlaggedTests, ScalaJSTests
 
   object jsWasm extends FlaggedModule, BaseJsWasmModule:
     override def platformCrossSuffix = "js"
 
-  object native extends FlaggedModule, BaseNativeModule, PublishSettings, JvmNativeSources:
+  object native
+      extends FlaggedModule, BaseNativeModule, PublishSettings, JvmNativeSources, CompatSettings:
     object test extends FlaggedTests, ScalaNativeTests
 
 /** Puts flagged on the run classpath as its packaged jar instead of a directory of class files, so

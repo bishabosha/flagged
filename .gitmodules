@@ -1,0 +1,7 @@
+[submodule "submodules/tasty-query"]
+	path = submodules/tasty-query
+	url = https://github.com/sjrd/tasty-query.git
+	branch = scala-3.9.0
+[submodule "submodules/tasty-mima"]
+	path = submodules/tasty-mima
+	url = https://github.com/scalacenter/tasty-mima.git
