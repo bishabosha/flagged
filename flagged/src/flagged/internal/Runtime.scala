@@ -39,7 +39,9 @@ private[flagged] object Runtime:
   /** Closest candidate within edit distance 2, for "did you mean" hints. */
   def suggest(input: String, candidates: Iterable[String]): Option[String] =
     candidates
-      .map(c => c -> levenshtein(input.toLowerCase, c.toLowerCase))
+      // tuple literal rather than `->`: in capture-checked sources `->` is the pure function
+      // arrow, and the Uncheck rewrite treats it as such
+      .map(c => (c, levenshtein(input.toLowerCase, c.toLowerCase)))
       .filter((c, d) => d <= 2 && d < c.length)
       .minByOption(_(1))
       .map(_(0))

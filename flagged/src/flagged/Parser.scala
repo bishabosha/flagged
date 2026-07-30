@@ -5,7 +5,7 @@ import java.util.UUID
 import scala.collection.Factory
 import scala.collection.immutable.ArraySeq
 import scala.deriving.Mirror
-import flagged.internal.{Assemble, Engine, HelpFmt}
+import flagged.internal.{frozen, Assemble, Engine, HelpFmt}
 import scala.annotation.{nowarn, publicInBinary}
 import Result.eval, eval.{check, ok}
 
@@ -101,11 +101,9 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     * element parse lets a collector reuse per-parse scratch across elements (the `Map` instance's
     * pair slots).
     */
-  private[flagged] abstract class Collector:
+  private[flagged] abstract class Collector[E]:
     private var n         = 0
     private var hasFailed = false
-
-    type Elem
 
     final def size: Int = n
 
@@ -118,24 +116,22 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
           hasFailed = true
           err
         case ok =>
-          append(out(i).asInstanceOf[Elem])
+          append(out(i).asInstanceOf[E])
           n += 1
           ok
 
     protected def read(s: String, out: Array[Any], i: Int): Result[Unit, String]
 
     /** Called with `size` still at the pre-insertion count. */
-    protected def append(v: Elem): Unit
+    protected def append(v: E): Unit
     def finishInto(out: Array[Any], i: Int): Result[Unit, String]
 
   private[flagged] object Collector:
-    type Of[E] = Collector { type Elem = E }
-    class WrapperCollector[E, A, B](inner: Collector.Of[E], f: A => Result[B, String])
-        extends Collector:
-      type Elem = E
+    class WrapperCollector[E, A, B](inner: Collector[E], f: A => Result[B, String])
+        extends Collector[E]:
       // the inner offer both parses and accumulates, so this wrapper's append adds nothing
       protected def read(s: String, out: Array[Any], i: Int) = inner.read(s, out, i)
-      protected def append(v: Elem)                          = inner.append(v)
+      protected def append(v: E)                             = inner.append(v)
       def finishInto(out: Array[Any], i: Int)                =
         Result.task:
           inner.finishInto(out, i).check
@@ -145,10 +141,9 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
   private[flagged] final class BuilderCollector[E](
       elem: Value[E],
       b: scala.collection.mutable.Builder[E, Any]
-  ) extends Collector:
-    type Elem = E
+  ) extends Collector[E]:
     protected def read(s: String, out: Array[Any], i: Int) = elem.readInto(s, out, i)
-    protected def append(v: Elem)                          = b += v
+    protected def append(v: E)                             = b += v
     def finishInto(out: Array[Any], i: Int)                =
       Result.task:
         out(i) = b.result()
@@ -253,12 +248,13 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
       * the collection's builder — elements are materialised exactly once; `Parser.repeated`
       * combinators collect an `IndexedSeq` for their combining function.
       */
-    private[flagged] def collector(): Collector.Of[Elem]
+    private[flagged] def collector(): Collector[Elem]
 
     def emap[B](f: A => Result[B, String]): Repeated[B] = new Repeated[B]:
       type Elem = self.Elem
       def typeName: String             = self.typeName
-      private[flagged] def collector() = new Collector.WrapperCollector(self.collector(), f)
+      private[flagged] def collector() =
+        new Collector.WrapperCollector[self.Elem, A, B](self.collector(), f)
 
   /** A value spanning a fixed number of consecutive tokens, one per element: `point: (Int, Int)`
     * parses `--point 3 4`. The arity is the product's size, statically known; each token is parsed
@@ -288,7 +284,8 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     final def typeName: String = metavars.mkString(" ")
 
     /** The pre-bracketed help metavar: `<x> <y>`. */
-    private[flagged] final def helpMetavar: String = metavars.map(m => s"<$m>").mkString(" ")
+    private[flagged] final def helpMetavar: String =
+      metavars.iterator.map(m => s"<$m>").mkString(" ")
 
     def emap[B](f: A => Result[B, String]): Product[B] = new Product[B]:
       private[flagged] def elements                                              = self.elements
@@ -355,10 +352,10 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     def withProg(name: String): Command[A]             = make(impl, name)
     private[flagged] final def emapImpl[B](f: A => Result[B, String]): flagged.internal.Command =
       impl.copy(build =
-        (arr, base, out, outIndex) =>
+        (arr, base, outIndex) =>
           Result.task:
-            impl.build(arr, base, out, outIndex).check
-            out(outIndex) = f(out(outIndex).asInstanceOf[A]).ok
+            impl.build(arr, base, outIndex).check
+            arr(outIndex) = f(arr(outIndex).asInstanceOf[A]).ok
       )
   object Command:
     /** Derivation for a single command: `case class Config(...) derives Parser.Command`. */
@@ -397,8 +394,8 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
 
   private[flagged] def enumeratedOf[A](name: String, pairs: Vector[(String, A)]): Enumerated[A] =
     new Enumerated[A]:
-      private val names  = pairs.map(_(0)).toArray
-      private val values = pairs.map(_(1)).toArray[Any]
+      private val names  = frozen(pairs.map(_(0)).toArray)
+      private val values = frozen(pairs.map(_(1)).toArray[Any])
 
       /** Index of the matching name, or -1. */
       private def indexOf(s: String): Int =
@@ -438,8 +435,7 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     new Repeated[A]:
       type Elem = E
       def typeName: String             = elem.typeName
-      private[flagged] def collector() = new Collector:
-        type Elem = E
+      private[flagged] def collector() = new Collector[E]:
         private val b                                          = ArraySeq.untagged.newBuilder[E]
         protected def read(s: String, out: Array[Any], i: Int) = elem.readInto(s, out, i)
         protected def append(v: Elem)                          = b += v
@@ -545,10 +541,9 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     type Elem = (K, V)
     private val pair                 = PairToken(k, v)
     def typeName: String             = pair.typeName
-    private[flagged] def collector() = new Collector:
-      type Elem = (K, V)
-      private val b     = Map.newBuilder[K, V]
-      private val slots = new Array[Any](2) // pair scratch, reused across entries
+    private[flagged] def collector() = new Collector[(K, V)]:
+      private val b                 = Map.newBuilder[K, V]
+      private val slots: Array[Any] = new Array[Any](2) // pair scratch, reused across entries
 
       protected def read(s: String, out: Array[Any], i: Int) = pair.readInto(s, slots, out, i)
       protected def append(v: Elem)                          = b += v
