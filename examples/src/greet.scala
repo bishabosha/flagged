@@ -3,11 +3,11 @@ package examples
 import flagged.*
 
 /** Minimal single-command CLI: `greet --name World -e -r 3`. */
-@help("Greet someone from the command line")
+@cmd(help = "Greet someone from the command line")
 case class Greet(
-    @short('n') @help("Who to greet") name: String = "world",
-    @short('e') @help("Add excitement") excited: Boolean = false,
-    @short('r') @help("How many times to greet") repeat: Int = 1
+    @opt(help = "Who to greet", short = 'n') name: String = "world",
+    @opt(help = "Add excitement", short = 'e') excited: Boolean = false,
+    @opt(help = "How many times to greet", short = 'r') repeat: Int = 1
 ) derives Parser.Command {
   def run(): Unit =
     val suffix = if excited then "!" else "."

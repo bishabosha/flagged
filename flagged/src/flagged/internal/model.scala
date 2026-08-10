@@ -122,7 +122,7 @@ private[flagged] final case class SubGroup(
     optional: Boolean,
     default: Option[() => Any],
     cases: Vector[SubCase],
-    defaultCase: Option[SubCase] = None // @default: run when no command token is given
+    defaultCase: Option[SubCase] = None // @cmd(default = true): run when no command token is given
 )
 
 /** An options group spliced into a parent command: the child command's option specs live re-indexed
