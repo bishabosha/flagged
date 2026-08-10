@@ -18,7 +18,7 @@ according to a schema. They differ in how to construct the schema, when validati
 
 | Library | Overview |
 | --- | --- |
-| flagged | Type class model, automatic derivation of option parser for case-class/enum/`@run` annotated methods. Compile time validation of the schema, except to check for name collisions |
+| flagged | Type class model, automatic derivation of option parser for case-class/enum/`@cmd` annotated methods. Compile time validation of the schema, except to check for name collisions |
 | mainargs | Type class model, automatic derivation of option parser for case class / `@main` annotated methods. Automatic assembly of subcommands (1-level, methods only) |
 | case-app | Type class model, automatic derivation of option parser for case class. Mixin traits used to assemble subcommands, override features. |
 | scopt | Type class model (for values only), options parser constructed with builder pattern. Arbitrary nesting of subcommands supported. Validation at runtime. |
@@ -38,31 +38,31 @@ according to a schema. They differ in how to construct the schema, when validati
 | Counting flags (`-vvv`) | `Count` | case-app `Int @@ Counter`; scallop `tally()`; picocli `boolean[]` length |
 | Repeated scalar options | last wins (values and flags) | error in all five (opt-outs: mainargs `allowRepeats`, case-app `Last[T]`, picocli `overwrittenOptionsAllowed`) |
 | Repeatable → collections | any collection with a `Factory`; any type via `Parser.repeated` | mainargs `Seq`/`Iterable`/`Map`; case-app `List`/`Vector`; scallop `opt[List[T]]`; picocli arrays/collections/`Map`; scopt: one comma-separated token |
-| Multi-value arity (`--point 1 2 3`) | fixed arity: tuple or `derives Parser.Product` fields; `1..*` via `@greedy` on repeated fields (compile error alongside positionals/subcommands — the ambiguity other libraries document away) | scallop multi-value options; picocli `arity = "2..3"` |
-| Value splitting (`--env A,B,C` → elements) | `@split` on repeated fields (separator char, default `,`) | scopt (its native collection format); picocli `split` regex |
+| Multi-value arity (`--point 1 2 3`) | fixed arity: tuple or `derives Parser.Product` fields; `1..*` via `@opt(greedy = true)` on repeated fields (compile error alongside positionals/subcommands — the ambiguity other libraries document away) | scallop multi-value options; picocli `arity = "2..3"` |
+| Value splitting (`--env A,B,C` → elements) | `@opt(split = ...)` on repeated fields (separator char) | scopt (its native collection format); picocli `split` regex |
 | `Map[K,V]` (`--x k=v`) | yes | mainargs; scopt (comma-separated pairs); scallop `props` (`-Dk=v`); picocli |
 | `Option[T]` | yes | mainargs, case-app; scallop `ScallopOption[T]`; picocli (incl. `Optional<T>`); scopt: config fields, options optional by default |
 | Defaults from field defaults | yes (lazy) | mainargs, case-app (lazy); scopt initial config instance; scallop `default =` parameter; picocli field initializers |
 | Environment-variable defaults | via lazy field defaults (not shown in help) | picocli `${env:VAR}`, default-value providers |
-| Positional arguments | `@positional`, ordering checked | mainargs `positional = true`; case-app: the remaining args; scopt `arg[T]`; scallop `trailArg[T]`; picocli `@Parameters(index = ...)` |
-| Variadic positionals, typed | repeated `@positional` field | mainargs `Leftover[T]`; scopt `.unbounded()`; scallop `trailArg[List[T]]`; picocli `index = "1..*"`; case-app `RemainingArgs` (untyped) |
+| Positional arguments | unannotated fields (as `@scala.main`); `@opt(positional = true)` to combine with metadata; ordering checked | mainargs `positional = true`; case-app: the remaining args; scopt `arg[T]`; scallop `trailArg[T]`; picocli `@Parameters(index = ...)` |
+| Variadic positionals, typed | repeated positional field | mainargs `Leftover[T]`; scopt `.unbounded()`; scallop `trailArg[List[T]]`; picocli `index = "1..*"`; case-app `RemainingArgs` (untyped) |
 | Number-only options (`-5`, as `tail -5`) | no — `-<digits>` is a value, by design | scallop `number()` |
-| Subcommands | enums or `@run` objects, arbitrarily nested | scallop, picocli: arbitrarily nested; case-app: nested via multi-word names; scopt `cmd().children`, nestable into one flat config; mainargs: one level |
+| Subcommands | enums or `@cmd` objects, arbitrarily nested | scallop, picocli: arbitrarily nested; case-app: nested via multi-word names; scopt `cmd().children`, nestable into one flat config; mainargs: one level |
 | Shared option groups (splicing) | `derives Parser.Shared`, nested; splice-safety invariants checked at the group's derivation | mainargs `TokensReader.Class`; case-app `@Recurse`; picocli `@Mixin`; scopt: builder fragments (values stay flat) |
 | Embedding a foreign command as a subcommand | sole-field group case substitutes the full command | picocli: subcommand classes from any source; case-app: `Command` objects |
 | Optional group | `Option[Group]` | case-app; picocli `@ArgGroup` multiplicity `0..1` |
-| Prefixed group names | `@name` on the group field | case-app `@Recurse("prefix")` |
+| Prefixed group names | `@opt(name = ...)` on the group field | case-app `@Recurse("prefix")` |
 | Declarative cross-option constraints | no — `emap` checks after parse | scallop `conflicts`/`codependent`/`requireOne`; picocli `@ArgGroup` exclusive / co-occurring |
 | `--help` | any position, per level | case-app, scallop, picocli: per command; mainargs: first token, top level only; scopt: one usage screen for the whole tree |
 | Help markers: defaults / required / repeatable | yes / yes / yes | case-app: `*` for repeatable; picocli: opt-in templates (`${DEFAULT-VALUE}`, `requiredOptionMarker`) |
 | Did-you-mean suggestions | commands and options | picocli ("possible solutions") |
 | Error aggregation | all error kinds together | case-app: all kinds; mainargs: missing + unknown + duplicate; scopt, picocli: unknown options together, else first; scallop: first error |
 | Duplicate name detection | compile time (constant names) + construction | case-app: opt-in runtime (`ensureNoDuplicates`); scallop, picocli: at model build/`verify()`; mainargs: none documented |
-| Hidden options / commands | `@hidden`, revealed by `--help-all` | mainargs, scallop, picocli `hidden = true`; case-app `@Hidden`, `--full-help`; scopt `.hidden()` |
-| Help sections | `@group` (also on spliced groups) | case-app `@Group`, sorted; scallop `group()`; picocli `@ArgGroup(heading = ...)` |
+| Hidden options / commands | `@opt(hidden = true)` / `@cmd(hidden = true)`, revealed by `--help-all` | mainargs, scallop, picocli `hidden = true`; case-app `@Hidden`, `--full-help`; scopt `.hidden()` |
+| Help sections | `@opt(group = ...)` (also on spliced groups) | case-app `@Group`, sorted; scallop `group()`; picocli `@ArgGroup(heading = ...)` |
 | Name & version in help | `@version("1.0")` literal, or bare `@version` via a `Versioned` instance; `--version` | case-app `@AppName`/`@AppVersion`; scopt `head(...)`/`version(...)`; scallop `version(...)`; picocli `@Command(version = ...)` |
-| Multiple names per option | repeatable `@name` + one short | case-app, picocli: any number; scopt: long + short + `abbr("ab")`; mainargs: one long + one short |
-| Command aliases / default command | repeatable `@name` / `@default` (with arg forwarding) | case-app: both; scallop: aliases; picocli: `aliases` / parent command runs |
+| Multiple names per option | `name` plus `aliases` + one short | case-app, picocli: any number; scopt: long + short + `abbr("ab")`; mainargs: one long + one short |
+| Command aliases / default command | `@cmd` aliases / `@cmd(default = true)` (with arg forwarding) | case-app: both; scallop: aliases; picocli: `aliases` / parent command runs |
 | Unrecognized-argument passthrough | no | mainargs: `Leftover` absorbs; case-app `stopAtFirstUnrecognized`/`ignoreUnrecognized`; scopt `errorOnUnknownArgument = false`; picocli `unmatchedArgumentsAllowed`/`stopAtUnmatched`/`stopAtPositional` |
 | Shell completions | no | case-app, picocli: bash and zsh |
 | Custom value types | `Parser.of` + shape-preserving `map`/`emap` combinators | mainargs `TokensReader.Simple`; case-app `SimpleArgParser`; scopt `Read`; scallop `ValueConverter`; picocli `ITypeConverter` |
@@ -77,10 +77,10 @@ according to a schema. They differ in how to construct the schema, when validati
   boolean flag replaces the previous value, so `--verbose=false --verbose` is true.
   Accumulation is opt-in through collection types and `Count`.
 - **Only kebab-case names match.** mainargs also accepts the raw `camelCase` spelling; accepting
-  both doubles the effective namespace and hides collisions. Explicit `@name` values are matched
+  both doubles the effective namespace and hides collisions. Explicit `name` values are matched
   verbatim in flagged, mainargs, and case-app alike.
 - **No automatic short option for single-letter fields.** mainargs and case-app turn a field `v`
-  into `-v` (short-only). flagged requires `@short('v')`; a single-letter field is `--v`.
+  into `-v` (short-only). flagged requires `@opt(short = 'v')`; a single-letter field is `--v`.
 - **`--` is an end-of-options marker** (POSIX guideline 10), optionally captured by a `Trailing`
   field. mainargs treats all-dash tokens as plain values; the other four agree with flagged.
 - **`--help` works at every level and position.** mainargs only recognizes it as the first token.
@@ -103,7 +103,7 @@ derivation libraries — are matched in the wider field by scallop and picocli.
 2. **Passthrough modes.** Stop-at-first-unrecognized and ignore-unrecognized parsing for wrapper
    CLIs that forward arguments (case-app has both, picocli has `stopAtUnmatched`/
    `stopAtPositional`, scopt can ignore unknown arguments; `Trailing` covers the explicit `--`
-   case, and `@default`-command forwarding covers the leading-command case). Needs an API-surface
+   case, and default-command forwarding covers the leading-command case). Needs an API-surface
    decision: a parse-time flag does not fit the typed model as well as a `Passthrough`-shaped
    field would.
 3. **Negatable flags.** An auto-generated `--no-verbose` complement (picocli `negatable`,

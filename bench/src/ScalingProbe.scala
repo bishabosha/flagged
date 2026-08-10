@@ -5,7 +5,9 @@ import dotty.tools.dotc.Driver
 import dotty.tools.dotc.reporting.StoreReporter
 
 /** Not a JMH benchmark: a quick scaling curve for derivation compile time by field count. Compiles
-  * a generated N-field options class per library, warm in-process, best of `reps`.
+  * a generated N-field class per library, warm in-process, best of `reps` (mainargs derives named
+  * options; unannotated flagged fields are implicit positionals, and the annotated variant makes
+  * every second field a renamed `@opt` named option).
   *
   * ./mill bench.runMain bench.ScalingProbe
   */
@@ -14,7 +16,7 @@ object ScalingProbe:
   def flaggedSrc(n: Int, annotated: Boolean): String =
     val fields = (1 to n)
       .map { i =>
-        val ann = if annotated && i % 2 == 0 then s"@name(\"renamed-$i\") " else ""
+        val ann = if annotated && i % 2 == 0 then s"@opt(name = \"renamed-$i\") " else ""
         s"    ${ann}f$i: Int = $i"
       }
       .mkString(",\n")

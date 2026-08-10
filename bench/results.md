@@ -5,9 +5,9 @@ tables were measured in one session at the commit below — the state where deri
 assembly (the inline field walk feeds `Assemble.FieldsBuilder` directly and a constructed
 command is parse-ready, with its lookup tables built and nothing deferred) and the engine
 builds commands into destination slots: per-level parse frames, compacted per-parse state
-(seen-bit words plus lazily allocated side arrays), and defaults and `@run` execution deferred
+(seen-bit words plus lazily allocated side arrays), and defaults and `@cmd` execution deferred
 until the whole selected command chain has validated — on top of the multi-token features
-(`Parser.Product`, `@split`, `@greedy`), the `Parser.Shared` splice model, and the single-pass
+(`Parser.Product`, `@opt(split)`, `@opt(greedy)`), the `Parser.Shared` splice model, and the single-pass
 compile-time rules layer (see `bench.RuleCostProbe` for the measurements behind that encoding)
 — with flagged on the benchmark classpath as its packaged jar (`FlaggedFromJar` in
 `build.mill`), like the mainargs/case-app jars from the coursier cache. JMH scores are
@@ -44,7 +44,7 @@ scrutinees are only data (the slot tuple, destructured elements, literal paramet
 `bench.RuleCostProbe` measures why that encoding wins (a match-type verdict caches across a
 file, its one-time reduction cost is set by what sits in scrutinee position, and nested
 scrutinees re-reduce without memoization). The `methods` row is the `commands` interface as
-command *methods* — flagged `@run` with `Parser.methods`, against mainargs'
+command *methods* — flagged `@cmd` with `Parser.methods`, against mainargs'
 `ParserForMethods` (its `commands` entry is already that encoding, so its two rows measure
 the same source; case-app has no method-based API, so its entry reuses the command-objects
 encoding).
@@ -52,7 +52,7 @@ encoding).
 ### Scaling with field count
 
 `bench.ScalingProbe` (same warm driver, best of five, one options class of N `Int` fields;
-`flagged@` has every second field `@name`-annotated):
+`flagged@` has every second field `@opt(name)`-annotated):
 
 | n fields | flagged | flagged@ | mainargs |
 |---|---|---|---|
@@ -226,7 +226,7 @@ last-wins, error accumulation — a mutable cursor loop, ~60 lines for this one 
 and Scala's built-in `@main` machinery (`scala.util.CommandLineParser`). `wide25` scales the
 typical idiom to 25 named `String` options, all provided; `positional` and `positional25` are
 `@main`'s fair comparisons — `@main` has no named options, so flagged parses the same tokens
-as all-`@positional` fields, the one grammar both can express.
+as all-positional fields, the one grammar both can express.
 
 | Scenario | flagged | typical hand-rolled | feature-parity | `@main` |
 |---|---|---|---|---|
