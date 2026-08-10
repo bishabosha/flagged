@@ -85,7 +85,7 @@ sealed trait Parser[A]:
 
   final def help(prog: String): String = HelpFmt.render(command, prog, Vector.empty)
 
-  /** [[help]] including `@hidden` options and subcommands — what `--help-all` prints. */
+  /** [[help]] including hidden options and subcommands — what `--help-all` prints. */
   final def helpAll: String = helpAll(typeName)
 
   final def helpAll(prog: String): String =
@@ -371,7 +371,7 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
 
   /** A spliceable options group: as a field of another command, its options parse as if declared
     * inline and the group is rebuilt as a value. Derivation enforces the invariants that make
-    * splicing always safe — no positional, trailing, subcommand, or `@greedy` fields — so a command
+    * splicing always safe — no positional, trailing, subcommand, or greedy fields — so a command
     * embedding a `Shared` group needs no knowledge of its contents. A `Shared` is still a
     * [[Command]]: it parses standalone, renders help, and `emap`/`withProg` keep the shape (and its
     * invariants — they never change the option specs).
@@ -447,7 +447,7 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     private[flagged] def buildInto(l: IndexedSeq[String], out: Array[Any], i: Int) =
       intoSlot(combine(l), out, i)
 
-  /** Derive a command from the single `@run` method of object `o`: its parameters become the
+  /** Derive a command from the single `@cmd` method of object `o`: its parameters become the
     * options and positionals (same annotations and rules as case-class fields), and a successful
     * parse invokes it.
     */
@@ -455,7 +455,7 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
     val (cmd, prog) = internal.DeriveMethods.single[T, r.type](r)
     make[r.Out](cmd, prog)
 
-  /** Derive subcommands from the `@run` methods and nested `@run` objects of `o`; parsing selects
+  /** Derive subcommands from the `@cmd` methods and nested `@cmd` objects of `o`; parsing selects
     * and invokes one, producing its result.
     */
   inline def methods[T](o: T)(using r: runner.MethodEntry[T]): CommandGroup[r.Out] =

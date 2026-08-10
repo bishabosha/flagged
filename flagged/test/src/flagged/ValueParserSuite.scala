@@ -6,10 +6,10 @@ enum LogLevel derives Parser.Enumerated:
   case Debug, Info, Warn, Error
 
 case class ValueConfig(
-    level: LogLevel = LogLevel.Info,
-    timeout: FiniteDuration = 30.seconds,
-    ratio: Double = 0.5,
-    id: Option[java.util.UUID] = None
+    @opt level: LogLevel = LogLevel.Info,
+    @opt timeout: FiniteDuration = 30.seconds,
+    @opt ratio: Double = 0.5,
+    @opt id: Option[java.util.UUID] = None
 ) derives Parser.Command
 
 class ValueParserSuite extends munit.FunSuite:
@@ -54,7 +54,7 @@ class ValueParserSuite extends munit.FunSuite:
       ok(Flagged.parse[ValueConfig](Seq("--ratio", "-Infinity"))).ratio,
       Double.NegativeInfinity
     )
-    case class Infinite(@positional value: Double) derives Parser.Command
+    case class Infinite(value: Double) derives Parser.Command
     assertEquals(
       ok(Flagged.parse[Infinite](Seq("-Infinity"))),
       Infinite(Double.NegativeInfinity)
@@ -76,7 +76,7 @@ class ValueParserSuite extends munit.FunSuite:
         case Some(_)                       => Result.Err(s"'$s' out of range")
         case None                          => Result.Err(s"'$s' is not a port")
     )
-    case class Srv(port: Int = 80) derives Parser.Command
+    case class Srv(@opt port: Int = 80) derives Parser.Command
     assertEquals(ok(Flagged.parse[Srv](Seq("--port", "8080"))).port, 8080)
     Flagged.parse[Srv](Seq("--port", "99999")) match
       case Result.Err(ParseError.Failure(m, _)) => assert(m.contains("out of range"), m)
@@ -90,7 +90,7 @@ class ValueParserSuite extends munit.FunSuite:
   }
 
   test("flags can accumulate occurrences (counter)") {
-    case class Verb(@short('v') verbose: Count = Count(0)) derives Parser.Command
+    case class Verb(@opt(short = 'v') verbose: Count = Count(0)) derives Parser.Command
     assertEquals(ok(Flagged.parse[Verb](Seq("-vvv"))).verbose, Count(3))
     assertEquals(ok(Flagged.parse[Verb](Seq("--verbose", "--verbose"))).verbose, Count(2))
     assertEquals(ok(Flagged.parse[Verb](Nil)).verbose, Count(0))
@@ -101,7 +101,7 @@ class ValueParserSuite extends munit.FunSuite:
       case Quiet, Loud
     given Parser.Flag[Volume] =
       Parser.flag(n => Result.Ok(if n > 0 then Volume.Loud else Volume.Quiet))
-    case class Player(@short('l') loud: Volume = Volume.Quiet) derives Parser.Command
+    case class Player(@opt(short = 'l') loud: Volume = Volume.Quiet) derives Parser.Command
     assertEquals(ok(Flagged.parse[Player](Seq("-l"))).loud, Volume.Loud)
     assertEquals(ok(Flagged.parse[Player](Nil)).loud, Volume.Quiet)
     // no value parser: --loud=x is rejected
@@ -116,7 +116,7 @@ class ValueParserSuite extends munit.FunSuite:
       Parser.flag(n =>
         if n <= 3 then Result.Ok(Verbosity(n)) else Result.Err(s"at most 3 occurrences (got $n)")
       )
-    case class C(@short('v') verbose: Verbosity = Verbosity(0)) derives Parser.Command
+    case class C(@opt(short = 'v') verbose: Verbosity = Verbosity(0)) derives Parser.Command
     assertEquals(ok(Flagged.parse[C](Seq("-vv"))).verbose, Verbosity(2))
     Flagged.parse[C](Seq("-vvvv")) match
       case Result.Err(ParseError.Failure(m, _)) => assert(m.contains("at most 3"), m)
@@ -126,7 +126,7 @@ class ValueParserSuite extends munit.FunSuite:
   test("any type can opt into repeated shape via Parser.repeated") {
     given Parser.Repeated[Set[String]] =
       Parser.repeated[String, Set[String]](l => Result.Ok(l.toSet))
-    case class Tags(tag: Set[String] = Set.empty) derives Parser.Command
+    case class Tags(@opt tag: Set[String] = Set.empty) derives Parser.Command
     assertEquals(
       ok(Flagged.parse[Tags](Seq("--tag", "a", "--tag", "b", "--tag", "a"))),
       Tags(Set("a", "b"))
@@ -140,7 +140,7 @@ class ValueParserSuite extends munit.FunSuite:
       if l.isEmpty then Result.Err("expected at least one occurrence")
       else Result.Ok(AtLeastOne(l.toList))
     )
-    case class Cfg(num: AtLeastOne) derives Parser.Command
+    case class Cfg(@opt num: AtLeastOne) derives Parser.Command
     assertEquals(
       ok(Flagged.parse[Cfg](Seq("--num", "1", "--num", "2"))),
       Cfg(AtLeastOne(List(1, 2)))
@@ -158,7 +158,7 @@ class ValueParserSuite extends munit.FunSuite:
       Parser
         .repeated[Int, List[Int]](l => Result.Ok(l.toList))
         .emap(l => if l.sum > 10 then Result.Err("sum too large") else Result.Ok(l))
-    case class Sums(n: List[Int] = Nil) derives Parser.Command
+    case class Sums(@opt n: List[Int] = Nil) derives Parser.Command
     assertEquals(ok(Flagged.parse[Sums](Seq("--n", "1", "--n", "2"))), Sums(List(1, 2)))
     Flagged.parse[Sums](Seq("--n", "9", "--n", "9")) match
       case Result.Err(ParseError.Failure(m, _)) => assert(m.contains("sum too large"), m)

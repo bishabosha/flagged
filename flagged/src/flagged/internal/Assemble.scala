@@ -55,7 +55,7 @@ private[flagged] enum SubEntry:
   private def invalid(msg: String): Nothing =
     throw new IllegalArgumentException(s"flagged: invalid CLI definition: $msg")
 
-  /** By-name parser for an all-singleton enum, honoring `@name` on cases. */
+  /** By-name parser for an all-singleton enum, honoring `@cmd(name)` on cases. */
   def enumValueParser(
       typeLabel: String,
       caseLabels: IndexedSeq[String],
@@ -127,7 +127,7 @@ private[flagged] enum SubEntry:
         case SubEntry.Cmd(c)  => c
       SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden, anns.aliases)
     }
-    // kebab-derived command names can collide only at the value level (constant @name/alias
+    // kebab-derived command names can collide only at the value level (constant @cmd name/alias
     // duplicates are compile errors); a silent collision would shadow the later command
     val caseNames = mutable.Set.empty[String]
     for c <- cases do
@@ -266,7 +266,7 @@ private[flagged] enum SubEntry:
         case sh: Parser.Shared[?] =>
           // splice-content invariants need no check here: every Shared instance descends from
           // checked derivation (the factory is private), which rejects positionals, trailing,
-          // subcommands, and @greedy at compile time
+          // subcommands, and greedy options at compile time
           val inner  = sh.impl
           val prefix = anns.name
           inner.opts.foreach { o =>

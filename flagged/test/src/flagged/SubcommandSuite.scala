@@ -1,23 +1,23 @@
 package flagged
 
-@help("A tiny git-like tool")
+@cmd(help = "A tiny git-like tool")
 enum Git derives Parser.CommandGroup:
-  @help("Clone a repository")
+  @cmd(help = "Clone a repository")
   case Clone(
-      @positional @help("Repository URL") repo: String,
-      @short('d') @help("Clone depth") depth: Option[Int] = None,
-      @short('q') quiet: Boolean = false
+      @opt(help = "Repository URL", positional = true) repo: String,
+      @opt(help = "Clone depth", short = 'd') depth: Option[Int] = None,
+      @opt(short = 'q') quiet: Boolean = false
   )
-  @help("Manage remotes")
+  @cmd(help = "Manage remotes")
   case Remote(action: RemoteAction)
-  @help("Show status")
+  @cmd(help = "Show status")
   case Status
 
 enum RemoteAction derives Parser.CommandGroup:
-  @help("Add a remote")
-  case Add(@positional name: String, @positional url: String)
-  @help("Remove a remote")
-  case Remove(@positional name: String)
+  @cmd(help = "Add a remote")
+  case Add(name: String, url: String)
+  @cmd(help = "Remove a remote")
+  case Remove(name: String)
 
 enum SimpleCmd derives Parser.CommandGroup:
   case Start
@@ -27,21 +27,21 @@ enum SimpleCmd derives Parser.CommandGroup:
 enum Color derives Parser.Enumerated:
   case Red, Green, DeepBlue
 
-case class Paint(color: Color = Color.Red, @positional what: String = "wall") derives Parser.Command
+case class Paint(@opt color: Color = Color.Red, what: String = "wall") derives Parser.Command
 
 // optional subcommand
 case class Tool(
-    @short('v') verbose: Boolean = false,
+    @opt(short = 'v') verbose: Boolean = false,
     action: Option[SimpleAction] = None
 ) derives Parser.Command
 
 enum SimpleAction derives Parser.CommandGroup:
-  case Run(@short('j') jobs: Int = 1)
+  case Run(@opt(short = 'j') jobs: Int = 1)
   case Clean
 
 // deliberately has no Parser instance: used to check the compile error
 enum NoDerive:
-  case Go(@positional x: Int)
+  case Go(x: Int)
   case Halt
 
 class SubcommandSuite extends munit.FunSuite:
@@ -139,8 +139,8 @@ class SubcommandSuite extends munit.FunSuite:
   test("subcommand result via sealed trait") {
     sealed trait Op derives Parser.CommandGroup
     object Op:
-      case class Add(@positional x: Int, @positional y: Int) extends Op
-      case object Noop                                       extends Op
+      case class Add(x: Int, y: Int) extends Op
+      case object Noop               extends Op
     assertEquals(
       Flagged.parse[Op](Seq("add", "1", "2")),
       Result.Ok(Op.Add(1, 2))
@@ -174,20 +174,24 @@ class SubcommandSuite extends munit.FunSuite:
 
   test("structural misconfiguration reported when the parser is constructed") {
     // a label-derived name collides only after kebab-casing, which is value-level:
-    // this stays a construction-time error (constant @name collisions are static now)
-    case class Dup(maxRetries: Int = 0, @name("max-retries") b: Int = 0)
+    // this stays a construction-time error (constant @opt(name) collisions are static now)
+    case class Dup(@opt maxRetries: Int = 0, @opt(name = "max-retries") b: Int = 0)
     val e = intercept[IllegalArgumentException](Parser.Command.derived[Dup])
     assert(e.getMessage.contains("duplicate option name '--max-retries'"), e.getMessage)
   }
 
   test("duplicate constant command names are compile errors") {
     val e = compileErrors(
-      "enum E derives Parser.CommandGroup:\n  @name(\"x\") case A\n  @name(\"x\") case B(f: Int)"
+      "enum E derives Parser.CommandGroup:\n" +
+        "  @cmd(name = \"x\") case A\n" +
+        "  @cmd(name = \"x\") case B(@opt f: Int)"
     )
     assert(e.contains("duplicate command name"), e)
     // an alias colliding with another case's primary name is also constant
     val e2 = compileErrors(
-      "enum E derives Parser.CommandGroup:\n  @name(\"a\") @name(\"b\") case A\n  @name(\"b\") case B(f: Int)"
+      "enum E derives Parser.CommandGroup:\n" +
+        "  @cmd(name = \"a\", aliases = \"b\" *: EmptyTuple) case A\n" +
+        "  @cmd(name = \"b\") case B(@opt f: Int)"
     )
     assert(e2.contains("duplicate command name"), e2)
   }
@@ -196,14 +200,16 @@ class SubcommandSuite extends munit.FunSuite:
     // FooBar's derived name only becomes "foo-bar" after kebab-casing: value-level
     enum Clash:
       case FooBar
-      @name("foo-bar") case Other(f: Int)
+      @cmd(name = "foo-bar") case Other(@opt f: Int)
     val e = intercept[IllegalArgumentException](Parser.CommandGroup.derived[Clash])
     assert(e.getMessage.contains("duplicate command name 'foo-bar'"), e.getMessage)
   }
 
-  test("more than one @default command is a compile error") {
+  test("more than one @cmd(default = true) command is a compile error") {
     val e = compileErrors(
-      "enum E derives Parser.CommandGroup:\n  @default case A\n  @default case B(f: Int)"
+      "enum E derives Parser.CommandGroup:\n" +
+        "  @cmd(default = true) case A\n" +
+        "  @cmd(default = true) case B(@opt f: Int)"
     )
-    assert(e.contains("only one @default command is supported"), e)
+    assert(e.contains("only one @cmd(default = true) command is supported"), e)
   }

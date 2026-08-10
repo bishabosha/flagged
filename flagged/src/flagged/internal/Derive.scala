@@ -61,7 +61,7 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
 
   /** A spliceable options group, for `derives Parser.Shared`: the same derivation as [[product]],
     * plus the splice invariants checked on the walk's final marks — no positional, trailing,
-    * subcommand, or `@greedy` fields — so a command splicing the group needs no knowledge of its
+    * subcommand, or greedy fields — so a command splicing the group needs no knowledge of its
     * contents.
     */
   inline def shared[A](using m: Mirror.ProductOf[A]): Parser.Shared[A] =
@@ -96,27 +96,34 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
         )
         Parser.makeGroup[A](cmd, Assemble.progName(constValue[m.MirroredLabel], annots.onType))
 
-  /** `@version` on the type: a non-empty literal argument is the version string as given and takes
-    * precedence over `dynamic`; otherwise `dynamic` (the default) requires a [[flagged.Versioned]]
-    * instance instead, whose string is requested when printed, not captured at derivation. With
-    * `dynamic = false` and no usable literal, the (empty) `value` is used as-is.
+  /** `@version` on the type: a non-empty literal `value` argument is the version string as given
+    * and takes precedence over `dynamic`; otherwise `dynamic` (the default) requires a
+    * [[flagged.Versioned]] instance instead, whose string is requested when printed, not captured
+    * at derivation. With `dynamic = false` and no usable literal, the (empty) `value` is used
+    * as-is.
     */
   inline def versionOf[A, Anns]: Option[() => String] =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                                   => None
-      case _: (Ann[flagged.version, args, defaulted] *: _) =>
-        inline erasedValue[(args, defaulted)] match
-          case _: ((("", ?)), ?)  => versionDynamic[A, args] // provided but empty: no literal
-          case _: (?, (false, ?)) =>
-            Some(() => constValue[Tuple.Head[args & NonEmptyTuple] & String])
-          case _ => versionDynamic[A, args]
+      case _: EmptyTuple                              => None
+      case _: (Ann[flagged.version, args, ?, ?] *: _) =>
+        versionArgs[A, NamedTuple.Names[args], NamedTuple.DropNames[args], "", true]
       case _: (_ *: t) => versionOf[A, t]
 
-  private inline def versionDynamic[A, Args <: Tuple]: Option[() => String] =
-    inline erasedValue[Args] match
-      // `dynamic = false` with no non-empty literal: the empty value is used as-is
-      case _: (?, false) => Some(() => "")
-      case _             => summonVersioned[A]
+  /** Fold the sparse arguments into the (`value`, `dynamic`) constants, then decide. */
+  private inline def versionArgs[A, Ns <: Tuple, Vs <: Tuple, V <: String, Dyn <: Boolean]
+      : Option[() => String] =
+    inline erasedValue[(Ns, Vs)] match
+      case _: (EmptyTuple, ?) =>
+        inline erasedValue[V] match
+          case _: "" =>
+            inline erasedValue[Dyn] match
+              // `dynamic = false` with no non-empty literal: the empty value is used as-is
+              case _: false => Some(() => "")
+              case _        => summonVersioned[A]
+          case _ => Some(() => constValue[V])
+      case _: ("value" *: nt, v *: vt)   => versionArgs[A, nt, vt, v & String, Dyn]
+      case _: ("dynamic" *: nt, v *: vt) => versionArgs[A, nt, vt, V, v & Boolean]
+      case _: (? *: nt, ? *: vt)         => versionArgs[A, nt, vt, V, Dyn]
 
   private inline def summonVersioned[A]: Option[() => String] =
     val v = summonInline[flagged.Versioned[A]]
@@ -189,6 +196,13 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
   /** The single field rule: summon the field type's `Parser`; `Option[_]` marks it optional. The
     * parser's shape (its `Parser` subtype, which derivation requires to be statically known)
     * decides everything else; combinations visible in types are rejected here, at compile time.
+    *
+    * Fields with no `@opt` annotation are *positional by default* (matching `@scala.main`): a
+    * value-shaped field parses as an unnamed argument, and a pure flag (no value parser) is a
+    * compile error asking for an `@opt`. Any `@opt` makes the field a named option unless it sets
+    * `positional = true` explicitly. The default is per-derivation — `PD` below — because a
+    * `Parser.Shared` options group cannot contain positionals: there, unannotated fields stay named
+    * options.
     */
   type FieldsB = Assemble.FieldsBuilder
 
@@ -207,10 +221,13 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
               case _: (l0 *: lr) =>
                 checkDupNames[s0 *: sr]
                 val b = Assemble.fieldsBuilder(constValue[Tuple.Size[t0 *: tr]], defaults)
-                walk[l0 *: lr, t0 *: tr, s0 *: sr](b)
+                walk[l0 *: lr, t0 *: tr, s0 *: sr, true](b)
                 b
 
-  /** [[fieldsOf]] plus the `Parser.Shared` splice invariants, read off the walk's final marks. */
+  /** [[fieldsOf]] plus the `Parser.Shared` splice invariants, read off the walk's final marks.
+    * Spliced groups are option bags by definition, so the positional-by-default rule is off here
+    * (`PD = false`): an unannotated field is a named option, as before.
+    */
   inline def sharedFieldsOf[Labels <: Tuple, Types <: Tuple, Slots <: Tuple](
       defaults: Defaults[?]
   ): FieldsB =
@@ -223,7 +240,7 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
               case _: (l0 *: lr) =>
                 checkDupNames[s0 *: sr]
                 val b = Assemble.fieldsBuilder(constValue[Tuple.Size[t0 *: tr]], defaults)
-                sharedChecked(walk[l0 *: lr, t0 *: tr, s0 *: sr](b))
+                sharedChecked(walk[l0 *: lr, t0 *: tr, s0 *: sr, false](b))
                 b
 
   /** The invariants read the marks through a type parameter, like [[merge]] — a val binding would
@@ -237,7 +254,7 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
             case 0 =>
               BitwiseAnd[M, GreedyBit] match
                 case 0 => ""
-                case _ => "a shared options group cannot contain a @greedy option"
+                case _ => "a shared options group cannot contain a greedy option"
             case _ => "a shared options group cannot contain a subcommand field"
         case _ => "a shared options group cannot contain a trailing field"
     case _ => "a shared options group cannot contain positional fields"
@@ -291,9 +308,15 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
   type HalfN[T <: Tuple] = Tuple.Size[T] / 2
 
   /** Whether the field's annotation slot is empty — the common case; lets every per-field
-    * annotation check and name collection collapse to nothing.
+    * annotation check and name collection collapse to nothing. `PD` is the derivation's
+    * positional-by-default rule, threaded to each field.
     */
-  private transparent inline def walk[Labels <: Tuple, Types <: Tuple, Slots <: Tuple](
+  private transparent inline def walk[
+      Labels <: Tuple,
+      Types <: Tuple,
+      Slots <: Tuple,
+      PD <: Boolean
+  ](
       inline b: FieldsB
   ): FieldsRes =
     inline erasedValue[Types] match
@@ -302,21 +325,21 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
         inline erasedValue[Slots] match
           case _: (a1 *: ?) =>
             inline erasedValue[Labels] match
-              case _: (l1 *: ?) => fieldRes[l1, f1, a1](b)
+              case _: (l1 *: ?) => fieldRes[l1, f1, a1, PD](b)
       case _: (f1 *: f2 *: EmptyTuple) =>
         inline erasedValue[Slots] match
           case _: (a1 *: a2 *: ?) =>
             inline erasedValue[Labels] match
               case _: (l1 *: l2 *: ?) =>
-                merge(fieldRes[l1, f1, a1](b), fieldRes[l2, f2, a2](b))
+                merge(fieldRes[l1, f1, a1, PD](b), fieldRes[l2, f2, a2, PD](b))
       case _: (f1 *: f2 *: f3 *: EmptyTuple) =>
         inline erasedValue[Slots] match
           case _: (a1 *: a2 *: a3 *: ?) =>
             inline erasedValue[Labels] match
               case _: (l1 *: l2 *: l3 *: ?) =>
                 merge(
-                  merge(fieldRes[l1, f1, a1](b), fieldRes[l2, f2, a2](b)),
-                  fieldRes[l3, f3, a3](b)
+                  merge(fieldRes[l1, f1, a1, PD](b), fieldRes[l2, f2, a2, PD](b)),
+                  fieldRes[l3, f3, a3, PD](b)
                 )
       case _: (f1 *: f2 *: f3 *: f4 *: EmptyTuple) =>
         inline erasedValue[Slots] match
@@ -324,22 +347,24 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
             inline erasedValue[Labels] match
               case _: (l1 *: l2 *: l3 *: l4 *: ?) =>
                 merge4(
-                  fieldRes[l1, f1, a1](b),
-                  fieldRes[l2, f2, a2](b),
-                  fieldRes[l3, f3, a3](b),
-                  fieldRes[l4, f4, a4](b)
+                  fieldRes[l1, f1, a1, PD](b),
+                  fieldRes[l2, f2, a2, PD](b),
+                  fieldRes[l3, f3, a3, PD](b),
+                  fieldRes[l4, f4, a4, PD](b)
                 )
       case _: NonEmptyTuple =>
         merge(
           walk[
             Tuple.Take[Labels, HalfN[Types]],
             Tuple.Take[Types, HalfN[Types]],
-            Tuple.Take[Slots, HalfN[Types]]
+            Tuple.Take[Slots, HalfN[Types]],
+            PD
           ](b),
           walk[
             Tuple.Drop[Labels, HalfN[Types]],
             Tuple.Drop[Types, HalfN[Types]],
-            Tuple.Drop[Slots, HalfN[Types]]
+            Tuple.Drop[Slots, HalfN[Types]],
+            PD
           ](b)
         )
 
@@ -412,8 +437,8 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
         case 0 =>
           BitwiseAnd[RM, GroupBit] match
             case 0 => CrossGreedyR[LM, RM]
-            case _ => "a command with a @greedy option cannot have a subcommand field"
-        case _ => "a command with a @greedy option cannot have positional fields"
+            case _ => "a command with a greedy option cannot have a subcommand field"
+        case _ => "a command with a greedy option cannot have positional fields"
 
   type CrossGreedyR[LM <: Int, RM <: Int] <: String = BitwiseAnd[RM, GreedyBit] match
     case 0 => ""
@@ -422,8 +447,8 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
         case 0 =>
           BitwiseAnd[LM, GroupBit] match
             case 0 => ""
-            case _ => "a command with a @greedy option cannot have a subcommand field"
-        case _ => "a command with a @greedy option cannot have positional fields"
+            case _ => "a command with a greedy option cannot have a subcommand field"
+        case _ => "a command with a greedy option cannot have positional fields"
 
   /** `Option[_]` unwrapping at the type level, so one transparent expansion handles a field. */
   type Unwrap[F] = F match
@@ -440,30 +465,72 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     * `(code, annotations, optionality)`, so fields with the same combination share one cached
     * reduction.
     */
-  /** The field rules as one pass over the annotation slot. Every scrutinee is *data* — the slot
-    * tuple, a destructured element, or a literal parameter — never an unreduced computation: a
-    * match type reduces its scrutinee strictly and, when nested inside an outer reduction, without
-    * memoization, so computation belongs in the arms (measured in [[bench.RuleCostProbe]]; a
-    * presence-query scrutinee costs ~7-13 ms per file, an ops-based one far more). Pairwise rules
-    * thread seen-flags as literal parameters and fire on the second sighting in either order;
-    * `@name("help")` defers to the end because its rule only applies to non-positional fields, and
-    * `@positional` may appear later.
+  /** The field rules: the `Option[_]` shape guards, then one pass over the annotation slot
+    * ([[SlotRules]]). Every scrutinee is *data* — the slot tuple, a destructured element, or a
+    * literal parameter — never an unreduced computation: a match type reduces its scrutinee
+    * strictly and, when nested inside an outer reduction, without memoization, so computation
+    * belongs in the arms (measured in [[bench.RuleCostProbe]]; a presence-query scrutinee costs
+    * ~7-13 ms per file, an ops-based one far more).
     */
-  type FieldErr[S <: Int, Anns, Opt <: Boolean] <: String = Opt match
+  type FieldErr[S <: Int, Anns, Opt <: Boolean, PD <: Boolean] <: String = Opt match
     case true =>
       S match
         case FlagShape     => "a flag Parser without a value parser cannot be used inside Option"
         case RepeatedShape =>
           "Option of a repeated Parser is not supported: the plain type is empty when absent"
-        case _ => Rules[S, Anns, false, false, false, false, false, false, false]
-    case false => Rules[S, Anns, false, false, false, false, false, false, false]
+        case _ => SlotRules[S, Anns, PD]
+    case false => SlotRules[S, Anns, PD]
 
-  /** One rule pass; `P`/`Sh`/`H`/`G`/`Sp`/`Gr`/`NH` are the seen-flags for `@positional`, `@short`,
-    * `@hidden`, `@group`, `@split`, `@greedy`, and `@name("help")`.
+  /** One pass over the slot: annotations aimed at other targets are rejected, and the `@opt`
+    * occurrence dispatches to [[OptRules]] over its sparse arguments. A slot with no `@opt` at all
+    * falls to [[NoOptErr]]: the field is implicitly positional (when `PD` says so), which a pure
+    * flag shape cannot be.
     */
-  type Rules[
+  type SlotRules[S <: Int, Anns, PD <: Boolean] <: String = Anns match
+    case EmptyTuple                         => NoOptErr[S, PD]
+    case Ann[flagged.version, ?, ?, ?] *: ? =>
+      "@version has no effect on a field (put it on the top-level type)"
+    case Ann[flagged.cmd, ?, ?, ?] *: ? =>
+      "@cmd has no effect on a field (commands are types, enum cases, methods, and objects)"
+    case Ann[flagged.opt, args, ?, ?] *: t =>
+      OptRules[
+        S,
+        NamedTuple.Names[args],
+        NamedTuple.DropNames[args],
+        t,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    case ? *: t => SlotRules[S, t, PD]
+
+  /** The rule for a field with no `@opt`: positional by default (like `@scala.main`), which is fine
+    * for every value shape — including `Boolean`, whose valued-flag parser reads a `true`/`false`
+    * token — but impossible for a pure flag with no value parser.
+    */
+  type NoOptErr[S <: Int, PD <: Boolean] <: String = PD match
+    case false => ""
+    case true  =>
+      S match
+        case FlagShape =>
+          "an unannotated field is positional by default, and a flag Parser without a value parser cannot be positional: add @opt to make it a named flag"
+        case _ => ""
+
+  /** One pass over an `@opt`'s sparse argument columns; `P`/`Sh`/`H`/`G`/`Sp`/`Gr`/`NH` accumulate
+    * `positional = true`, `short`, `hidden = true`, `group`, `split`, `greedy = true`, and a
+    * constant name or alias `"help"`. Argument-target mismatches report as each argument is passed;
+    * combinations report where the walk ends ([[OptCombErr]]) — with a single occurrence, every
+    * argument is in scope by then, in whatever order they were written.
+    */
+  type OptRules[
       S <: Int,
-      Anns,
+      Ns <: Tuple,
+      Vs <: Tuple,
+      Rest,
       P <: Boolean,
       Sh <: Boolean,
       H <: Boolean,
@@ -471,152 +538,210 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
       Sp <: Boolean,
       Gr <: Boolean,
       NH <: Boolean
-  ] <: String = Anns match
-    case EmptyTuple =>
-      NH match
-        case true =>
-          P match
-            case true  => ""
-            case false => "option name 'help' is reserved"
-        case false => ""
-    case Ann[flagged.short, args, ?] *: t =>
-      args match
-        case 'h' *: EmptyTuple => "short option 'h' is reserved for help"
-        case _                 =>
-          P match
-            case true  => "@short cannot be combined with @positional"
-            case false =>
-              S match
-                case TrailingShape => "@short cannot be combined with a trailing field"
-                case GroupShape    => "@short has no effect on a subcommand field"
-                case SharedShape   => "@short has no effect on a spliced options group"
-                case _             => Rules[S, t, P, true, H, G, Sp, Gr, NH]
-    case Ann[flagged.name, args, ?] *: t =>
+  ] <: String = (Ns, Vs) match
+    case (EmptyTuple, ?)         => OptCombErr[S, Rest, P, Sh, H, G, Sp, Gr, NH]
+    case ("name" *: nt, v *: vt) =>
       S match
-        case TrailingShape => "@name has no effect on a trailing field"
+        case TrailingShape => "@opt(name) has no effect on a trailing field"
         case GroupShape    =>
-          "@name has no effect on a subcommand field (command names come from the cases)"
+          "@opt(name) has no effect on a subcommand field (command names come from the cases)"
         case _ =>
-          args match
-            case "help" *: EmptyTuple => Rules[S, t, P, Sh, H, G, Sp, Gr, true]
-            case _                    => Rules[S, t, P, Sh, H, G, Sp, Gr, NH]
-    case Ann[flagged.help, ?, ?] *: t =>
+          v match
+            case "help" => OptRules[S, nt, vt, Rest, P, Sh, H, G, Sp, Gr, true]
+            case _      => OptRules[S, nt, vt, Rest, P, Sh, H, G, Sp, Gr, NH]
+    case ("aliases" *: nt, v *: vt) =>
+      S match
+        case TrailingShape => "@opt(aliases) has no effect on a trailing field"
+        case GroupShape    =>
+          "@opt(aliases) has no effect on a subcommand field (command names come from the cases)"
+        case _ =>
+          Tuple.Contains[v & Tuple, "help"] match
+            case true  => OptRules[S, nt, vt, Rest, P, Sh, H, G, Sp, Gr, true]
+            case false => OptRules[S, nt, vt, Rest, P, Sh, H, G, Sp, Gr, NH]
+    case ("short" *: nt, v *: vt) =>
+      v match
+        case 'h' => "short option 'h' is reserved for help"
+        case _   =>
+          S match
+            case TrailingShape => "@opt(short) cannot be combined with a trailing field"
+            case GroupShape    => "@opt(short) has no effect on a subcommand field"
+            case SharedShape   => "@opt(short) has no effect on a spliced options group"
+            case _             => OptRules[S, nt, vt, Rest, P, true, H, G, Sp, Gr, NH]
+    case ("help" *: nt, v *: vt) =>
       S match
         case GroupShape =>
-          "@help has no effect on a subcommand field (put it on the enum or its cases)"
-        case SharedShape => "@help has no effect on a spliced options group"
-        case _           => Rules[S, t, P, Sh, H, G, Sp, Gr, NH]
-    case Ann[flagged.positional, ?, ?] *: t =>
+          "@opt(help) has no effect on a subcommand field (put it on the enum or its cases)"
+        case SharedShape => "@opt(help) has no effect on a spliced options group"
+        case _           => OptRules[S, nt, vt, Rest, P, Sh, H, G, Sp, Gr, NH]
+    case ("positional" *: nt, v *: vt) =>
+      v match
+        case false => OptRules[S, nt, vt, Rest, P, Sh, H, G, Sp, Gr, NH]
+        case true  =>
+          S match
+            case TrailingShape => "@opt(positional) cannot be combined with a trailing field"
+            case GroupShape    => "@opt(positional) cannot be combined with a subcommand field"
+            case SharedShape   => "@opt(positional) cannot be combined with a command-shaped Parser"
+            case FlagShape     => "a flag Parser without a value parser cannot be used positionally"
+            case _             => OptRules[S, nt, vt, Rest, true, Sh, H, G, Sp, Gr, NH]
+    case ("hidden" *: nt, v *: vt) =>
+      v match
+        case false => OptRules[S, nt, vt, Rest, P, Sh, H, G, Sp, Gr, NH]
+        case true  =>
+          S match
+            case TrailingShape => "@opt(hidden) has no effect on a trailing field"
+            case GroupShape    =>
+              "@opt(hidden) has no effect on a subcommand field (put it on the enum cases)"
+            case SharedShape =>
+              "@opt(hidden) has no effect on a spliced options group (put it on the group's fields)"
+            case _ => OptRules[S, nt, vt, Rest, P, Sh, true, G, Sp, Gr, NH]
+    case ("group" *: nt, v *: vt) =>
       S match
-        case TrailingShape => "@positional cannot be combined with a trailing field"
-        case GroupShape    => "@positional cannot be combined with a subcommand field"
-        case SharedShape   => "@positional cannot be combined with a command-shaped Parser"
-        case FlagShape     => "a flag Parser without a value parser cannot be used positionally"
-        case _             =>
+        case TrailingShape => "@opt(group) has no effect on a trailing field"
+        case GroupShape    => "@opt(group) has no effect on a subcommand field"
+        case _             => OptRules[S, nt, vt, Rest, P, Sh, H, true, Sp, Gr, NH]
+    case ("split" *: nt, v *: vt) =>
+      S match
+        case RepeatedShape => OptRules[S, nt, vt, Rest, P, Sh, H, G, true, Gr, NH]
+        case _             => "@opt(split) requires a field with a repeated Parser (a collection)"
+    case ("greedy" *: nt, v *: vt) =>
+      v match
+        case false => OptRules[S, nt, vt, Rest, P, Sh, H, G, Sp, Gr, NH]
+        case true  =>
+          S match
+            case RepeatedShape => OptRules[S, nt, vt, Rest, P, Sh, H, G, Sp, true, NH]
+            case _ => "@opt(greedy) requires a field with a repeated Parser (a collection)"
+    case (? *: nt, ? *: vt) => OptRules[S, nt, vt, Rest, P, Sh, H, G, Sp, Gr, NH]
+
+  /** The argument combinations, checked where the walk ends, then the rest of the slot. */
+  type OptCombErr[
+      S <: Int,
+      Rest,
+      P <: Boolean,
+      Sh <: Boolean,
+      H <: Boolean,
+      G <: Boolean,
+      Sp <: Boolean,
+      Gr <: Boolean,
+      NH <: Boolean
+  ] <: String = P match
+    case true =>
+      Sh match
+        case true  => "@opt(short) cannot be combined with @opt(positional)"
+        case false =>
           H match
-            case true  => "@hidden cannot be combined with @positional"
+            case true  => "@opt(hidden) cannot be combined with @opt(positional)"
             case false =>
               G match
-                case true  => "@group cannot be combined with @positional"
+                case true  => "@opt(group) cannot be combined with @opt(positional)"
                 case false =>
-                  Sh match
-                    case true  => "@short cannot be combined with @positional"
-                    case false =>
-                      Gr match
-                        case true =>
-                          "@greedy has no effect on a positional field (a repeated positional is already greedy)"
-                        case false => Rules[S, t, true, Sh, H, G, Sp, Gr, NH]
-    case Ann[flagged.hidden, ?, ?] *: t =>
-      S match
-        case TrailingShape => "@hidden has no effect on a trailing field"
-        case GroupShape    =>
-          "@hidden has no effect on a subcommand field (put it on the enum cases)"
-        case SharedShape =>
-          "@hidden has no effect on a spliced options group (put it on the group's fields)"
-        case _ =>
-          P match
-            case true  => "@hidden cannot be combined with @positional"
-            case false => Rules[S, t, P, Sh, true, G, Sp, Gr, NH]
-    case Ann[flagged.group, ?, ?] *: t =>
-      S match
-        case TrailingShape => "@group has no effect on a trailing field"
-        case GroupShape    => "@group has no effect on a subcommand field"
-        case _             =>
-          P match
-            case true  => "@group cannot be combined with @positional"
-            case false => Rules[S, t, P, Sh, H, true, Sp, Gr, NH]
-    case Ann[flagged.version, ?, ?] *: ? =>
-      "@version has no effect on a field (put it on the top-level type)"
-    case Ann[flagged.default, ?, ?] *: ? =>
-      "@default has no effect on a field (put it on a command-group enum case)"
-    case Ann[flagged.split, ?, ?] *: t =>
+                  Gr match
+                    case true =>
+                      "@opt(greedy) has no effect on a positional field (a repeated positional is already greedy)"
+                    case false => OptSplitErr[S, Rest, Sp, Gr]
+    case false =>
+      NH match
+        case true  => "option name 'help' is reserved"
+        case false => OptSplitErr[S, Rest, Sp, Gr]
+
+  type OptSplitErr[S <: Int, Rest, Sp <: Boolean, Gr <: Boolean] <: String = Sp match
+    case true =>
       Gr match
-        case true  => "@split cannot be combined with @greedy"
-        case false =>
-          S match
-            case RepeatedShape => Rules[S, t, P, Sh, H, G, true, Gr, NH]
-            case _             => "@split requires a field with a repeated Parser (a collection)"
-    case Ann[flagged.greedy, ?, ?] *: t =>
-      Sp match
-        case true  => "@split cannot be combined with @greedy"
-        case false =>
-          S match
-            case RepeatedShape =>
-              P match
-                case true =>
-                  "@greedy has no effect on a positional field (a repeated positional is already greedy)"
-                case false => Rules[S, t, P, Sh, H, G, Sp, true, NH]
-            case _ => "@greedy requires a field with a repeated Parser (a collection)"
-    case ? *: t => Rules[S, t, P, Sh, H, G, Sp, Gr, NH]
+        case true  => "@opt(split) cannot be combined with @opt(greedy)"
+        case false => RestRules[S, Rest]
+    case false => RestRules[S, Rest]
+
+  /** The slot after its `@opt`: a second `@opt` is ambiguous, and the other annotations stay
+    * rejected wherever they appear.
+    */
+  type RestRules[S <: Int, Anns] <: String = Anns match
+    case EmptyTuple                         => ""
+    case Ann[flagged.version, ?, ?, ?] *: ? =>
+      "@version has no effect on a field (put it on the top-level type)"
+    case Ann[flagged.cmd, ?, ?, ?] *: ? =>
+      "@cmd has no effect on a field (commands are types, enum cases, methods, and objects)"
+    case Ann[flagged.opt, ?, ?, ?] *: ? => "duplicate @opt annotation"
+    case ? *: t                         => RestRules[S, t]
 
   /** The [[FieldsRes.Marks]] contribution of a field of shape `S` with annotations `Anns`. */
-  type MarksOf[S <: Int, Anns] <: Int = S match
+  type MarksOf[S <: Int, Anns, PD <: Boolean] <: Int = S match
     case TrailingShape => TrailBit
     case GroupShape    => GroupBit
     case SharedShape   => NoMarks
     case _             =>
-      PosGreedyMark[Anns, S]
+      PosGreedyMark[Anns, S, PD]
 
-  /** One walk finds `@positional` or `@greedy` (never both — a [[FieldErr]] rules the combination
-    * out before marks matter).
+  /** One walk finds `positional = true` or `greedy = true` (never both — a [[FieldErr]] rules the
+    * combination out before marks matter). A slot with no `@opt` is implicitly positional when `PD`
+    * says so ([[ImplicitPosMark]]).
     */
-  type PosGreedyMark[Anns, S <: Int] <: Int = Anns match
-    case EmptyTuple                         => NoMarks
-    case Ann[flagged.positional, ?, ?] *: _ =>
+  type PosGreedyMark[Anns, S <: Int, PD <: Boolean] <: Int = Anns match
+    case EmptyTuple                        => ImplicitPosMark[S, PD]
+    case Ann[flagged.opt, args, ?, ?] *: _ =>
+      PosGreedyArg[NamedTuple.Names[args], NamedTuple.DropNames[args], S]
+    case _ *: t => PosGreedyMark[t, S, PD]
+
+  /** The marks of an implicitly positional field: value shapes claim [[PosBit]] (a repeated one is
+    * a repeated positional); a pure flag shape claims nothing — it is a [[NoOptErr]] error before
+    * marks matter.
+    */
+  type ImplicitPosMark[S <: Int, PD <: Boolean] <: Int = PD match
+    case false => NoMarks
+    case true  =>
+      S match
+        case RepeatedShape => BitwiseOr[RepBit, PosBit]
+        case FlagShape     => NoMarks
+        case _             => PosBit
+
+  type PosGreedyArg[Ns <: Tuple, Vs <: Tuple, S <: Int] <: Int = (Ns, Vs) match
+    case (EmptyTuple, ?)                => NoMarks
+    case ("positional" *: ?, true *: ?) =>
       S match
         case RepeatedShape => BitwiseOr[RepBit, PosBit]
         case _             => PosBit
-    case Ann[flagged.greedy, ?, ?] *: _ => GreedyBit
-    case _ *: t                         => PosGreedyMark[t, S]
+    case ("greedy" *: ?, true *: ?) => GreedyBit
+    case (? *: nt, ? *: vt)         => PosGreedyArg[nt, vt, S]
+
+  /** Whether a field of shape `S` with no `@opt` parses positionally under default rule `PD` —
+    * decides which empty record the extraction hands to the builder.
+    */
+  type ImplicitlyPositional[S <: Int, PD <: Boolean] <: Boolean = PD match
+    case false => false
+    case true  =>
+      S match
+        case ValueShape      => true
+        case ValuedFlagShape => true
+        case RepeatedShape   => true
+        case ProductShape    => true
+        case _               => false
 
   /** A field either fails with its match-type-computed error or constructs exactly one summary. */
-  private transparent inline def fin[L, S <: Int, F, Anns](
+  private transparent inline def fin[L, S <: Int, F, Anns, PD <: Boolean](
       inline p: Parser[?],
       inline b: FieldsB
   ): FieldsRes =
-    inline if constValue[FieldErr[S, Anns, IsOpt[F]] == ""] then ()
-    else error(constValue[FieldErr[S, Anns, IsOpt[F]]])
-    def annots() = Annots.fieldAnnotsOf[Anns]
+    inline if constValue[FieldErr[S, Anns, IsOpt[F], PD] == ""] then ()
+    else error(constValue[FieldErr[S, Anns, IsOpt[F], PD]])
+    def annots() = Annots.fieldAnnotsOf[Anns](constValue[ImplicitlyPositional[S, PD]])
     b.addField(constValue[L & String], p, constValue[IsOpt[F]], annots())
-    resOf[MarksOf[S, Anns]]
+    resOf[MarksOf[S, Anns, PD]]
 
   /** One field: instance selection (the field's single implicit search) and shape dispatch — the
     * only parts that are inherently term-level. The dispatch must be an inline match on the
     * instance *tree*: a summonFrom binder's static type is the pattern type, so the precise subtype
     * is invisible to match types.
     */
-  private transparent inline def fieldRes[L, F, Anns](inline b: FieldsB): FieldsRes =
+  private transparent inline def fieldRes[L, F, Anns, PD <: Boolean](inline b: FieldsB): FieldsRes =
     summonFrom:
       case p: Parser[Unwrap[F]] =>
         inline p match
-          case _: Parser.Value[?]        => fin[L, ValueShape, F, Anns](p, b)
-          case _: Parser.ValuedFlag[?]   => fin[L, ValuedFlagShape, F, Anns](p, b)
-          case _: Parser.Flag[?]         => fin[L, FlagShape, F, Anns](p, b)
-          case _: Parser.Product[?]      => fin[L, ProductShape, F, Anns](p, b)
-          case _: Parser.Repeated[?]     => fin[L, RepeatedShape, F, Anns](p, b)
-          case _: Parser.Trailing[?]     => fin[L, TrailingShape, F, Anns](p, b)
-          case _: Parser.CommandGroup[?] => fin[L, GroupShape, F, Anns](p, b)
-          case _: Parser.Shared[?]       => fin[L, SharedShape, F, Anns](p, b)
+          case _: Parser.Value[?]        => fin[L, ValueShape, F, Anns, PD](p, b)
+          case _: Parser.ValuedFlag[?]   => fin[L, ValuedFlagShape, F, Anns, PD](p, b)
+          case _: Parser.Flag[?]         => fin[L, FlagShape, F, Anns, PD](p, b)
+          case _: Parser.Product[?]      => fin[L, ProductShape, F, Anns, PD](p, b)
+          case _: Parser.Repeated[?]     => fin[L, RepeatedShape, F, Anns, PD](p, b)
+          case _: Parser.Trailing[?]     => fin[L, TrailingShape, F, Anns, PD](p, b)
+          case _: Parser.CommandGroup[?] => fin[L, GroupShape, F, Anns, PD](p, b)
+          case _: Parser.Shared[?]       => fin[L, SharedShape, F, Anns, PD](p, b)
           case _: Parser.Command[?]      =>
             error(
               "a command-shaped Parser cannot be a field: derive Parser.Shared for a spliceable options group, or Parser.CommandGroup for subcommands (a full command can be embedded as the sole field of a command-group case)"
@@ -635,16 +760,34 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
         )
         plainRes
 
-  /** The constant `@short` characters / `@name` names a slot claims, as tuples. */
+  /** The constant `short` character / long names (`name` and `aliases`) a slot's `@opt` claims, as
+    * tuples.
+    */
   type ShortsOf[Anns] <: Tuple = Anns match
-    case Ann[flagged.short, args, ?] *: t => Tuple.Head[args & NonEmptyTuple] *: ShortsOf[t]
-    case _ *: t                           => ShortsOf[t]
-    case EmptyTuple                       => EmptyTuple
+    case Ann[flagged.opt, args, ?, ?] *: ? =>
+      ArgShorts[NamedTuple.Names[args], NamedTuple.DropNames[args]]
+    case ? *: t     => ShortsOf[t]
+    case EmptyTuple => EmptyTuple
+
+  type ArgShorts[Ns <: Tuple, Vs <: Tuple] <: Tuple = (Ns, Vs) match
+    case (EmptyTuple, ?)        => EmptyTuple
+    case ("short" *: ?, v *: ?) => v *: EmptyTuple
+    case (? *: nt, ? *: vt)     => ArgShorts[nt, vt]
 
   type LongsOf[Anns] <: Tuple = Anns match
-    case Ann[flagged.name, args, ?] *: t => Tuple.Head[args & NonEmptyTuple] *: LongsOf[t]
-    case _ *: t                          => LongsOf[t]
-    case EmptyTuple                      => EmptyTuple
+    case Ann[flagged.opt, args, ?, ?] *: ? =>
+      ArgLongs[NamedTuple.Names[args], NamedTuple.DropNames[args]]
+    case ? *: t     => LongsOf[t]
+    case EmptyTuple => EmptyTuple
+
+  /** The constant `name` and `aliases` names of one sparse argument list — shared between `@opt`
+    * (option names) and `@cmd` (command names), whose arguments are spelled the same.
+    */
+  type ArgLongs[Ns <: Tuple, Vs <: Tuple] <: Tuple = (Ns, Vs) match
+    case (EmptyTuple, ?)            => EmptyTuple
+    case ("name" *: nt, v *: vt)    => v *: ArgLongs[nt, vt]
+    case ("aliases" *: nt, v *: vt) => Tuple.Concat[v & Tuple, ArgLongs[nt, vt]]
+    case (? *: nt, ? *: vt)         => ArgLongs[nt, vt]
 
   /** Whether the two constant-name tuples share an element. */
   type OverlapsT[A <: Tuple, B <: Tuple] <: Boolean = B match
@@ -656,16 +799,28 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
 
   /** Duplicate constant names across the whole product, one fold over the annotation slots. A
     * field's constant names participate unless it is positional (positional fields claim no option
-    * names); no shape knowledge is needed — a name annotation on a shape that could not claim it is
+    * names); no shape knowledge is needed — a name argument on a shape that could not claim it is
     * already a [[FieldErr]] error.
     */
-  type SlotShorts[S] <: Tuple = HasAnnT[flagged.positional, S] match
+  type SlotShorts[S] <: Tuple = IsPositionalSlot[S] match
     case true  => EmptyTuple
     case false => ShortsOf[S]
 
-  type SlotLongs[S] <: Tuple = HasAnnT[flagged.positional, S] match
+  type SlotLongs[S] <: Tuple = IsPositionalSlot[S] match
     case true  => EmptyTuple
     case false => LongsOf[S]
+
+  /** Whether the slot's `@opt` sets `positional = true` — a compile-time constant. */
+  type IsPositionalSlot[Anns] <: Boolean = Anns match
+    case EmptyTuple                        => false
+    case Ann[flagged.opt, args, ?, ?] *: ? =>
+      ArgsPositional[NamedTuple.Names[args], NamedTuple.DropNames[args]]
+    case ? *: t => IsPositionalSlot[t]
+
+  type ArgsPositional[Ns <: Tuple, Vs <: Tuple] <: Boolean = (Ns, Vs) match
+    case (EmptyTuple, ?)                => false
+    case ("positional" *: ?, true *: ?) => true
+    case (? *: nt, ? *: vt)             => ArgsPositional[nt, vt]
 
   type DupNameErr[Slots <: Tuple] = DupNameErrAcc[Slots, EmptyTuple, EmptyTuple]
 
@@ -686,31 +841,50 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
 
   // ---- sum-level rules --------------------------------------------------------
 
-  /** Sum-level compile checks over the per-case annotation slots: at most one `@default` case, and
-    * no duplicate constant command names (`@name` primaries and aliases) across cases.
-    * Kebab-derived command-name collisions are value-level and checked at construction in
-    * [[Assemble.sum]].
+  /** Sum-level compile checks over the per-case annotation slots: at most one
+    * `@cmd(default = true)` case, and no duplicate constant command names (`@cmd` names and
+    * aliases) across cases. Kebab-derived command-name collisions are value-level and checked at
+    * construction in [[Assemble.sum]].
     */
   inline def checkSumRules[Slots]: Unit =
     inline erasedValue[Slots] match
       case _: EmptyTuple => ()
       case _: (s0 *: sr) =>
         inline if constValue[MultiDefaultT[s0 *: sr, false]] then
-          error("only one @default command is supported")
+          error("only one @cmd(default = true) command is supported")
         else ()
         inline if constValue[DupCaseNameErr[s0 *: sr] == ""] then ()
         else error(constValue[DupCaseNameErr[s0 *: sr]])
 
-  /** Whether more than one case carries `@default`. */
+  /** Whether more than one case carries `@cmd(default = true)`. */
   type MultiDefaultT[Slots, Seen <: Boolean] <: Boolean = Slots match
     case EmptyTuple => false
     case s *: t     =>
-      HasAnnT[flagged.default, s] match
+      IsDefaultCmd[s] match
         case true =>
           Seen match
             case true  => true
             case false => MultiDefaultT[t, true]
         case false => MultiDefaultT[t, Seen]
+
+  /** Whether the slot's `@cmd` sets `default = true` — a compile-time constant. */
+  type IsDefaultCmd[Anns] <: Boolean = Anns match
+    case EmptyTuple                        => false
+    case Ann[flagged.cmd, args, ?, ?] *: ? =>
+      ArgsDefault[NamedTuple.Names[args], NamedTuple.DropNames[args]]
+    case ? *: t => IsDefaultCmd[t]
+
+  type ArgsDefault[Ns <: Tuple, Vs <: Tuple] <: Boolean = (Ns, Vs) match
+    case (EmptyTuple, ?)             => false
+    case ("default" *: ?, true *: ?) => true
+    case (? *: nt, ? *: vt)          => ArgsDefault[nt, vt]
+
+  /** The constant command names (`name` plus `aliases`) a `@cmd` slot claims. */
+  type CmdNamesOf[Anns] <: Tuple = Anns match
+    case Ann[flagged.cmd, args, ?, ?] *: ? =>
+      ArgLongs[NamedTuple.Names[args], NamedTuple.DropNames[args]]
+    case ? *: t     => CmdNamesOf[t]
+    case EmptyTuple => EmptyTuple
 
   /** Duplicate constant command names across the sum's cases, one fold over the slots. */
   type DupCaseNameErr[Slots] = DupCaseNameErrAcc[Slots, EmptyTuple]
@@ -718,18 +892,18 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
   type DupCaseNameErrAcc[Slots, Seen <: Tuple] <: String = Slots match
     case EmptyTuple => ""
     case s *: t     =>
-      OverlapsT[Seen, LongsOf[s]] match
+      OverlapsT[Seen, CmdNamesOf[s]] match
         case true  => "duplicate command name"
-        case false => DupCaseNameErrAcc[t, Tuple.Concat[Seen, LongsOf[s]]]
+        case false => DupCaseNameErrAcc[t, Tuple.Concat[Seen, CmdNamesOf[s]]]
 
   /** Whether annotation slot `Anns` contains an `A` — a compile-time constant. Match types rather
     * than inline-match recursion: reduction happens in the (cached) type domain instead of one
     * inline expansion per slot element.
     */
   type HasAnnT[A <: scala.annotation.Annotation, Anns] <: Boolean = Anns match
-    case EmptyTuple        => false
-    case Ann[A, ?, ?] *: _ => true
-    case _ *: t            => HasAnnT[A, t]
+    case EmptyTuple           => false
+    case Ann[A, ?, ?, ?] *: _ => true
+    case _ *: t               => HasAnnT[A, t]
 
   // ---- sums -----------------------------------------------------------------
 
@@ -769,7 +943,7 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     * `Parser.Command` embeds that command wholesale — substitution: the case's grammar *is* the
     * embedded command's (options, positionals, trailing and all — safe, because subcommand dispatch
     * delegates the remaining tokens rather than merging grammars), and the build wraps its result
-    * in the case constructor. `@name`/`@help`/`@hidden` still apply on the *case*; `Shared` and
+    * in the case constructor. `@cmd(name/help/hidden)` still applies on the *case*; `Shared` and
     * `CommandGroup` fields keep their splice/nesting meaning. Deliberately scoped to group cases: a
     * top-level wrapper class has no need for it (use the command's parser directly).
     */
@@ -805,7 +979,7 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
           case _: (EmptyTuple *: EmptyTuple) => ()
           case _                             =>
             error(
-              "annotations have no effect on an embedded command field (put @name/@help/@hidden on the enum case)"
+              "annotations have no effect on an embedded command field (put @cmd(name/help/hidden) on the enum case)"
             )
         val c = summonInline[Parser.Command[E]]
         Parser.make[H](

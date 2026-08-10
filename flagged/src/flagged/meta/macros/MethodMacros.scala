@@ -4,7 +4,7 @@ import scala.quoted.*
 import flagged.meta.{MethodMirror, MethodsMirror}
 
 /** The macro backing [[MethodsMirror]]: enumerate an object's methods (and nested objects) marked
-  * by a [[flagged.meta.Reflectable]] annotation — `@run` in flagged — and mirror each one:
+  * by a [[flagged.meta.Reflectable]] annotation — `@cmd` in flagged — and mirror each one:
   * structure as refined type members in the same encodings `Mirror`/`AnnotMirror` use, plus the
   * minimal term residue: an invoker and the default argument getters. Everything downstream is the
   * ordinary inline derivation pipeline.
@@ -169,7 +169,7 @@ object MethodMacros:
       val members = reflectableMembers(mod.moduleClass)
       if members.isEmpty then
         report.errorAndAbort(
-          s"no methods or nested objects with a meta.Reflectable annotation (such as @run) " +
+          s"no methods or nested objects with a meta.Reflectable annotation (such as @cmd) " +
             s"found in ${mod.name}"
         )
 
