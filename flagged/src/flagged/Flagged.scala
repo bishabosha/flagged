@@ -7,12 +7,12 @@ package flagged
   *   val cfg = Flagged.parseOrExit[Config](args)   // Config derives Parser.Command
   *
   * @main def cli(args: String*): Unit =
-  *   Flagged.parseOrExit[this.type](args)          // @run methods in this file
+  *   Flagged.parseOrExit[this.type](args)          // @cmd methods in this file
   * }}}
   */
 object Flagged:
   /** Parse `args`, reporting help and errors as values on the `Err` channel. The grammar comes from
-    * implicit search — the [[Parser]] for `A` when one exists, otherwise `A`'s `@run` methods (see
+    * implicit search — the [[Parser]] for `A` when one exists, otherwise `A`'s `@cmd` methods (see
     * [[Entry]]) — so `A` may be a `derives` type or an object holding commands.
     */
   def parse[A](args: Seq[String])(using e: Entry[A]): ParseResult[e.Out] = e.parser.parse(args)
@@ -52,30 +52,30 @@ object Flagged:
   /** [[help]] with `prog` as the program name, instead of one derived from the type name. */
   def help[A](prog: String)(using e: Entry[A]): String = e.parser.help(prog)
 
-  /** [[help]] including `@hidden` options and subcommands — what `--help-all` prints. */
+  /** [[help]] including hidden options and subcommands — what `--help-all` prints. */
   def helpAll[A](using e: Entry[A]): String = e.parser.helpAll
 
   /** [[helpAll]] with `prog` as the program name, instead of one derived from the type name. */
   def helpAll[A](prog: String)(using e: Entry[A]): String = e.parser.helpAll(prog)
 
   /** How the entry points parse an `A`, resolved by implicit search: with the [[Parser]] for `A`
-    * when one exists (`Out = A`), otherwise by deriving from `A`'s `@run` methods (`Out` is the
+    * when one exists (`Out = A`), otherwise by deriving from `A`'s `@cmd` methods (`Out` is the
     * invoked method's result — for an object, the union across its commands).
     */
   @annotation.implicitNotFound(
-    "cannot parse ${A}: no given Parser[${A}] instance, and no @run methods to derive one from"
+    "cannot parse ${A}: no given Parser[${A}] instance, and no @cmd methods to derive one from"
   )
   trait Entry[A]:
     type Out
     def parser: Parser[Out]
 
   trait EntryLowPriority:
-    /** Carrier for the `@run` branch: named so inline expansion shares one class. */
+    /** Carrier for the `@cmd` branch: named so inline expansion shares one class. */
     class MethodsEntry[T, O](p: () => Parser[O]) extends Entry[T]:
       type Out = O
       def parser: Parser[O] = p()
 
-    /** `@run` methods: the result union comes from the recursively summoned [[runner.MethodEntry]]
+    /** `@cmd` methods: the result union comes from the recursively summoned [[runner.MethodEntry]]
       * tower. `ValueOf` is the cheap gate — it fails implicit search for a non-singleton `T` before
       * the mirror macro is expanded, so those call sites get this trait's `implicitNotFound`
       * message rather than a macro abort. The value itself is not needed: commands are static

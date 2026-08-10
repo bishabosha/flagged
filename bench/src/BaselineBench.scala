@@ -8,7 +8,7 @@ import bench.defs.{BaselineDefs, FlaggedDefs}
   * `empty`/`simple`/`repeated`/`bundled` flagged rows live in [[RuntimeBench]]; same JMH settings,
   * one forked JVM per benchmark either way). `wide25` scales the typical hand-rolled idiom to 25
   * named options; `positional` compares Scala's built-in `@main` machinery against flagged parsing
-  * the same tokens as all-`@positional` fields — the only grammar `@main` can express.
+  * the same tokens as all-`@opt(positional = true)` fields — the only grammar `@main` can express.
   */
 @State(Scope.Benchmark)
 @BenchmarkMode(Array(Mode.AverageTime))

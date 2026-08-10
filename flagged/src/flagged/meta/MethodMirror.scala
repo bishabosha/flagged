@@ -48,7 +48,7 @@ object MethodMirror:
     case WithAnnots[a] => a
 
 /** `Mirror`-style witness for the command members of `T` (an object): its methods and, nested, its
-  * member objects marked by a [[Reflectable]] annotation (`@run` in flagged), in declaration order.
+  * member objects marked by a [[Reflectable]] annotation (`@cmd` in flagged), in declaration order.
   *
   * The mirror is one level deep: nested objects appear only as [[MethodsMirror.Entry.Scope]] tags
   * in [[MirroredEntries]], and callers descend by summoning a `MethodsMirror` for the scope's own

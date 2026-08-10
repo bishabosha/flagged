@@ -7,13 +7,13 @@ package flagged
   */
 
 case class ParityBasic(
-    @short('v') verbose: Boolean = false,
-    @short('o') output: String = "out.txt",
-    maxRetries: Int = 3
+    @opt(short = 'v') verbose: Boolean = false,
+    @opt(short = 'o') output: String = "out.txt",
+    @opt maxRetries: Int = 3
 ) derives Parser.Command
 
 case class ParityCount(
-    @short('v') verbose: Count = Count(0)
+    @opt(short = 'v') verbose: Count = Count(0)
 ) derives Parser.Command
 
 case class ParityAuth(
@@ -22,81 +22,81 @@ case class ParityAuth(
 ) derives Parser.Shared
 
 case class ParityApp(
-    url: String,
+    @opt url: String,
     auth: ParityAuth
 ) derives Parser.Command
 
 case class ParityLazyDefault(
-    name: String,
-    expensive: Int = sys.error("default evaluated")
+    @opt name: String,
+    @opt expensive: Int = sys.error("default evaluated")
 ) derives Parser.Command
 
 case class ParityWide(
-    f1: Int = 1,
-    f2: Int = 2,
-    f3: Int = 3,
-    f4: Int = 4,
-    f5: Int = 5,
-    f6: Int = 6,
-    f7: Int = 7,
-    f8: Int = 8,
-    f9: Int = 9,
-    f10: Int = 10,
-    f11: Int = 11,
-    f12: Int = 12,
-    f13: Int = 13,
-    f14: Int = 14,
-    f15: Int = 15,
-    f16: Int = 16,
-    f17: Int = 17,
-    f18: Int = 18,
-    f19: Int = 19,
-    f20: Int = 20,
-    f21: Int = 21,
-    f22: Int = 22,
-    f23: Int = 23
+    @opt f1: Int = 1,
+    @opt f2: Int = 2,
+    @opt f3: Int = 3,
+    @opt f4: Int = 4,
+    @opt f5: Int = 5,
+    @opt f6: Int = 6,
+    @opt f7: Int = 7,
+    @opt f8: Int = 8,
+    @opt f9: Int = 9,
+    @opt f10: Int = 10,
+    @opt f11: Int = 11,
+    @opt f12: Int = 12,
+    @opt f13: Int = 13,
+    @opt f14: Int = 14,
+    @opt f15: Int = 15,
+    @opt f16: Int = 16,
+    @opt f17: Int = 17,
+    @opt f18: Int = 18,
+    @opt f19: Int = 19,
+    @opt f20: Int = 20,
+    @opt f21: Int = 21,
+    @opt f22: Int = 22,
+    @opt f23: Int = 23
 ) derives Parser.Command
 
 case class ParityIntArgs(
-    @positional nums: List[Int] = Nil
+    nums: List[Int] = Nil
 ) derives Parser.Command
 
 case class ParityMaybeFlag(
-    flag: Option[Boolean] = None
+    @opt flag: Option[Boolean] = None
 ) derives Parser.Command
 
 case class ParitySeqField(
-    items: Seq[String] = Nil
+    @opt items: Seq[String] = Nil
 ) derives Parser.Command
 
 case class ParityDefines(
-    define: Map[String, Int] = Map.empty
+    @opt define: Map[String, Int] = Map.empty
 ) derives Parser.Command
 
 case class ParityDigits(
-    optFor29Name: Int = 0
+    @opt optFor29Name: Int = 0
 ) derives Parser.Command
 
 case class ParityExactName(
-    @name("myExact") value: Int = 0
+    @opt(name = "myExact") value: Int = 0
 ) derives Parser.Command
 
 case class ParityShortField(
-    v: Int = 0
+    @opt v: Int = 0
 ) derives Parser.Command
 
 case class ParityHidden(
-    visible: String = "a",
-    @hidden secret: String = "b"
+    @opt visible: String = "a",
+    @opt(hidden = true) secret: String = "b"
 ) derives Parser.Command
 
 enum ParityTool derives Parser.CommandGroup:
-  case Run(fast: Boolean = false)
-  @hidden case Debug(level: Int = 0)
+  case Run(@opt fast: Boolean = false)
+  @cmd(hidden = true) case Debug(@opt level: Int = 0)
 
 @version
 case class ParityVersioned(
-    input: String = ""
+    @opt input: String = ""
 ) derives Parser.Command
 
 object ParityVersioned:
@@ -105,7 +105,7 @@ object ParityVersioned:
 
 @version
 case class ParityDynVersioned(
-    input: String = ""
+    @opt input: String = ""
 ) derives Parser.Command
 
 object ParityDynVersioned:
@@ -114,30 +114,30 @@ object ParityDynVersioned:
     def version = current
 
 case class ParityAliased(
-    @name("color") @name("colour") color: Boolean = false
+    @opt(name = "color", aliases = "colour" *: EmptyTuple) color: Boolean = false
 ) derives Parser.Command
 
 enum ParityVcs derives Parser.CommandGroup:
-  @name("checkout") @name("co") case Checkout(branch: String = "main")
+  @cmd(name = "checkout", aliases = "co" *: EmptyTuple) case Checkout(@opt branch: String = "main")
 
 enum ParityGit derives Parser.CommandGroup:
-  @default case Status(@short('s') short: Boolean = false)
-  case Push(remote: String = "origin")
+  @cmd(default = true) case Status(@opt(short = 's') short: Boolean = false)
+  case Push(@opt remote: String = "origin")
 
 case class ParityWrappedDefault(
-    verbose: Boolean = false,
+    @opt verbose: Boolean = false,
     action: ParityGit
 ) derives Parser.Command
 
 case class ParityRequiredWrappedDefault(
-    required: String,
+    @opt required: String,
     action: ParityGit
 ) derives Parser.Command
 
 case class ParityNet(
-    @group("Network") host: String = "localhost",
-    @group("Network") port: Int = 80,
-    quiet: Boolean = false
+    @opt(group = "Network") host: String = "localhost",
+    @opt(group = "Network") port: Int = 80,
+    @opt quiet: Boolean = false
 ) derives Parser.Command
 
 case class ParityOut(
@@ -146,8 +146,8 @@ case class ParityOut(
 ) derives Parser.Shared
 
 case class ParityGrouped(
-    input: String = "",
-    @group("Output") out: ParityOut
+    @opt input: String = "",
+    @opt(group = "Output") out: ParityOut
 ) derives Parser.Command
 
 class ParitySuite extends munit.FunSuite:
@@ -253,7 +253,9 @@ class ParitySuite extends munit.FunSuite:
     assert(msg.startsWith("unknown option '--maxRetries'"), msg)
   }
 
-  test("an explicit @name is matched verbatim, never kebab-mapped (mainargs, case-app: same)") {
+  test(
+    "an explicit @opt(name) is matched verbatim, never kebab-mapped (mainargs, case-app: same)"
+  ) {
     assertEquals(ok(Flagged.parse[ParityExactName](Seq("--myExact", "5"))), ParityExactName(5))
     val msg = err(Flagged.parse[ParityExactName](Seq("--my-exact", "5")))
     assert(msg.contains("unknown option"), msg)
@@ -323,7 +325,7 @@ class ParitySuite extends munit.FunSuite:
     assert(msg.contains("unknown option"), msg)
   }
 
-  test("@hidden options parse but are omitted from help (mainargs, case-app: same)") {
+  test("@opt(hidden) options parse but are omitted from help (mainargs, case-app: same)") {
     assertEquals(
       ok(Flagged.parse[ParityHidden](Seq("--secret", "x"))),
       ParityHidden(secret = "x")
@@ -333,7 +335,7 @@ class ParitySuite extends munit.FunSuite:
     assert(!help.contains("--secret"), help)
   }
 
-  test("@hidden subcommands are selectable but unlisted (case-app: same)") {
+  test("@cmd(hidden) subcommands are selectable but unlisted (case-app: same)") {
     assertEquals(
       ok(Flagged.parse[ParityTool](Seq("debug", "--level", "2"))),
       ParityTool.Debug(2)
@@ -361,13 +363,13 @@ class ParitySuite extends munit.FunSuite:
 
   test("@version without a Versioned instance is a compile error") {
     val e = compileErrors(
-      "@version case class NoV(x: Int = 0) derives Parser.Command"
+      "@version case class NoV(@opt x: Int = 0) derives Parser.Command"
     )
     assert(e.contains("requires a given Versioned"), e)
   }
 
   test("@version with a literal needs no Versioned instance") {
-    @version("0.4.2") case class LitVersioned(x: Int = 0) derives Parser.Command
+    @version("0.4.2") case class LitVersioned(@opt x: Int = 0) derives Parser.Command
     Flagged.parse[LitVersioned](Seq("--version")) match
       case Result.Err(ParseError.Help(t)) => assertEquals(t, "0.4.2")
       case other                          => fail(s"expected version output, got $other")
@@ -376,7 +378,7 @@ class ParitySuite extends munit.FunSuite:
   }
 
   test("a non-empty @version literal takes precedence over dynamic") {
-    @version("9.9.9", dynamic = true) case class LitOver(x: Int = 0) derives Parser.Command
+    @version("9.9.9", dynamic = true) case class LitOver(@opt x: Int = 0) derives Parser.Command
     given Versioned[LitOver] = Versioned.of("3.0.0")
     Flagged.parse[LitOver](Seq("--version")) match
       case Result.Err(ParseError.Help(t)) => assertEquals(t, "9.9.9")
@@ -384,7 +386,7 @@ class ParitySuite extends munit.FunSuite:
   }
 
   test("an empty @version literal is not a version: dynamic applies") {
-    @version("") case class EmptyLit(x: Int = 0) derives Parser.Command
+    @version("") case class EmptyLit(@opt x: Int = 0) derives Parser.Command
     given Versioned[EmptyLit] = Versioned.of("3.0.0")
     Flagged.parse[EmptyLit](Seq("--version")) match
       case Result.Err(ParseError.Help(t)) => assertEquals(t, "3.0.0")
@@ -393,13 +395,13 @@ class ParitySuite extends munit.FunSuite:
 
   test("@version(dynamic = true) without a Versioned instance is a compile error") {
     val e = compileErrors(
-      "@version(dynamic = true) case class NoV2(x: Int = 0) derives Parser.Command"
+      "@version(dynamic = true) case class NoV2(@opt x: Int = 0) derives Parser.Command"
     )
     assert(e.contains("requires a given Versioned"), e)
   }
 
   test("@version rejects a user option that would shadow --version") {
-    @version case class OwnVersion(version: String = "field") derives Parser.Command
+    @version case class OwnVersion(@opt version: String = "field") derives Parser.Command
     given Versioned[OwnVersion] = Versioned.of("1.0")
     val e = intercept[IllegalArgumentException](Parser.Command.derived[OwnVersion])
     assert(e.getMessage.contains("duplicate option name '--version'"), e.getMessage)
@@ -415,7 +417,7 @@ class ParitySuite extends munit.FunSuite:
     assertEquals(versionOut(), "0.2.0")
   }
 
-  test("repeated @name adds option aliases (case-app stacked @Name: same)") {
+  test("@opt(aliases) adds option aliases (case-app stacked @Name: same)") {
     assertEquals(ok(Flagged.parse[ParityAliased](Seq("--color"))), ParityAliased(true))
     assertEquals(ok(Flagged.parse[ParityAliased](Seq("--colour"))), ParityAliased(true))
     val help = Flagged.help[ParityAliased]
@@ -423,7 +425,7 @@ class ParitySuite extends munit.FunSuite:
     assert(help.contains("alias: --colour"), help)
   }
 
-  test("repeated @name on an enum case adds command aliases (case-app names: same)") {
+  test("@cmd(aliases) on an enum case adds command aliases (case-app names: same)") {
     assertEquals(
       ok(Flagged.parse[ParityVcs](Seq("co", "--branch", "dev"))),
       ParityVcs.Checkout("dev")
@@ -436,12 +438,15 @@ class ParitySuite extends munit.FunSuite:
 
   test("an alias colliding with a constant name is a compile error") {
     val e = compileErrors(
-      "case class C(@name(\"x\") a: Int = 0, @name(\"y\") @name(\"x\") b: Int = 0) derives Parser.Command"
+      "case class C(@opt(name = \"x\") a: Int = 0, " +
+        "@opt(name = \"y\", aliases = \"x\" *: EmptyTuple) b: Int = 0) derives Parser.Command"
     )
     assert(e.contains("duplicate option name"), e)
   }
 
-  test("@default command runs when no command is given, with args forwarded (case-app: same)") {
+  test(
+    "@cmd(default = true) command runs when no command is given, args forwarded (case-app: same)"
+  ) {
     assertEquals(ok(Flagged.parse[ParityGit](Nil)), ParityGit.Status())
     assertEquals(ok(Flagged.parse[ParityGit](Seq("--short"))), ParityGit.Status(true))
     assertEquals(ok(Flagged.parse[ParityGit](Seq("-s"))), ParityGit.Status(true))
@@ -468,12 +473,12 @@ class ParitySuite extends munit.FunSuite:
     assert(!msg.contains("child-option"), msg)
   }
 
-  test("@default on a field is a compile error") {
-    val e = compileErrors("case class C(@default x: Int = 0) derives Parser.Command")
-    assert(e.contains("@default has no effect on a field"), e)
+  test("@cmd on a field is a compile error") {
+    val e = compileErrors("case class C(@cmd(default = true) x: Int = 0) derives Parser.Command")
+    assert(e.contains("@cmd has no effect on a field"), e)
   }
 
-  test("@group renders options under titled sections (case-app @Group: same)") {
+  test("@opt(group) renders options under titled sections (case-app @Group: same)") {
     val help = Flagged.help[ParityNet]
     val net  = help.indexOf("Network options:")
     assert(net > 0, help)
@@ -482,7 +487,7 @@ class ParitySuite extends munit.FunSuite:
     assert(help.indexOf("--quiet") < net, help)
   }
 
-  test("@group on a spliced group titles its options (case-app: per-field only)") {
+  test("@opt(group) on a spliced group titles its options (case-app: per-field only)") {
     val help = Flagged.help[ParityGrouped]
     val out  = help.indexOf("Output options:")
     assert(out > 0, help)
@@ -490,18 +495,18 @@ class ParitySuite extends munit.FunSuite:
     assert(help.indexOf("--pager") > out, help)
   }
 
-  test("@group misuse is a compile error") {
+  test("@opt(group) misuse is a compile error") {
     val e = compileErrors(
-      "case class C(@positional @group(\"X\") x: Int = 0) derives Parser.Command"
+      "case class C(@opt(positional = true, group = \"X\") x: Int = 0) derives Parser.Command"
     )
-    assert(e.contains("@group cannot be combined with @positional"), e)
+    assert(e.contains("@opt(group) cannot be combined with @opt(positional)"), e)
   }
 
-  test("@hidden misuse is a compile error") {
+  test("@opt(hidden) misuse is a compile error") {
     val e = compileErrors(
-      "case class C(@positional @hidden x: Int = 0) derives Parser.Command"
+      "case class C(@opt(positional = true, hidden = true) x: Int = 0) derives Parser.Command"
     )
-    assert(e.contains("@hidden cannot be combined with @positional"), e)
+    assert(e.contains("@opt(hidden) cannot be combined with @opt(positional)"), e)
   }
 
   test("option names are case-sensitive (case-app: same)") {

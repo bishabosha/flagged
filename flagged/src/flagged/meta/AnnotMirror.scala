@@ -9,18 +9,22 @@ import scala.annotation.Annotation
 import scala.compiletime.*
 import scala.deriving.Mirror
 import scala.annotation.publicInBinary
+import scala.NamedTuple.AnyNamedTuple
 
-/** Type-level description of a single annotation occurrence: the monomorphic annotation type `A`,
-  * the singleton types of its constructor arguments `Args`, and a parallel tuple `Defaulted` of
-  * boolean literal types. Where `Defaulted` is `false`, the `Args` element is the provided
-  * argument's constant type; where it is `true`, the argument was omitted (or a typer-inserted
-  * default) and the `Args` element is the parameter's index, to be looked up through the
-  * annotation's [[Defaults]] mirror at materialisation. E.g. `@tagged(level = 3)` with
-  * `tagged(label: String = "none", level: Int)` mirrors as `Ann[tagged, (0, 3), (true, false)]`.
+/** Type-level description of a single annotation occurrence, sparsely encoded: the monomorphic
+  * annotation type `A`; `Args`, a named tuple typing only the *explicitly provided* constructor
+  * arguments (parameter name -> the argument's constant type, in declaration order); `Arity`, the
+  * total number of constructor parameters; and `Indices`, a tuple of the parameter indices of the
+  * provided arguments, parallel to `Args`. Omitted parameters (including typer-inserted defaults)
+  * are not encoded at all: a consumer that needs a runtime value looks them up through the
+  * annotation's [[Defaults]] mirror (with `scala.deriving.Mirror.Of` for the parameter order) at
+  * materialisation, and compile-time-only consumers traverse the sparse arguments and assume
+  * defaults for the rest. E.g. `@tagged(level = 3)` with `tagged(label: String = "none", level:
+  * Int)` mirrors as `Ann[tagged, (level: 3), 2, 1 *: EmptyTuple]`.
   *
   * Purely a phantom type — never instantiated.
   */
-sealed trait Ann[A <: Annotation, Args <: Tuple, Defaulted <: Tuple]
+sealed trait Ann[A <: Annotation, Args <: AnyNamedTuple, Arity <: Int, Indices <: Tuple]
 
 /** `Mirror`-style witness describing how `T` is annotated. Like `Mirror`, all information lives in
   * type members, so a compiler-intrinsic version of this would synthesize only types. The kind —
@@ -28,9 +32,9 @@ sealed trait Ann[A <: Annotation, Args <: Tuple, Defaulted <: Tuple]
   * how `MirroredAnnotations` is interpreted: one slot per constructor field, or one slot per case.
   *
   * Only annotations that are case classes extending `StaticAnnotation` and applied with
-  * compile-time-constant arguments are mirrored — the same restriction a compiler intrinsic would
-  * need so that every argument has a singleton type and the annotation can be rebuilt through its
-  * `Mirror.ProductOf`.
+  * compile-time-constant arguments (single constants, or tuples of constants such as an `aliases`
+  * list) are mirrored — the same restriction a compiler intrinsic would need so that every provided
+  * argument has a singleton type and the annotation can be rebuilt through its `Mirror.ProductOf`.
   */
 sealed trait AnnotMirror[T]:
   /** Tuple of [[Ann]] types: the annotations on `T` itself. */
@@ -59,14 +63,14 @@ object AnnotMirror:
   transparent inline given ofSum[T]: AnnotMirror.Sum[T] =
     ${ macros.AnnotationMacros.annotMirrorSum[T] }
 
-  /** Find first slot in `Anns` that matches type `A` and materialise its arguments as `A`. Default
-    * arguments are filled in.
+  /** Find first slot in `Anns` that matches type `A` and materialise its arguments as `A`. Omitted
+    * arguments are filled in through the [[Defaults]] mirror.
     */
   inline def findExact[A <: Annotation: {Mirror.ProductOf as m, Defaults}, Anns]: Option[A] =
     findImpl[A, Anns, A](m.fromProduct)
 
   /** Find first slot in `Anns` that matches type `A` and materialise its arguments as a named
-    * tuple. Default arguments are filled in.
+    * tuple. Omitted arguments are filled in through the [[Defaults]] mirror.
     */
   inline def find[A <: Annotation: {Mirror.ProductOf as m, Defaults}, Anns]
       : Option[NamedTuple.From[A]] =
@@ -77,15 +81,13 @@ object AnnotMirror:
       inline finish: Tuple => B
   ): Option[B] =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                     => None
-      case _: (Ann[A, args, defaulted] *: _) =>
-        Some(
-          finish(argsOf[A, m.MirroredElemTypes, args, defaulted])
-        )
+      case _: EmptyTuple                      => None
+      case _: (Ann[A, args, arity, idx] *: _) =>
+        Some(finish(argsOf[A, args, arity, idx]))
       case _: (_ *: t) => findImpl[A, t, B](finish)
 
   /** All slots in `Anns` that match type `A`, in declaration order, materialised as named tuples
-    * (for repeatable annotations). Default arguments are filled in.
+    * (for repeatable annotations). Omitted arguments are filled in.
     */
   inline def findAll[A <: Annotation: {Mirror.ProductOf as m, Defaults}, Anns]
       : List[NamedTuple.From[A]] =
@@ -96,69 +98,77 @@ object AnnotMirror:
       inline finish: Tuple => B
   ): List[B] =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                     => Nil
-      case _: (Ann[A, args, defaulted] *: t) =>
-        finish(argsOf[A, m.MirroredElemTypes, args, defaulted]) :: findAllImpl[A, t, B](finish)
+      case _: EmptyTuple                      => Nil
+      case _: (Ann[A, args, arity, idx] *: t) =>
+        finish(argsOf[A, args, arity, idx]) :: findAllImpl[A, t, B](finish)
       case _: (_ *: t) => findAllImpl[A, t, B](finish)
 
-  /** The constructor-argument tuple for one mirrored annotation: provided constants are
-    * materialised directly; defaulted positions are looked up through the annotation's [[Defaults]]
-    * mirror (which throws on an index without a default — unreachable for mirrors synthesized by
-    * flagged).
+  /** The full constructor-argument tuple for one sparsely mirrored annotation: the explicit
+    * constants are materialised from their singleton types into the positions named by `Is`, and
+    * every other position is looked up through the annotation's [[Defaults]] mirror (which throws
+    * on an index without a default — unreachable for mirrors synthesized by flagged, since an
+    * argument is only omitted where the parameter declares a default).
     */
-  private inline def argsOf[A: Defaults as d, Elems <: Tuple, Args <: Tuple, Defaulted <: Tuple]
+  private inline def argsOf[A: Defaults as d, Args <: AnyNamedTuple, Arity <: Int, Is <: Tuple]
       : Tuple =
-    inline erasedValue[Elems] match
-      case _: EmptyTuple => EmptyTuple
-      case _             =>
-        inline erasedValue[(Elems, Args, Defaulted)] match
-          case _: (ex *: EmptyTuple, ax *: EmptyTuple, dx *: EmptyTuple) =>
-            Tuple1(resolveInner[ex, ax, dx](d.defaultArgument))
-          case _: (e1 *: e2 *: EmptyTuple, a1 *: a2 *: EmptyTuple, d1 *: d2 *: EmptyTuple) =>
-            Tuple2(
-              resolveInner[e1, a1, d1](d.defaultArgument),
-              resolveInner[e2, a2, d2](d.defaultArgument)
-            )
-          case _: (
-                  e1 *: e2 *: e3 *: EmptyTuple,
-                  a1 *: a2 *: a3 *: EmptyTuple,
-                  d1 *: d2 *: d3 *: EmptyTuple
-              ) =>
-            Tuple3(
-              resolveInner[e1, a1, d1](d.defaultArgument),
-              resolveInner[e2, a2, d2](d.defaultArgument),
-              resolveInner[e3, a3, d3](d.defaultArgument)
-            )
-          case _ =>
-            buildTuple(constValue[Tuple.Size[Elems]])({ append =>
-              resolveMany[Elems, Args, Defaulted](append, d.defaultArgument)
-            })
+    mergeArgs(constValue[Arity], indicesOf[Is], explicitsOf[NamedTuple.DropNames[Args]], d)
 
+  /** Merge explicit arguments (parallel to their `indices` positions) with defaults for the rest.
+    */
   @publicInBinary
-  private[AnnotMirror] def buildTuple[T, A](size: Int)(
-      build: (append: Any => Unit) => Unit
+  private[AnnotMirror] def mergeArgs(
+      arity: Int,
+      indices: Array[Int],
+      explicits: Array[Any],
+      d: Defaults[?]
   ): Tuple =
-    val buf = new scala.collection.mutable.ArrayBuffer[AnyRef](size)
-    build(x => buf += x.asInstanceOf[AnyRef])
-    Tuple.fromIArray(frozenIArray(frozen(buf.toArray)))
+    def merged(): Array[Any] =
+      val arr = new Array[Any](arity)
+      var i   = 0
+      var k   = 0
+      while i < arity do
+        if k < indices.length && indices(k) == i then
+          arr(i) = explicits(k)
+          k += 1
+        else arr(i) = d.defaultArgument(i)
+        i += 1
+      arr
+    Tuple.fromIArray(frozenIArray(frozen(merged())))
 
-  private inline def resolveMany[Elems, Args, D](
-      inline append: Any => Unit,
-      inline lookup: Int => Any
-  ): Unit =
-    inline erasedValue[Elems] match
-      case _: (eh *: et) =>
-        inline erasedValue[Args] match
-          case _: (ah *: at) =>
-            inline erasedValue[D] match
-              case _: (dh *: dt) =>
-                append(resolveInner[eh, ah, dh](lookup))
-                resolveMany[et, at, dt](append, lookup)
+  private inline def indicesOf[Is <: Tuple]: Array[Int] =
+    val arr = new Array[Int](constValue[Tuple.Size[Is]])
+    writeIndices[Is](arr, 0)
+    arr
+
+  private inline def writeIndices[Is <: Tuple](arr: Array[Int], k: Int): Unit =
+    inline erasedValue[Is] match
       case _: EmptyTuple => ()
+      case _: (i *: it)  =>
+        arr(k) = constValue[i & Int]
+        writeIndices[it](arr, k + 1)
 
-  private inline def resolveInner[Eh, Ah, Dh](
-      inline lookup: Int => Any
-  ): Eh =
-    inline erasedValue[Dh] match
-      case _: false => constValue[Ah].asInstanceOf[Eh]
-      case _: true  => lookup(constValue[Ah].asInstanceOf[Int]).asInstanceOf[Eh]
+  private inline def explicitsOf[Vs <: Tuple]: Array[Any] =
+    val arr = new Array[Any](constValue[Tuple.Size[Vs]])
+    writeExplicits[Vs](arr, 0)
+    arr
+
+  private inline def writeExplicits[Vs <: Tuple](arr: Array[Any], k: Int): Unit =
+    inline erasedValue[Vs] match
+      case _: EmptyTuple => ()
+      case _: (v *: vt)  =>
+        arr(k) = constOf[v]
+        writeExplicits[vt](arr, k + 1)
+
+  /** One explicit argument materialised from its constant type: a plain literal via `constValue`, a
+    * tuple of constants (e.g. an `aliases` argument) element-wise.
+    */
+  private inline def constOf[V]: Any =
+    inline erasedValue[V] match
+      case _: EmptyTuple => EmptyTuple
+      case _: (h *: t)   => constTuple[h *: t]
+      case _             => constValue[V]
+
+  private inline def constTuple[T <: Tuple]: Tuple =
+    inline erasedValue[T] match
+      case _: EmptyTuple => EmptyTuple
+      case _: (h *: t)   => constOf[h] *: constTuple[t]

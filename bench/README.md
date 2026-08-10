@@ -48,7 +48,7 @@ with no parsing library at all, giving the compiler's floor for the file shape.
 | `options10` | one options class with ten mixed fields (strings, numerics, flags, a list, an `Option`) |
 | `options25` | one options class with twenty-five defaulted fields (wide derivation) |
 | `commands` | a three-command interface, each command with its own options |
-| `methods` | the same interface as command *methods* (flagged `@run` + `Parser.methods`, mainargs `ParserForMethods`); mainargs' `commands` entry is already its method encoding, so its two rows measure the same source, and case-app has no method-based API, so its entry reuses the command-objects encoding |
+| `methods` | the same interface as command *methods* (flagged `@cmd` + `Parser.methods`, mainargs `ParserForMethods`); mainargs' `commands` entry is already its method encoding, so its two rows measure the same source, and case-app has no method-based API, so its entry reuses the command-objects encoding |
 | `realistic` | a docker-style CLI modeled on a subset of `docker` `run`/`pull`/`ps` (github.com/docker/cli, Apache-2.0): one subcommand level, a 20-field command with mostly optional and several repeatable options — each library in its idiomatic subcommand encoding (see `bench-portable/src/defs/RealisticDefs.scala`) |
 
 **`RuntimeBench`** — average time per parse of a fixed command line, against parser instances
@@ -86,7 +86,7 @@ scallop's `ScallopConf` is construct-and-parse by design, and picocli rebuilds i
 model. `ConstructBench` and `RuntimeBench` are the two halves measured separately.
 
 **`MethodBench`** — the method-based counterpart to `RuntimeBench`: parse-and-invoke latency for
-command methods, flagged's `@run` derivation against mainargs' `ParserForMethods` (the two
+command methods, flagged's `@cmd` derivation against mainargs' `ParserForMethods` (the two
 libraries with a method parser). Both sides select a method, parse its parameters, and invoke
 it; setup asserts both succeed and agree on the invoked result.
 

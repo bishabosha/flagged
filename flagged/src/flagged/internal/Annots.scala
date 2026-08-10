@@ -3,9 +3,9 @@ package flagged.internal
 import language.experimental.captureChecking
 import language.experimental.separationChecking
 
-import compiletime.{summonFrom, summonInline, erasedValue, constValue}
+import compiletime.{summonFrom, erasedValue, constValue}
 import compiletime.ops.int./
-import flagged.meta.{Ann, AnnotMirror, Defaults}
+import flagged.meta.{Ann, AnnotMirror}
 import scala.annotation.publicInBinary
 
 /** Allocation-free optional character for derivation metadata. */
@@ -13,7 +13,7 @@ import scala.annotation.publicInBinary
   final val empty: Int               = -1
   inline def apply(value: Char): Int = value.toInt
 
-/** flagged's annotations on a type or an enum case, extracted at compile time from an
+/** flagged's `@cmd` arguments on a type or an enum case, extracted at compile time from an
   * [[AnnotMirror]] — fully typed, no `Any` and no runtime type tests.
   */
 private[flagged] final case class TargetAnnots @publicInBinary() (
@@ -27,7 +27,7 @@ private[flagged] final case class TargetAnnots @publicInBinary() (
 @publicInBinary private[flagged] object TargetAnnots:
   val empty: TargetAnnots = TargetAnnots(None, None, false)
 
-/** flagged's annotations on one constructor field, extracted at compile time. */
+/** flagged's `@opt` arguments on one constructor field, extracted at compile time. */
 private[flagged] final case class FieldAnnots @publicInBinary() (
     name: Option[String],
     short: Int,
@@ -42,6 +42,11 @@ private[flagged] final case class FieldAnnots @publicInBinary() (
 
 @publicInBinary private[flagged] object FieldAnnots:
   val empty: FieldAnnots = FieldAnnots(None, MaybeChar.empty, None, false, false)
+
+  /** The record of a field with no `@opt` in a positional-by-default derivation: positional, like a
+    * `@scala.main` parameter.
+    */
+  val emptyPositional: FieldAnnots = FieldAnnots(None, MaybeChar.empty, None, true, false)
 
 /** Runtime carrier for annotations extracted at compile time. Only sums need one: a product's
   * fields are walked in [[Derive]], which extracts each slot as it reaches the field
@@ -76,160 +81,230 @@ private[flagged] final case class FieldAnnots @publicInBinary() (
       case _: EmptyTuple => TargetAnnots.empty
       case _             => targetAnnotsOfSome[Anns]
 
-  // Extraction folds the annotation slot once, matching each mirrored occurrence against
-  // flagged's annotations directly, instead of one AnnotMirror.find walk per annotation type.
-  // Every flagged annotation has zero or one parameter and no defaults, so a matched occurrence
-  // materialises as a single constValue — no Mirror/Defaults machinery per query.
-
-  private inline def const1[Args, T]: T = constValue[Tuple.Head[Args & NonEmptyTuple] & T]
+  // Extraction reads the slot's `@cmd` / `@opt` occurrence once: the sparse argument list types
+  // exactly the arguments written at the use site, so the fold walks the named tuple's (names,
+  // values) columns in parallel, and an omitted argument costs nothing — absence is the record's
+  // default. Every matched value materialises as a single constValue — no Mirror/Defaults
+  // machinery per query.
 
   inline def targetAnnotsOfSome[Anns]: TargetAnnots =
-    collectTarget[Anns](Vector.empty, None, false, false)
+    inline erasedValue[Anns] match
+      case _: EmptyTuple                          => TargetAnnots.empty
+      case _: (Ann[flagged.cmd, args, ?, ?] *: ?) =>
+        inline erasedValue[NamedTuple.Names[args]] match
+          // bare @cmd: nothing to collect — share the empty record
+          case _: EmptyTuple => TargetAnnots.empty
+          case _             =>
+            collectTarget[NamedTuple.Names[args], NamedTuple.DropNames[args]](
+              None,
+              None,
+              false,
+              Vector.empty,
+              false
+            )
+      case _: (_ *: t) => targetAnnotsOfSome[t]
 
   // the folds thread each extracted value as an inline parameter and call the constructor once
-  // at the end — no intermediate copies, and superseded values are dropped unmaterialised
-  inline def collectTarget[Anns](
-      inline names: Vector[String],
+  // at the end — no intermediate copies
+  inline def collectTarget[Ns <: Tuple, Vs <: Tuple](
+      inline name: Option[String],
       inline help: Option[String],
       inline hidden: Boolean,
+      inline aliases: IndexedSeq[String],
       inline default: Boolean
   ): TargetAnnots =
-    inline erasedValue[Anns] match
-      case _: EmptyTuple =>
-        val ns = names
-        TargetAnnots(ns.headOption, help, hidden, ns.drop(1), default)
-      case _: (Ann[flagged.name, args, ?] *: t) =>
-        collectTarget[t](names :+ const1[args, String], help, hidden, default)
-      case _: (Ann[flagged.help, args, ?] *: t) =>
-        collectTarget[t](names, Some(const1[args, String]), hidden, default)
-      case _: (Ann[flagged.hidden, ?, ?] *: t) =>
-        collectTarget[t](names, help, true, default)
-      case _: (Ann[flagged.default, ?, ?] *: t) =>
-        collectTarget[t](names, help, hidden, true)
-      case _: (_ *: t) =>
-        collectTarget[t](names, help, hidden, default)
+    inline erasedValue[(Ns, Vs)] match
+      case _: (EmptyTuple, ?)         => TargetAnnots(name, help, hidden, aliases, default)
+      case _: ("name" *: nt, v *: vt) =>
+        collectTarget[nt, vt](Some(constValue[v & String]), help, hidden, aliases, default)
+      case _: ("help" *: nt, v *: vt) =>
+        collectTarget[nt, vt](name, Some(constValue[v & String]), hidden, aliases, default)
+      case _: ("hidden" *: nt, v *: vt) =>
+        collectTarget[nt, vt](name, help, constValue[v & Boolean], aliases, default)
+      case _: ("default" *: nt, v *: vt) =>
+        collectTarget[nt, vt](name, help, hidden, aliases, constValue[v & Boolean])
+      case _: ("aliases" *: nt, v *: vt) =>
+        collectTarget[nt, vt](name, help, hidden, constStrings[v & Tuple], default)
+      case _: (? *: nt, ? *: vt) =>
+        collectTarget[nt, vt](name, help, hidden, aliases, default)
 
-  inline def fieldAnnotsOf[Anns]: FieldAnnots =
+  /** The field record: from the slot's `@opt` when there is one — its `positional` starts `false`,
+    * so an annotated field is a named option unless it says `positional = true` — otherwise the
+    * no-`@opt` record selected by `positionalDefault` (positional in a command, named in a
+    * `Parser.Shared` group).
+    */
+  inline def fieldAnnotsOf[Anns](inline positionalDefault: Boolean): FieldAnnots =
     inline erasedValue[Anns] match
-      case _: EmptyTuple => FieldAnnots.empty
-      case _             => fieldAnnotsOfSome[Anns]
+      case _: EmptyTuple => noOptAnnots(positionalDefault)
+      case _             => fieldAnnotsOfSome[Anns](positionalDefault)
 
-  inline def fieldAnnotsOfSome[Anns]: FieldAnnots =
-    collectField[Anns](
-      Vector.empty,
-      MaybeChar.empty,
-      None,
-      None,
-      false,
-      false,
-      MaybeChar.empty,
-      false
-    )
+  inline def noOptAnnots(inline positionalDefault: Boolean): FieldAnnots =
+    inline if positionalDefault then FieldAnnots.emptyPositional else FieldAnnots.empty
+
+  inline def fieldAnnotsOfSome[Anns](inline positionalDefault: Boolean): FieldAnnots =
+    inline erasedValue[Anns] match
+      case _: EmptyTuple                          => noOptAnnots(positionalDefault)
+      case _: (Ann[flagged.opt, args, ?, ?] *: ?) =>
+        inline erasedValue[NamedTuple.Names[args]] match
+          // bare @opt — the common named-option marker: nothing to collect, so every such field
+          // shares the empty record instead of calling the constructor
+          case _: EmptyTuple => FieldAnnots.empty
+          case _             =>
+            collectField[NamedTuple.Names[args], NamedTuple.DropNames[args]](
+              None,
+              MaybeChar.empty,
+              None,
+              false,
+              false,
+              None,
+              Vector.empty,
+              MaybeChar.empty,
+              false
+            )
+      case _: (_ *: t) => fieldAnnotsOfSome[t](positionalDefault)
 
   // inline parameters: arguments substitute as expressions, so pass-through values bind
-  // nothing per step and a value replaced later in the walk is never constructed at all
-  inline def collectField[Anns](
-      inline names: Vector[String],
+  // nothing per step and only the arguments actually written are ever constructed
+  inline def collectField[Ns <: Tuple, Vs <: Tuple](
+      inline name: Option[String],
       inline short: Int,
       inline help: Option[String],
-      inline group: Option[String],
       inline positional: Boolean,
       inline hidden: Boolean,
+      inline group: Option[String],
+      inline aliases: IndexedSeq[String],
       inline split: Int,
       inline greedy: Boolean
   ): FieldAnnots =
-    inline erasedValue[Anns] match
-      case _: EmptyTuple =>
-        val ns = names
-        FieldAnnots(
-          ns.headOption,
+    inline erasedValue[(Ns, Vs)] match
+      case _: (EmptyTuple, ?) =>
+        FieldAnnots(name, short, help, positional, hidden, group, aliases, split, greedy)
+      case _: ("name" *: nt, v *: vt) =>
+        collectField[nt, vt](
+          Some(constValue[v & String]),
           short,
           help,
           positional,
           hidden,
           group,
-          ns.drop(1),
+          aliases,
           split,
           greedy
         )
-      case _: (Ann[flagged.name, args, ?] *: t) =>
-        collectField[t](
-          names :+ const1[args, String],
+      case _: ("help" *: nt, v *: vt) =>
+        collectField[nt, vt](
+          name,
+          short,
+          Some(constValue[v & String]),
+          positional,
+          hidden,
+          group,
+          aliases,
+          split,
+          greedy
+        )
+      case _: ("short" *: nt, v *: vt) =>
+        collectField[nt, vt](
+          name,
+          MaybeChar(constValue[v & Char]),
+          help,
+          positional,
+          hidden,
+          group,
+          aliases,
+          split,
+          greedy
+        )
+      case _: ("aliases" *: nt, v *: vt) =>
+        collectField[nt, vt](
+          name,
           short,
           help,
-          group,
           positional,
           hidden,
+          group,
+          constStrings[v & Tuple],
           split,
           greedy
         )
-      case _: (Ann[flagged.short, args, ?] *: t) =>
-        collectField[t](
-          names,
-          MaybeChar(const1[args, Char]),
-          help,
-          group,
-          positional,
-          hidden,
-          split,
-          greedy
-        )
-      case _: (Ann[flagged.help, args, ?] *: t) =>
-        collectField[t](
-          names,
-          short,
-          Some(const1[args, String]),
-          group,
-          positional,
-          hidden,
-          split,
-          greedy
-        )
-      case _: (Ann[flagged.group, args, ?] *: t) =>
-        collectField[t](
-          names,
+      case _: ("positional" *: nt, v *: vt) =>
+        collectField[nt, vt](
+          name,
           short,
           help,
-          Some(const1[args, String]),
-          positional,
+          constValue[v & Boolean],
           hidden,
+          group,
+          aliases,
           split,
           greedy
         )
-      case _: (Ann[flagged.positional, ?, ?] *: t) =>
-        collectField[t](names, short, help, group, true, hidden, split, greedy)
-      case _: (Ann[flagged.hidden, ?, ?] *: t) =>
-        collectField[t](names, short, help, group, positional, true, split, greedy)
-      case _: (Ann[flagged.split, args, dflt] *: t) =>
-        // the separator may be defaulted (`@split`): resolve it through the Defaults mirror
-        inline erasedValue[dflt] match
-          case _: (false *: EmptyTuple) =>
-            collectField[t](
-              names,
-              short,
-              help,
-              group,
-              positional,
-              hidden,
-              MaybeChar(const1[args, Char]),
-              greedy
-            )
-          case _ =>
-            val sep = summonInline[Defaults[flagged.split]].defaultArgument(0).asInstanceOf[Char]
-            collectField[t](
-              names,
-              short,
-              help,
-              group,
-              positional,
-              hidden,
-              MaybeChar(sep),
-              greedy
-            )
-      case _: (Ann[flagged.greedy, ?, ?] *: t) =>
-        collectField[t](names, short, help, group, positional, hidden, split, true)
-      case _: (_ *: t) =>
-        collectField[t](names, short, help, group, positional, hidden, split, greedy)
+      case _: ("hidden" *: nt, v *: vt) =>
+        collectField[nt, vt](
+          name,
+          short,
+          help,
+          positional,
+          constValue[v & Boolean],
+          group,
+          aliases,
+          split,
+          greedy
+        )
+      case _: ("group" *: nt, v *: vt) =>
+        collectField[nt, vt](
+          name,
+          short,
+          help,
+          positional,
+          hidden,
+          Some(constValue[v & String]),
+          aliases,
+          split,
+          greedy
+        )
+      case _: ("split" *: nt, v *: vt) =>
+        collectField[nt, vt](
+          name,
+          short,
+          help,
+          positional,
+          hidden,
+          group,
+          aliases,
+          MaybeChar(constValue[v & Char]),
+          greedy
+        )
+      case _: ("greedy" *: nt, v *: vt) =>
+        collectField[nt, vt](
+          name,
+          short,
+          help,
+          positional,
+          hidden,
+          group,
+          aliases,
+          split,
+          constValue[v & Boolean]
+        )
+      case _: (? *: nt, ? *: vt) =>
+        collectField[nt, vt](name, short, help, positional, hidden, group, aliases, split, greedy)
+
+  /** Materialise a tuple of string constants (an `aliases` argument). */
+  inline def constStrings[T <: Tuple]: IndexedSeq[String] =
+    inline erasedValue[T] match
+      case _: EmptyTuple => Vector.empty
+      case _             =>
+        val b = Vector.newBuilder[String]
+        constStringsInto[T](b)
+        b.result()
+
+  inline def constStringsInto[T <: Tuple](b: scala.collection.mutable.Growable[String]): Unit =
+    inline erasedValue[T] match
+      case _: EmptyTuple => ()
+      case _: (h *: t)   =>
+        b += constValue[h & String]
+        constStringsInto[t](b)
 
   // the walk halves the slot tuple (inline depth O(log n), matching Derive.walk) — annotation
   // slots hold only literal constant types, which survive the destructuring binders
