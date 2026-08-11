@@ -7,6 +7,7 @@ import flagged.internal.{frozen, frozenIArray}
 
 import scala.annotation.Annotation
 import scala.compiletime.*
+import scala.compiletime.ops.int.S
 import scala.deriving.Mirror
 import scala.annotation.publicInBinary
 
@@ -109,58 +110,42 @@ object AnnotMirror:
 
   /** The full constructor-argument tuple for one sparsely mirrored annotation: the explicit
     * constants are materialised from their singleton types into the positions named by `Is`, and
-    * every other position is looked up through the annotation's [[Defaults]] mirror (which throws
-    * on an index without a default — unreachable for mirrors synthesized by flagged, since an
-    * argument is only omitted where the parameter declares a default).
+    * every other position comes from the annotation's [[Defaults]] mirror.
     */
   private inline def argsOf[A: Defaults as d, Elems <: Tuple, Vs <: Tuple, Is <: Tuple]: Tuple =
-    mergeArgs(constValue[Tuple.Size[Elems]], indicesOf[Is], explicitsOf[Vs], d)
+    argsTuple(constValue[Tuple.Size[Elems]]): put =>
+      writeArgs[0, Tuple.Size[Elems], Vs, Is](put, d)
 
-  /** Merge explicit arguments (parallel to their `indices` positions) with defaults for the rest.
-    */
+  /** Freeze the argument array the inline walk writes. */
   @publicInBinary
-  private[AnnotMirror] def mergeArgs(
-      arity: Int,
-      indices: Array[Int],
-      explicits: Array[Any],
-      d: Defaults[?]
-  ): Tuple =
-    def merged(): Array[Any] =
+  private[AnnotMirror] def argsTuple(arity: Int)(write: (put: (Int, Any) => Unit) => Unit): Tuple =
+    def filled(): Array[Any] =
       val arr = new Array[Any](arity)
-      var i   = 0
-      var k   = 0
-      while i < arity do
-        if k < indices.length && indices(k) == i then
-          arr(i) = explicits(k)
-          k += 1
-        else arr(i) = d.defaultArgument(i)
-        i += 1
+      write((i, x) => arr(i) = x)
       arr
-    Tuple.fromIArray(frozenIArray(frozen(merged())))
+    Tuple.fromIArray(frozenIArray(frozen(filled())))
 
-  private inline def indicesOf[Is <: Tuple]: Array[Int] =
-    val arr = new Array[Int](constValue[Tuple.Size[Is]])
-    writeIndices[Is](arr, 0)
-    arr
-
-  private inline def writeIndices[Is <: Tuple](arr: Array[Int], k: Int): Unit =
-    inline erasedValue[Is] match
-      case _: EmptyTuple => ()
-      case _: (i *: it)  =>
-        arr(k) = constValue[i & Int]
-        writeIndices[it](arr, k + 1)
-
-  private inline def explicitsOf[Vs <: Tuple]: Array[Any] =
-    val arr = new Array[Any](constValue[Tuple.Size[Vs]])
-    writeExplicits[Vs](arr, 0)
-    arr
-
-  private inline def writeExplicits[Vs <: Tuple](arr: Array[Any], k: Int): Unit =
-    inline erasedValue[Vs] match
-      case _: EmptyTuple => ()
-      case _: (v *: vt)  =>
-        arr(k) = constOf[v]
-        writeExplicits[vt](arr, k + 1)
+  /** One interwoven walk over the positions `I until N`: a position at the head of the explicit
+    * `Is` column takes its constant from `Vs`, and any other position pulls its default — the
+    * [[Defaults]] mirror is consulted for exactly the omitted parameters.
+    */
+  private inline def writeArgs[I <: Int, N <: Int, Vs <: Tuple, Is <: Tuple](
+      inline put: (Int, Any) => Unit,
+      d: Defaults[?]
+  ): Unit =
+    inline if constValue[I] == constValue[N] then ()
+    else
+      inline erasedValue[(Vs, Is)] match
+        case _: (v *: vt, ih *: it) =>
+          inline if constValue[I] == constValue[ih & Int] then
+            put(constValue[I], constOf[v])
+            writeArgs[S[I], N, vt, it](put, d)
+          else
+            put(constValue[I], d.defaultArgument(constValue[I]))
+            writeArgs[S[I], N, Vs, Is](put, d)
+        case _ =>
+          put(constValue[I], d.defaultArgument(constValue[I]))
+          writeArgs[S[I], N, Vs, Is](put, d)
 
   /** One explicit argument materialised from its constant type: a plain literal via `constValue`, a
     * tuple of constants (e.g. an `aliases` argument) element-wise.
