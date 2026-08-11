@@ -16,10 +16,10 @@ trait MethodMirror[T] extends Defaults[Any]:
   /** Parameter types. */
   type MirroredElemTypes <: Tuple
 
-  /** [[Ann]]-encoded annotations on the method itself. */
+  /** [[ArgumentList]]-encoded annotations on the method itself. */
   type MirroredSelfAnnotations <: Tuple
 
-  /** One [[Ann]]-tuple slot per parameter. */
+  /** One [[ArgumentList]]-tuple slot per parameter. */
   type MirroredAnnotations <: Tuple
 
   /** The method's result type. */
@@ -58,7 +58,7 @@ sealed trait MethodsMirror[T]:
   /** The object's name. */
   type MirroredLabel <: String
 
-  /** [[Ann]]-encoded annotations on the object itself. */
+  /** [[ArgumentList]]-encoded annotations on the object itself. */
   type MirroredSelfAnnotations <: Tuple
 
   /** One [[MethodsMirror.Entry]] tag per member, in declaration order:

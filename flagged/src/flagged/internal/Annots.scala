@@ -5,7 +5,7 @@ import language.experimental.separationChecking
 
 import compiletime.{summonFrom, erasedValue, constValue}
 import compiletime.ops.int./
-import flagged.meta.{Ann, AnnotMirror}
+import flagged.meta.{ArgumentList, AnnotMirror}
 import scala.annotation.publicInBinary
 
 /** Allocation-free optional character for derivation metadata. */
@@ -88,8 +88,8 @@ private[flagged] final case class FieldAnnots @publicInBinary() (
 
   inline def targetAnnotsOfSome[Anns]: TargetAnnots =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                         => TargetAnnots.empty
-      case _: (Ann[flagged.cmd, ns, vs, ?] *: ?) =>
+      case _: EmptyTuple                                  => TargetAnnots.empty
+      case _: (ArgumentList[flagged.cmd, ns, vs, ?] *: ?) =>
         inline erasedValue[ns] match
           // bare @cmd: nothing to collect — share the empty record
           case _: EmptyTuple => TargetAnnots.empty
@@ -142,8 +142,8 @@ private[flagged] final case class FieldAnnots @publicInBinary() (
 
   inline def fieldAnnotsOfSome[Anns](inline positionalDefault: Boolean): FieldAnnots =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                         => noOptAnnots(positionalDefault)
-      case _: (Ann[flagged.opt, ns, vs, ?] *: ?) =>
+      case _: EmptyTuple                                  => noOptAnnots(positionalDefault)
+      case _: (ArgumentList[flagged.opt, ns, vs, ?] *: ?) =>
         inline erasedValue[ns] match
           // bare @opt — the common named-option marker: nothing to collect, so every such field
           // shares the empty record instead of calling the constructor

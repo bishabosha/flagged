@@ -10,7 +10,7 @@ import flagged.meta.Defaults
 // All customisation lives in two annotations with named arguments — `@cmd` for commands and
 // command groups (types, enum cases, methods, nested objects), `@opt` for fields and method
 // parameters — sparsely mirrored: only the arguments written at the use site are encoded
-// ([[flagged.meta.Ann]]), so an argument left at its default costs nothing at derivation.
+// ([[flagged.meta.ArgumentList]]), so an argument left at its default costs nothing at derivation.
 
 /** Mark and customise a command or command group.
   *

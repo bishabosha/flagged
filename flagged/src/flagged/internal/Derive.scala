@@ -10,7 +10,7 @@ import scala.compiletime.ops.int.{BitwiseOr, BitwiseAnd}
 import scala.compiletime.ops.any.{==, !=}
 import scala.deriving.Mirror
 import flagged.Parser
-import flagged.meta.{Ann, AnnotMirror, Defaults}
+import flagged.meta.{ArgumentList, AnnotMirror, Defaults}
 
 /** `Mirror`-based derivation. Structure and construction come from `Mirror`; field semantics are
   * the field parser's schema: `CommandGroup` instances become nested subcommands, `Shared`
@@ -107,8 +107,8 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     */
   inline def versionOf[A, Anns]: Option[() => String] =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                             => None
-      case _: (Ann[flagged.version, ns, vs, ?] *: _) =>
+      case _: EmptyTuple                                      => None
+      case _: (ArgumentList[flagged.version, ns, vs, ?] *: _) =>
         versionArgs[A, ns, vs, "", true]
       case _: (_ *: t) => versionOf[A, t]
 
@@ -490,12 +490,12 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     * flag shape cannot be.
     */
   type SlotRules[S <: Int, Anns, PD <: Boolean] <: String = Anns match
-    case EmptyTuple                         => NoOptErr[S, PD]
-    case Ann[flagged.version, ?, ?, ?] *: ? =>
+    case EmptyTuple                                  => NoOptErr[S, PD]
+    case ArgumentList[flagged.version, ?, ?, ?] *: ? =>
       "@version has no effect on a field (put it on the top-level type)"
-    case Ann[flagged.cmd, ?, ?, ?] *: ? =>
+    case ArgumentList[flagged.cmd, ?, ?, ?] *: ? =>
       "@cmd has no effect on a field (commands are types, enum cases, methods, and objects)"
-    case Ann[flagged.opt, ns, vs, ?] *: t =>
+    case ArgumentList[flagged.opt, ns, vs, ?] *: t =>
       OptRules[
         S,
         ns,
@@ -657,13 +657,13 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     * rejected wherever they appear.
     */
   type RestRules[S <: Int, Anns] <: String = Anns match
-    case EmptyTuple                         => ""
-    case Ann[flagged.version, ?, ?, ?] *: ? =>
+    case EmptyTuple                                  => ""
+    case ArgumentList[flagged.version, ?, ?, ?] *: ? =>
       "@version has no effect on a field (put it on the top-level type)"
-    case Ann[flagged.cmd, ?, ?, ?] *: ? =>
+    case ArgumentList[flagged.cmd, ?, ?, ?] *: ? =>
       "@cmd has no effect on a field (commands are types, enum cases, methods, and objects)"
-    case Ann[flagged.opt, ?, ?, ?] *: ? => "duplicate @opt annotation"
-    case ? *: t                         => RestRules[S, t]
+    case ArgumentList[flagged.opt, ?, ?, ?] *: ? => "duplicate @opt annotation"
+    case ? *: t                                  => RestRules[S, t]
 
   /** The [[FieldsRes.Marks]] contribution of a field of shape `S` with annotations `Anns`. */
   type MarksOf[S <: Int, Anns, PD <: Boolean] <: Int = S match
@@ -678,8 +678,8 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     * says so ([[ImplicitPosMark]]).
     */
   type PosGreedyMark[Anns, S <: Int, PD <: Boolean] <: Int = Anns match
-    case EmptyTuple                       => ImplicitPosMark[S, PD]
-    case Ann[flagged.opt, ns, vs, ?] *: _ =>
+    case EmptyTuple                                => ImplicitPosMark[S, PD]
+    case ArgumentList[flagged.opt, ns, vs, ?] *: _ =>
       PosGreedyArg[ns, vs, S]
     case _ *: t => PosGreedyMark[t, S, PD]
 
@@ -767,7 +767,7 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     * tuples.
     */
   type ShortsOf[Anns] <: Tuple = Anns match
-    case Ann[flagged.opt, ns, vs, ?] *: ? =>
+    case ArgumentList[flagged.opt, ns, vs, ?] *: ? =>
       ArgShorts[ns, vs]
     case ? *: t     => ShortsOf[t]
     case EmptyTuple => EmptyTuple
@@ -778,7 +778,7 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     case (? *: nt, ? *: vt)     => ArgShorts[nt, vt]
 
   type LongsOf[Anns] <: Tuple = Anns match
-    case Ann[flagged.opt, ns, vs, ?] *: ? =>
+    case ArgumentList[flagged.opt, ns, vs, ?] *: ? =>
       ArgLongs[ns, vs]
     case ? *: t     => LongsOf[t]
     case EmptyTuple => EmptyTuple
@@ -815,8 +815,8 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
 
   /** Whether the slot's `@opt` sets `positional = true` — a compile-time constant. */
   type IsPositionalSlot[Anns] <: Boolean = Anns match
-    case EmptyTuple                       => false
-    case Ann[flagged.opt, ns, vs, ?] *: ? =>
+    case EmptyTuple                                => false
+    case ArgumentList[flagged.opt, ns, vs, ?] *: ? =>
       ArgsPositional[ns, vs]
     case ? *: t => IsPositionalSlot[t]
 
@@ -872,8 +872,8 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
 
   /** Whether the slot's `@cmd` sets `default = true` — a compile-time constant. */
   type IsDefaultCmd[Anns] <: Boolean = Anns match
-    case EmptyTuple                       => false
-    case Ann[flagged.cmd, ns, vs, ?] *: ? =>
+    case EmptyTuple                                => false
+    case ArgumentList[flagged.cmd, ns, vs, ?] *: ? =>
       ArgsDefault[ns, vs]
     case ? *: t => IsDefaultCmd[t]
 
@@ -884,7 +884,7 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
 
   /** The constant command names (`name` plus `aliases`) a `@cmd` slot claims. */
   type CmdNamesOf[Anns] <: Tuple = Anns match
-    case Ann[flagged.cmd, ns, vs, ?] *: ? =>
+    case ArgumentList[flagged.cmd, ns, vs, ?] *: ? =>
       ArgLongs[ns, vs]
     case ? *: t     => CmdNamesOf[t]
     case EmptyTuple => EmptyTuple
@@ -904,9 +904,9 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     * inline expansion per slot element.
     */
   type HasAnnT[A <: scala.annotation.Annotation, Anns] <: Boolean = Anns match
-    case EmptyTuple           => false
-    case Ann[A, ?, ?, ?] *: _ => true
-    case _ *: t               => HasAnnT[A, t]
+    case EmptyTuple                    => false
+    case ArgumentList[A, ?, ?, ?] *: _ => true
+    case _ *: t                        => HasAnnT[A, t]
 
   // ---- sums -----------------------------------------------------------------
 

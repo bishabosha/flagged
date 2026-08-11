@@ -19,7 +19,7 @@ import scala.annotation.publicInBinary
   * mirror (with `scala.deriving.Mirror.Of` for the parameter order and count), and
   * compile-time-only consumers traverse the sparse columns and assume defaults for the rest. E.g.
   * `@tagged(level = 3)` with `tagged(label: String = "none", level: Int)` mirrors as
-  * `Ann[tagged, "level" *: EmptyTuple, 3 *: EmptyTuple, 1 *: EmptyTuple]`.
+  * `ArgumentList[tagged, "level" *: EmptyTuple, 3 *: EmptyTuple, 1 *: EmptyTuple]`.
   *
   * Plain parameters rather than a named tuple or `Mirror`-style type members: consumers are
   * match-type and inline-match walks, and both alternatives measurably tax them — a named tuple
@@ -29,7 +29,7 @@ import scala.annotation.publicInBinary
   *
   * Purely a phantom type — never instantiated.
   */
-sealed trait Ann[A <: Annotation, Names <: Tuple, Values <: Tuple, Indices <: Tuple]
+sealed trait ArgumentList[A <: Annotation, Names <: Tuple, Values <: Tuple, Indices <: Tuple]
 
 /** `Mirror`-style witness describing how `T` is annotated. Like `Mirror`, all information lives in
   * type members, so a compiler-intrinsic version of this would synthesize only types. The kind —
@@ -42,11 +42,11 @@ sealed trait Ann[A <: Annotation, Names <: Tuple, Values <: Tuple, Indices <: Tu
   * argument has a singleton type and the annotation can be rebuilt through its `Mirror.ProductOf`.
   */
 sealed trait AnnotMirror[T]:
-  /** Tuple of [[Ann]] types: the annotations on `T` itself. */
+  /** Tuple of [[ArgumentList]] types: the annotations on `T` itself. */
   type MirroredSelfAnnotations <: Tuple
 
   /** Tuple with one element per member — constructor fields for products, cases for sums; each
-    * element is a tuple of [[Ann]] types.
+    * element is a tuple of [[ArgumentList]] types.
     */
   type MirroredAnnotations <: Tuple
 
@@ -67,7 +67,6 @@ object AnnotMirror:
       type MirroredSelfAnnotations = EmptyTuple
       type MirroredAnnotations     = EmptyTuple
   }
-
 
   /** Synthesize the annotation mirror for a class (macro-backed; the intrinsic candidate). Given as
     * `transparent inline` so the refined type members reach the summoning site — like `Mirror`, the
@@ -99,8 +98,8 @@ object AnnotMirror:
       inline finish: Tuple => B
   ): Option[B] =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                 => None
-      case _: (Ann[A, ns, vs, idx] *: _) =>
+      case _: EmptyTuple                          => None
+      case _: (ArgumentList[A, ns, vs, idx] *: _) =>
         Some(finish(argsOf[A, m.MirroredElemTypes, vs, idx]))
       case _: (_ *: t) => findImpl[A, t, B](finish)
 
@@ -116,8 +115,8 @@ object AnnotMirror:
       inline finish: Tuple => B
   ): List[B] =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                 => Nil
-      case _: (Ann[A, ns, vs, idx] *: t) =>
+      case _: EmptyTuple                          => Nil
+      case _: (ArgumentList[A, ns, vs, idx] *: t) =>
         finish(argsOf[A, m.MirroredElemTypes, vs, idx]) :: findAllImpl[A, t, B](finish)
       case _: (_ *: t) => findAllImpl[A, t, B](finish)
 

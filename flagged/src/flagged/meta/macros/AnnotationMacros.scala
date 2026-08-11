@@ -2,7 +2,7 @@ package flagged.meta.macros
 
 import scala.quoted.*
 import flagged.meta.AnnotMirror
-import flagged.meta.Ann
+import flagged.meta.ArgumentList
 
 /** The two residual macros backing [[Defaults]] and [[AnnotMirror]]. Everything else in flagged's
   * derivation is `Mirror` + `inline`.
@@ -94,7 +94,9 @@ object AnnotationMacros:
       }
       Option.when(ok)(provided.result())
 
-    /** `Ann[a, names, values, indices]` for one annotation occurrence, if it is mirrorable. */
+    /** `ArgumentList[a, names, values, indices]` for one annotation occurrence, if it is
+      * mirrorable.
+      */
     private def annType(a: Term): Option[TypeRepr] =
       val tpe = a.tpe
       val sym = tpe.typeSymbol
@@ -103,7 +105,7 @@ object AnnotationMacros:
         case Apply(Select(New(_), _), args) if ok =>
           resolveArgs(sym, args).map { provided =>
             TypeRepr
-              .of[Ann]
+              .of[ArgumentList]
               .appliedTo(
                 List(
                   tpe,

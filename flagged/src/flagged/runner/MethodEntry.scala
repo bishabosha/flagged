@@ -1,6 +1,6 @@
 package flagged.runner
 
-import flagged.meta.{Ann, MethodMirror, MethodsMirror}
+import flagged.meta.{ArgumentList, MethodMirror, MethodsMirror}
 import flagged.meta.MethodsMirror.Entry
 
 /** `T`'s `@cmd` command tower in one bundle: the object's [[MethodsMirror]], the union of the
@@ -54,16 +54,16 @@ object MethodEntry:
   type MirrorOf[R] = R match
     case WithMirror[m] => m
 
-  /** The [[Ann]]-encoded annotations on the object a [[MethodEntry]] describes. */
+  /** The [[ArgumentList]]-encoded annotations on the object a [[MethodEntry]] describes. */
   type SelfAnnotsOf[R] = MethodsMirror.AnnotsOf[MirrorOf[R]]
 
-  /** Is `flagged.cmd` itself among the [[Ann]]-encoded annotations? Other
+  /** Is `flagged.cmd` itself among the [[ArgumentList]]-encoded annotations? Other
     * [[flagged.meta.Reflectable]] markers do not count.
     */
   type HasCmd[Anns <: Tuple] <: Boolean = Anns match
-    case EmptyTuple                     => false
-    case Ann[flagged.cmd, ?, ?, ?] *: ? => true
-    case ? *: t                         => HasCmd[t]
+    case EmptyTuple                              => false
+    case ArgumentList[flagged.cmd, ?, ?, ?] *: ? => true
+    case ? *: t                                  => HasCmd[t]
 
   /** `R` when the annotations carry `@cmd`, `Nothing` otherwise. */
   type IfCmd[Anns <: Tuple, R] = HasCmd[Anns] match
