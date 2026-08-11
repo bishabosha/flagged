@@ -29,14 +29,6 @@ object AnnotationMacros:
     def tupleType(ts: List[TypeRepr]): TypeRepr =
       ts.foldRight(TypeRepr.of[EmptyTuple])((h, acc) => TypeRepr.of[*:].appliedTo(List(h, acc)))
 
-    private lazy val namedTupleTycon: TypeRepr =
-      TypeRepr.of[NamedTuple.NamedTuple[EmptyTuple, EmptyTuple]] match
-        case AppliedType(tycon, _) => tycon
-        case other                 => report.errorAndAbort(s"not a named tuple: ${other.show}")
-
-    private def namedTupleType(names: List[TypeRepr], values: List[TypeRepr]): TypeRepr =
-      namedTupleTycon.appliedTo(List(tupleType(names), tupleType(values)))
-
     private def constArg(t: Term): Option[TypeRepr] = t match
       case NamedArg(_, v)  => constArg(v)
       case Literal(c)      => Some(ConstantType(c))
@@ -75,12 +67,12 @@ object AnnotationMacros:
       * parameter name, constant type, and parameter index. An omitted argument (or a typer-inserted
       * default getter) contributes nothing, provided the parameter declares a default —
       * materialisation looks it up via the annotation's `Defaults` mirror. Returns the provided
-      * triples and the constructor's arity, or `None` when the occurrence is not mirrorable.
+      * triples, or `None` when the occurrence is not mirrorable.
       */
     private def resolveArgs(
         sym: Symbol,
         args: List[Term]
-    ): Option[(List[(String, TypeRepr, Int)], Int)] =
+    ): Option[List[(String, TypeRepr, Int)]] =
       val params = sym.primaryConstructor.paramSymss.flatten.filter(_.isTerm)
       val named  = args.collect { case NamedArg(n, v) => n -> v }.toMap
       // note: isInstanceOf[NamedArg] would erase to the reflect type's bound (Term)
@@ -100,26 +92,23 @@ object AnnotationMacros:
               case None      => ok = false
           case None => ok &= p.flags.is(Flags.HasDefault)
       }
-      Option.when(ok)((provided.result(), params.length))
+      Option.when(ok)(provided.result())
 
-    /** `Ann[a, args, arity, indices]` for one annotation occurrence, if it is mirrorable. */
+    /** `Ann[a, names, values, indices]` for one annotation occurrence, if it is mirrorable. */
     private def annType(a: Term): Option[TypeRepr] =
       val tpe = a.tpe
       val sym = tpe.typeSymbol
       val ok  = tpe <:< TypeRepr.of[scala.annotation.StaticAnnotation] && sym.flags.is(Flags.Case)
       a match
         case Apply(Select(New(_), _), args) if ok =>
-          resolveArgs(sym, args).map { (provided, arity) =>
+          resolveArgs(sym, args).map { provided =>
             TypeRepr
               .of[Ann]
               .appliedTo(
                 List(
                   tpe,
-                  namedTupleType(
-                    provided.map((n, _, _) => ConstantType(StringConstant(n))),
-                    provided.map(_(1))
-                  ),
-                  ConstantType(IntConstant(arity)),
+                  tupleType(provided.map((n, _, _) => ConstantType(StringConstant(n)))),
+                  tupleType(provided.map(_(1))),
                   tupleType(provided.map((_, _, i) => ConstantType(IntConstant(i))))
                 )
               )

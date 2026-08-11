@@ -107,9 +107,9 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     */
   inline def versionOf[A, Anns]: Option[() => String] =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                              => None
-      case _: (Ann[flagged.version, args, ?, ?] *: _) =>
-        versionArgs[A, NamedTuple.Names[args], NamedTuple.DropNames[args], "", true]
+      case _: EmptyTuple                             => None
+      case _: (Ann[flagged.version, ns, vs, ?] *: _) =>
+        versionArgs[A, ns, vs, "", true]
       case _: (_ *: t) => versionOf[A, t]
 
   /** Fold the sparse arguments into the (`value`, `dynamic`) constants, then decide. */
@@ -495,11 +495,11 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
       "@version has no effect on a field (put it on the top-level type)"
     case Ann[flagged.cmd, ?, ?, ?] *: ? =>
       "@cmd has no effect on a field (commands are types, enum cases, methods, and objects)"
-    case Ann[flagged.opt, args, ?, ?] *: t =>
+    case Ann[flagged.opt, ns, vs, ?] *: t =>
       OptRules[
         S,
-        NamedTuple.Names[args],
-        NamedTuple.DropNames[args],
+        ns,
+        vs,
         t,
         false,
         false,
@@ -678,9 +678,9 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     * says so ([[ImplicitPosMark]]).
     */
   type PosGreedyMark[Anns, S <: Int, PD <: Boolean] <: Int = Anns match
-    case EmptyTuple                        => ImplicitPosMark[S, PD]
-    case Ann[flagged.opt, args, ?, ?] *: _ =>
-      PosGreedyArg[NamedTuple.Names[args], NamedTuple.DropNames[args], S]
+    case EmptyTuple                       => ImplicitPosMark[S, PD]
+    case Ann[flagged.opt, ns, vs, ?] *: _ =>
+      PosGreedyArg[ns, vs, S]
     case _ *: t => PosGreedyMark[t, S, PD]
 
   /** The marks of an implicitly positional field: value shapes claim [[PosBit]] (a repeated one is
@@ -767,8 +767,8 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     * tuples.
     */
   type ShortsOf[Anns] <: Tuple = Anns match
-    case Ann[flagged.opt, args, ?, ?] *: ? =>
-      ArgShorts[NamedTuple.Names[args], NamedTuple.DropNames[args]]
+    case Ann[flagged.opt, ns, vs, ?] *: ? =>
+      ArgShorts[ns, vs]
     case ? *: t     => ShortsOf[t]
     case EmptyTuple => EmptyTuple
 
@@ -778,8 +778,8 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
     case (? *: nt, ? *: vt)     => ArgShorts[nt, vt]
 
   type LongsOf[Anns] <: Tuple = Anns match
-    case Ann[flagged.opt, args, ?, ?] *: ? =>
-      ArgLongs[NamedTuple.Names[args], NamedTuple.DropNames[args]]
+    case Ann[flagged.opt, ns, vs, ?] *: ? =>
+      ArgLongs[ns, vs]
     case ? *: t     => LongsOf[t]
     case EmptyTuple => EmptyTuple
 
@@ -815,9 +815,9 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
 
   /** Whether the slot's `@opt` sets `positional = true` — a compile-time constant. */
   type IsPositionalSlot[Anns] <: Boolean = Anns match
-    case EmptyTuple                        => false
-    case Ann[flagged.opt, args, ?, ?] *: ? =>
-      ArgsPositional[NamedTuple.Names[args], NamedTuple.DropNames[args]]
+    case EmptyTuple                       => false
+    case Ann[flagged.opt, ns, vs, ?] *: ? =>
+      ArgsPositional[ns, vs]
     case ? *: t => IsPositionalSlot[t]
 
   type ArgsPositional[Ns <: Tuple, Vs <: Tuple] <: Boolean = (Ns, Vs) match
@@ -872,9 +872,9 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
 
   /** Whether the slot's `@cmd` sets `default = true` — a compile-time constant. */
   type IsDefaultCmd[Anns] <: Boolean = Anns match
-    case EmptyTuple                        => false
-    case Ann[flagged.cmd, args, ?, ?] *: ? =>
-      ArgsDefault[NamedTuple.Names[args], NamedTuple.DropNames[args]]
+    case EmptyTuple                       => false
+    case Ann[flagged.cmd, ns, vs, ?] *: ? =>
+      ArgsDefault[ns, vs]
     case ? *: t => IsDefaultCmd[t]
 
   type ArgsDefault[Ns <: Tuple, Vs <: Tuple] <: Boolean = (Ns, Vs) match
@@ -884,8 +884,8 @@ import flagged.meta.{Ann, AnnotMirror, Defaults}
 
   /** The constant command names (`name` plus `aliases`) a `@cmd` slot claims. */
   type CmdNamesOf[Anns] <: Tuple = Anns match
-    case Ann[flagged.cmd, args, ?, ?] *: ? =>
-      ArgLongs[NamedTuple.Names[args], NamedTuple.DropNames[args]]
+    case Ann[flagged.cmd, ns, vs, ?] *: ? =>
+      ArgLongs[ns, vs]
     case ? *: t     => CmdNamesOf[t]
     case EmptyTuple => EmptyTuple
 

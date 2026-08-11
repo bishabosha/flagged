@@ -31,8 +31,8 @@ class MetaSuite extends munit.FunSuite:
 
   test("find extracts a typed annotation from a sparse mirrored slot at compile time") {
     // hand-written mirror type for `@opt(help = "text", short = 'v')`: only the provided
-    // arguments are encoded — help is opt's parameter 1, short parameter 2, of 9
-    type Slot = Ann[opt, (help: "text", short: 'v'), 9, (1, 2)] *: EmptyTuple
+    // argument columns are encoded — help is opt's parameter 1, short parameter 2
+    type Slot = Ann[opt, ("help", "short"), ("text", 'v'), (1, 2)] *: EmptyTuple
     val o = AnnotMirror.find[opt, Slot]
     assertEquals(o.map(_.short), Some('v'))
     assertEquals(o.map(_.help), Some("text"))
@@ -56,7 +56,7 @@ class MetaSuite extends munit.FunSuite:
 
   test("omitted positions are looked up through the Defaults mirror") {
     // hand-written sparse mirror type: label omitted, level provided at parameter index 1
-    type Slot = Ann[tagged, (level: 7), 2, 1 *: EmptyTuple] *: EmptyTuple
+    type Slot = Ann[tagged, "level" *: EmptyTuple, 7 *: EmptyTuple, 1 *: EmptyTuple] *: EmptyTuple
     assertEquals(AnnotMirror.findExact[tagged, Slot], Some(tagged("none", 7)))
     assertEquals(AnnotMirror.find[tagged, Slot].map(fromMirror[tagged]), Some(tagged("none", 7)))
   }

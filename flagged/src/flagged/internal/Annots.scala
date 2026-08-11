@@ -81,21 +81,20 @@ private[flagged] final case class FieldAnnots @publicInBinary() (
       case _: EmptyTuple => TargetAnnots.empty
       case _             => targetAnnotsOfSome[Anns]
 
-  // Extraction reads the slot's `@cmd` / `@opt` occurrence once: the sparse argument list types
-  // exactly the arguments written at the use site, so the fold walks the named tuple's (names,
-  // values) columns in parallel, and an omitted argument costs nothing — absence is the record's
-  // default. Every matched value materialises as a single constValue — no Mirror/Defaults
-  // machinery per query.
+  // Extraction reads the slot's `@cmd` / `@opt` occurrence once: the sparse argument columns type
+  // exactly the arguments written at the use site, so the fold walks the (names, values) tuples
+  // in parallel, and an omitted argument costs nothing — absence is the record's default. Every
+  // matched value materialises as a single constValue — no Mirror/Defaults machinery per query.
 
   inline def targetAnnotsOfSome[Anns]: TargetAnnots =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                          => TargetAnnots.empty
-      case _: (Ann[flagged.cmd, args, ?, ?] *: ?) =>
-        inline erasedValue[NamedTuple.Names[args]] match
+      case _: EmptyTuple                         => TargetAnnots.empty
+      case _: (Ann[flagged.cmd, ns, vs, ?] *: ?) =>
+        inline erasedValue[ns] match
           // bare @cmd: nothing to collect — share the empty record
           case _: EmptyTuple => TargetAnnots.empty
           case _             =>
-            collectTarget[NamedTuple.Names[args], NamedTuple.DropNames[args]](
+            collectTarget[ns, vs](
               None,
               None,
               false,
@@ -143,14 +142,14 @@ private[flagged] final case class FieldAnnots @publicInBinary() (
 
   inline def fieldAnnotsOfSome[Anns](inline positionalDefault: Boolean): FieldAnnots =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                          => noOptAnnots(positionalDefault)
-      case _: (Ann[flagged.opt, args, ?, ?] *: ?) =>
-        inline erasedValue[NamedTuple.Names[args]] match
+      case _: EmptyTuple                         => noOptAnnots(positionalDefault)
+      case _: (Ann[flagged.opt, ns, vs, ?] *: ?) =>
+        inline erasedValue[ns] match
           // bare @opt — the common named-option marker: nothing to collect, so every such field
           // shares the empty record instead of calling the constructor
           case _: EmptyTuple => FieldAnnots.empty
           case _             =>
-            collectField[NamedTuple.Names[args], NamedTuple.DropNames[args]](
+            collectField[ns, vs](
               None,
               MaybeChar.empty,
               None,

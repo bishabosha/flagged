@@ -9,22 +9,26 @@ import scala.annotation.Annotation
 import scala.compiletime.*
 import scala.deriving.Mirror
 import scala.annotation.publicInBinary
-import scala.NamedTuple.AnyNamedTuple
 
 /** Type-level description of a single annotation occurrence, sparsely encoded: the monomorphic
-  * annotation type `A`; `Args`, a named tuple typing only the *explicitly provided* constructor
-  * arguments (parameter name -> the argument's constant type, in declaration order); `Arity`, the
-  * total number of constructor parameters; and `Indices`, a tuple of the parameter indices of the
-  * provided arguments, parallel to `Args`. Omitted parameters (including typer-inserted defaults)
-  * are not encoded at all: a consumer that needs a runtime value looks them up through the
-  * annotation's [[Defaults]] mirror (with `scala.deriving.Mirror.Of` for the parameter order) at
-  * materialisation, and compile-time-only consumers traverse the sparse arguments and assume
-  * defaults for the rest. E.g. `@tagged(level = 3)` with `tagged(label: String = "none", level:
-  * Int)` mirrors as `Ann[tagged, (level: 3), 2, 1 *: EmptyTuple]`.
+  * annotation type `A`, and three parallel tuples typing only the *explicitly provided* constructor
+  * arguments, in declaration order: their parameter `Names`, their constant `Values`, and their
+  * parameter `Indices`. Omitted parameters (including typer-inserted defaults) are not encoded at
+  * all: a consumer that needs a runtime value looks them up through the annotation's [[Defaults]]
+  * mirror (with `scala.deriving.Mirror.Of` for the parameter order and count), and
+  * compile-time-only consumers traverse the sparse columns and assume defaults for the rest. E.g.
+  * `@tagged(level = 3)` with `tagged(label: String = "none", level: Int)` mirrors as
+  * `Ann[tagged, "level" *: EmptyTuple, 3 *: EmptyTuple, 1 *: EmptyTuple]`.
+  *
+  * Plain parameters rather than a named tuple or `Mirror`-style type members: consumers are
+  * match-type and inline-match walks, and both alternatives measurably tax them — a named tuple
+  * adds a `Names`/`DropNames` reduction per query, and type members can neither be pattern-matched
+  * for dispatch (no member disjointness) nor extracted without an alias-pattern reduction per
+  * column.
   *
   * Purely a phantom type — never instantiated.
   */
-sealed trait Ann[A <: Annotation, Args <: AnyNamedTuple, Arity <: Int, Indices <: Tuple]
+sealed trait Ann[A <: Annotation, Names <: Tuple, Values <: Tuple, Indices <: Tuple]
 
 /** `Mirror`-style witness describing how `T` is annotated. Like `Mirror`, all information lives in
   * type members, so a compiler-intrinsic version of this would synthesize only types. The kind —
@@ -81,9 +85,9 @@ object AnnotMirror:
       inline finish: Tuple => B
   ): Option[B] =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                      => None
-      case _: (Ann[A, args, arity, idx] *: _) =>
-        Some(finish(argsOf[A, args, arity, idx]))
+      case _: EmptyTuple                 => None
+      case _: (Ann[A, ns, vs, idx] *: _) =>
+        Some(finish(argsOf[A, m.MirroredElemTypes, vs, idx]))
       case _: (_ *: t) => findImpl[A, t, B](finish)
 
   /** All slots in `Anns` that match type `A`, in declaration order, materialised as named tuples
@@ -98,9 +102,9 @@ object AnnotMirror:
       inline finish: Tuple => B
   ): List[B] =
     inline erasedValue[Anns] match
-      case _: EmptyTuple                      => Nil
-      case _: (Ann[A, args, arity, idx] *: t) =>
-        finish(argsOf[A, args, arity, idx]) :: findAllImpl[A, t, B](finish)
+      case _: EmptyTuple                 => Nil
+      case _: (Ann[A, ns, vs, idx] *: t) =>
+        finish(argsOf[A, m.MirroredElemTypes, vs, idx]) :: findAllImpl[A, t, B](finish)
       case _: (_ *: t) => findAllImpl[A, t, B](finish)
 
   /** The full constructor-argument tuple for one sparsely mirrored annotation: the explicit
@@ -109,9 +113,8 @@ object AnnotMirror:
     * on an index without a default — unreachable for mirrors synthesized by flagged, since an
     * argument is only omitted where the parameter declares a default).
     */
-  private inline def argsOf[A: Defaults as d, Args <: AnyNamedTuple, Arity <: Int, Is <: Tuple]
-      : Tuple =
-    mergeArgs(constValue[Arity], indicesOf[Is], explicitsOf[NamedTuple.DropNames[Args]], d)
+  private inline def argsOf[A: Defaults as d, Elems <: Tuple, Vs <: Tuple, Is <: Tuple]: Tuple =
+    mergeArgs(constValue[Tuple.Size[Elems]], indicesOf[Is], explicitsOf[Vs], d)
 
   /** Merge explicit arguments (parallel to their `indices` positions) with defaults for the rest.
     */
