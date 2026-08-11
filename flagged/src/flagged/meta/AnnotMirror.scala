@@ -54,7 +54,20 @@ object AnnotMirror:
 
   trait Product[T] extends AnnotMirror[T]
 
+  object Product {
+    object Empty extends Product[Any]:
+      type MirroredSelfAnnotations = EmptyTuple
+      type MirroredAnnotations     = EmptyTuple
+  }
+
   trait Sum[T] extends AnnotMirror[T]
+
+  object Sum {
+    object Empty extends Sum[Any]:
+      type MirroredSelfAnnotations = EmptyTuple
+      type MirroredAnnotations     = EmptyTuple
+  }
+
 
   /** Synthesize the annotation mirror for a class (macro-backed; the intrinsic candidate). Given as
     * `transparent inline` so the refined type members reach the summoning site — like `Mirror`, the
@@ -113,15 +126,15 @@ object AnnotMirror:
     * every other position comes from the annotation's [[Defaults]] mirror.
     */
   private inline def argsOf[A: Defaults as d, Elems <: Tuple, Vs <: Tuple, Is <: Tuple]: Tuple =
-    argsTuple(constValue[Tuple.Size[Elems]]): put =>
-      writeArgs[0, Tuple.Size[Elems], Vs, Is](put, d)
+    argsTuple(constValue[Tuple.Size[Elems]]): arr =>
+      writeArgs[0, Tuple.Size[Elems], Vs, Is](arr, d)
 
   /** Freeze the argument array the inline walk writes. */
   @publicInBinary
-  private[AnnotMirror] def argsTuple(arity: Int)(write: (put: (Int, Any) => Unit) => Unit): Tuple =
-    def filled(): Array[Any] =
-      val arr = new Array[Any](arity)
-      write((i, x) => arr(i) = x)
+  private[AnnotMirror] def argsTuple(arity: Int)(write: Array[AnyRef]^ => Unit): Tuple =
+    def filled(): Array[AnyRef]^ =
+      val arr = new Array[AnyRef](arity)
+      write(arr)
       arr
     Tuple.fromIArray(frozenIArray(frozen(filled())))
 
@@ -130,7 +143,7 @@ object AnnotMirror:
     * [[Defaults]] mirror is consulted for exactly the omitted parameters.
     */
   private inline def writeArgs[I <: Int, N <: Int, Vs <: Tuple, Is <: Tuple](
-      inline put: (Int, Any) => Unit,
+      arr: Array[AnyRef]^,
       d: Defaults[?]
   ): Unit =
     inline if constValue[I] == constValue[N] then ()
@@ -138,14 +151,17 @@ object AnnotMirror:
       inline erasedValue[(Vs, Is)] match
         case _: (v *: vt, ih *: it) =>
           inline if constValue[I] == constValue[ih & Int] then
-            put(constValue[I], constOf[v])
-            writeArgs[S[I], N, vt, it](put, d)
+            arr(constValue[I]) = constOf[v].asInstanceOf[AnyRef]
+            writeArgs[S[I], N, vt, it](arr, d)
           else
-            put(constValue[I], d.defaultArgument(constValue[I]))
-            writeArgs[S[I], N, Vs, Is](put, d)
+            writeDefaultAt[I](arr, d)
+            writeArgs[S[I], N, Vs, Is](arr, d)
         case _ =>
-          put(constValue[I], d.defaultArgument(constValue[I]))
-          writeArgs[S[I], N, Vs, Is](put, d)
+          writeDefaultAt[I](arr, d)
+          writeArgs[S[I], N, Vs, Is](arr, d)
+
+  private inline def writeDefaultAt[I <: Int](arr: Array[AnyRef]^, d: Defaults[?]): Unit =
+    arr(constValue[I]) = d.defaultArgument(constValue[I]).asInstanceOf[AnyRef]
 
   /** One explicit argument materialised from its constant type: a plain literal via `constValue`, a
     * tuple of constants (e.g. an `aliases` argument) element-wise.

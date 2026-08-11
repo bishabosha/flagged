@@ -119,34 +119,43 @@ object AnnotationMacros:
 
     private def slotOf(annotTerms: List[Term]): TypeRepr = tupleType(annotTerms.flatMap(annType))
 
-    private def alias(t: TypeRepr): TypeBounds = TypeBounds(t, t)
-
-    /** Refine an `AnnotMirror` kind with the self and per-member annotation slots. */
-    private def refine(base: TypeRepr, self: TypeRepr, members: List[TypeRepr]): TypeRepr =
-      Refinement(
-        Refinement(base, "MirroredSelfAnnotations", alias(self)),
-        "MirroredAnnotations",
-        alias(tupleType(members))
-      )
+    // the refinements are built as quoted types, like [[MethodMacros]]: the members must be true
+    // aliases — match-type capture through an alias pattern does not reduce over `>: t <: t`
+    // bounds, and the Refinement API can only express bounds (a bare TypeRepr makes a val member
+    // instead)
 
     def product[A: Type]: Expr[AnnotMirror.Product[A]] =
       val sym = TypeRepr.of[A].typeSymbol
       if !(sym.isClassDef && sym.flags.is(Flags.Case) && !sym.flags.is(Flags.Module)) then
         report.errorAndAbort(s"No product AnnotMirror for ${TypeRepr.of[A].show}: not a case class")
-      val params   = sym.primaryConstructor.paramSymss.flatten.filter(_.isTerm)
-      val perField = sym.caseFields.zipWithIndex.map { (f, i) =>
-        val merged =
-          params.lift(i).map(_.annotations.reverse).getOrElse(Nil) ++ f.annotations.reverse
-        slotOf(merged)
+      val params = sym.primaryConstructor.paramSymss.flatten.filter(_.isTerm)
+      // case fields are the primary constructor's parameter accessors — the same declarations —
+      // so the constructor's parameter symbols are the single source of a field's annotations
+      val perField = sym.caseFields.zipWithIndex.map { (_, i) =>
+        slotOf(params.lift(i).map(_.annotations.reverse).getOrElse(Nil))
       }
-      refine(TypeRepr.of[AnnotMirror.Product[A]], slot(sym), perField).asType match
-        case '[t] =>
-          '{ (new AnnotMirror.Product[A] {}).asInstanceOf[t & AnnotMirror.Product[A]] }
+      (slot(sym).asType, tupleType(perField).asType).runtimeChecked match
+        case ('[type msa <: Tuple; msa], '[type man <: Tuple; man]) =>
+          '{
+            AnnotMirror.Product.Empty.asInstanceOf[
+              AnnotMirror.Product[A] {
+                type MirroredSelfAnnotations = msa
+                type MirroredAnnotations     = man
+              }
+            ]
+          }
 
     def sum[A: Type]: Expr[AnnotMirror.Sum[A]] =
       val sym = TypeRepr.of[A].typeSymbol
       if sym.children.isEmpty then
         report.errorAndAbort(s"No sum AnnotMirror for ${TypeRepr.of[A].show}: no cases found")
-      refine(TypeRepr.of[AnnotMirror.Sum[A]], slot(sym), sym.children.map(slot)).asType match
-        case '[t] =>
-          '{ (new AnnotMirror.Sum[A] {}).asInstanceOf[t & AnnotMirror.Sum[A]] }
+      (slot(sym).asType, tupleType(sym.children.map(slot)).asType).runtimeChecked match
+        case ('[type msa <: Tuple; msa], '[type man <: Tuple; man]) =>
+          '{
+            AnnotMirror.Sum.Empty.asInstanceOf[
+              AnnotMirror.Sum[A] {
+                type MirroredSelfAnnotations = msa
+                type MirroredAnnotations     = man
+              }
+            ]
+          }
