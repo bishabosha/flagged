@@ -31,6 +31,12 @@ private[flagged] transparent inline def frozen(
 private[flagged] inline def frozenIArray[T](x: Array[T]^{}): IArray[T] =
   x.asInstanceOf[IArray[T]]
 
+/** An [[IndexedSeq]] from a materialised tuple's elements — the runtime tail of the
+  * `compiletime.constValueTuple`-based walks over label and alias columns.
+  */
+@publicInBinary private[flagged] def asIndexedSeq[T](t: Tuple): IndexedSeq[T] =
+  IndexedSeq.from(t.productIterator.asInstanceOf[Iterator[T]])
+
 /** Exposes the engine's value array as the `Product` a `Mirror#fromProduct` consumes — the
   * generated constructor call reads `productElement(n)` only, so no tuple is built or copied. The
   * arity is explicit: under splices the array is the whole storage (the spliced children's slots

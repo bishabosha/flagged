@@ -175,26 +175,7 @@ import flagged.meta.{ArgumentList, AnnotMirror, Defaults}
   inline def labelsOf[L <: Tuple]: IndexedSeq[String] =
     inline erasedValue[L] match
       case _: EmptyTuple    => Vector.empty
-      case _: NonEmptyTuple =>
-        val b = Vector.newBuilder[String]
-        labelsInto[L](b)
-        b.result()
-
-  inline def labelsInto[L <: Tuple](b: scala.collection.mutable.Growable[String]): Unit =
-    inline erasedValue[L] match
-      case _: EmptyTuple              => ()
-      case _: (a *: EmptyTuple)       => b += constValue[a].asInstanceOf[String]
-      case _: (a *: b0 *: EmptyTuple) =>
-        b += constValue[a].asInstanceOf[String] += constValue[b0].asInstanceOf[String]
-      case _: (a *: b0 *: c *: EmptyTuple) =>
-        b += constValue[a].asInstanceOf[String] += constValue[b0].asInstanceOf[String]
-          += constValue[c].asInstanceOf[String]
-      case _: (a *: b0 *: c *: d *: EmptyTuple) =>
-        b += constValue[a].asInstanceOf[String] += constValue[b0].asInstanceOf[String]
-          += constValue[c].asInstanceOf[String] += constValue[d].asInstanceOf[String]
-      case _: NonEmptyTuple =>
-        labelsInto[Tuple.Take[L, HalfN[L]]](b)
-        labelsInto[Tuple.Drop[L, HalfN[L]]](b)
+      case _: (h *: t) => asIndexedSeq[String](constValueTuple[h *: t])
 
   /** The single field rule: summon the field type's `Parser`; `Option[_]` marks it optional. The
     * parser's shape (its `Parser` subtype, which derivation requires to be statically known)
@@ -462,12 +443,6 @@ import flagged.meta.{ArgumentList, AnnotMirror, Defaults}
     case Option[?] => true
     case _         => false
 
-  /** Shape codes for the dispatch below: 1 Value, 2 Flag, 3 ValuedFlag, 4 Repeated, 5 Trailing, 6
-    * Command (splice), 7 CommandGroup. Everything a field contributes — its error verdict, its
-    * [[FieldsRes.Marks]] bits, and the constant names it claims — is a match type over
-    * `(code, annotations, optionality)`, so fields with the same combination share one cached
-    * reduction.
-    */
   /** The field rules: the `Option[_]` shape guards, then one pass over the annotation slot
     * ([[SlotRules]]). Every scrutinee is *data* — the slot tuple, a destructured element, or a
     * literal parameter — never an unreduced computation: a match type reduces its scrutinee
@@ -992,6 +967,10 @@ import flagged.meta.{ArgumentList, AnnotMirror, Defaults}
 
   // ---- singleton helpers ------------------------------------------------------
 
+  // not a constValueTuple walk like the label and alias columns: an enum case is a *term*
+  // singleton (`E.A.type`), not a literal constant type, so `constValue` rejects it — the witness
+  // for a term singleton is `ValueOf`, summoned per case below, which also carries the tailored
+  // error for a parameterized case
   inline def singletonValues[T <: Tuple]: IndexedSeq[Any] =
     inline erasedValue[T] match
       case _: EmptyTuple    => Vector.empty

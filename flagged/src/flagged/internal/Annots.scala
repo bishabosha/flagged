@@ -3,7 +3,7 @@ package flagged.internal
 import language.experimental.captureChecking
 import language.experimental.separationChecking
 
-import compiletime.{summonFrom, erasedValue, constValue}
+import compiletime.{summonFrom, erasedValue, constValue, constValueTuple}
 import compiletime.ops.int./
 import flagged.meta.{ArgumentList, AnnotMirror}
 import scala.annotation.publicInBinary
@@ -123,7 +123,7 @@ private[flagged] final case class FieldAnnots @publicInBinary() (
       case _: ("default" *: nt, v *: vt) =>
         collectTarget[nt, vt](name, help, hidden, aliases, constValue[v & Boolean])
       case _: ("aliases" *: nt, v *: vt) =>
-        collectTarget[nt, vt](name, help, hidden, constStrings[v & Tuple], default)
+        collectTarget[nt, vt](name, help, hidden, Derive.labelsOf[v & Tuple], default)
       case _: (? *: nt, ? *: vt) =>
         collectTarget[nt, vt](name, help, hidden, aliases, default)
 
@@ -222,7 +222,7 @@ private[flagged] final case class FieldAnnots @publicInBinary() (
           positional,
           hidden,
           group,
-          constStrings[v & Tuple],
+          Derive.labelsOf[v & Tuple],
           split,
           greedy
         )
@@ -288,22 +288,6 @@ private[flagged] final case class FieldAnnots @publicInBinary() (
         )
       case _: (? *: nt, ? *: vt) =>
         collectField[nt, vt](name, short, help, positional, hidden, group, aliases, split, greedy)
-
-  /** Materialise a tuple of string constants (an `aliases` argument). */
-  inline def constStrings[T <: Tuple]: IndexedSeq[String] =
-    inline erasedValue[T] match
-      case _: EmptyTuple => Vector.empty
-      case _             =>
-        val b = Vector.newBuilder[String]
-        constStringsInto[T](b)
-        b.result()
-
-  inline def constStringsInto[T <: Tuple](b: scala.collection.mutable.Growable[String]): Unit =
-    inline erasedValue[T] match
-      case _: EmptyTuple => ()
-      case _: (h *: t)   =>
-        b += constValue[h & String]
-        constStringsInto[t](b)
 
   // the walk halves the slot tuple (inline depth O(log n), matching Derive.walk) — annotation
   // slots hold only literal constant types, which survive the destructuring binders
