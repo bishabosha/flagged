@@ -64,11 +64,12 @@ object MethodMacros:
         case _: PolyType =>
           report.errorAndAbort(s"command method ${m.name}: type parameters are not supported")
         case _ => None // parameterless `def m`
-      val params                    = m.paramSymss.flatten.filter(_.isTerm)
-      val paramTypes                = mt.map(_.paramTypes).getOrElse(Nil)
-      val resType                   = mt.map(_.resType).getOrElse(Ref(mod).tpe.memberType(m))
-      val labels: List[TypeRepr]    = params.map(p => ConstantType(StringConstant(p.name)))
-      val paramAnns: List[TypeRepr] = params.map(slot)
+      val params                 = m.paramSymss.flatten.filter(_.isTerm)
+      val paramTypes             = mt.map(_.paramTypes).getOrElse(Nil)
+      val resType                = mt.map(_.resType).getOrElse(Ref(mod).tpe.memberType(m))
+      val labels: List[TypeRepr] = params.map(p => ConstantType(StringConstant(p.name)))
+      // the mirror is an AnnotMirror for the method: one shared computation of its two members
+      val (selfAnns, paramAnns) = annotEncoding(m, params)
 
       // default getters live on the same object: `m$default$N`
       val getters: List[(Int, Term)] = params.zipWithIndex.flatMap { (p, i) =>
@@ -125,8 +126,8 @@ object MethodMacros:
           ConstantType(StringConstant(m.name)).asType,
           tupleType(labels).asType,
           tupleType(paramTypes).asType,
-          slot(m).asType,
-          tupleType(paramAnns).asType,
+          selfAnns.asType,
+          paramAnns.asType,
           resType.asType
         ).runtimeChecked match
           case (

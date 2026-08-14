@@ -31,22 +31,23 @@ import scala.annotation.publicInBinary
   */
 sealed trait ArgumentList[A <: Annotation, Names <: Tuple, Values <: Tuple, Indices <: Tuple]
 
-/** `Mirror`-style witness describing how `T` is annotated. Like `Mirror`, all information lives in
-  * type members, so a compiler-intrinsic version of this would synthesize only types. The kind —
-  * [[AnnotMirror.Product]] for classes, [[AnnotMirror.Sum]] for enums / sealed traits — determines
-  * how `MirroredAnnotations` is interpreted: one slot per constructor field, or one slot per case.
+/** `Mirror`-style witness for the annotations of one definition: `T` itself for the
+  * [[AnnotMirror.Product]] and [[AnnotMirror.Sum]] kinds, a command method of `T` for
+  * [[MethodMirror]]. Like `Mirror`, all information lives in type members, so a compiler-intrinsic
+  * version of this would synthesize only types. The kind determines how `MirroredAnnotations` is
+  * interpreted: one slot per constructor field, per case, or per method parameter.
   *
   * Only annotations that are case classes extending `StaticAnnotation` and applied with
   * compile-time-constant arguments (single constants, or tuples of constants such as an `aliases`
   * list) are mirrored — the same restriction a compiler intrinsic would need so that every provided
   * argument has a singleton type and the annotation can be rebuilt through its `Mirror.ProductOf`.
   */
-sealed trait AnnotMirror[T]:
-  /** Tuple of [[ArgumentList]] types: the annotations on `T` itself. */
+trait AnnotMirror[T]:
+  /** Tuple of [[ArgumentList]] types: the annotations on the mirrored definition itself. */
   type MirroredSelfAnnotations <: Tuple
 
-  /** Tuple with one element per member — constructor fields for products, cases for sums; each
-    * element is a tuple of [[ArgumentList]] types.
+  /** Tuple with one element per member — constructor fields for products, cases for sums,
+    * parameters for methods; each element is a tuple of [[ArgumentList]] types.
     */
   type MirroredAnnotations <: Tuple
 
@@ -79,6 +80,15 @@ object AnnotMirror:
   /** Synthesize the annotation mirror for an enum / sealed trait. */
   transparent inline given ofSum[T]: AnnotMirror.Sum[T] =
     ${ macros.AnnotationMacros.annotMirrorSum[T] }
+
+  /** Alias pattern: lets a match type capture through the `MirroredSelfAnnotations` member, which a
+    * refinement written inline in a match-type case cannot do.
+    */
+  type WithAnnots[A <: Tuple] = AnnotMirror[?] { type MirroredSelfAnnotations = A }
+
+  /** The self annotations of a refined [[AnnotMirror]] type. */
+  type AnnotsOf[M] <: Tuple = M match
+    case WithAnnots[a] => a
 
   /** Find first slot in `Anns` that matches type `A` and materialise its arguments as `A`. Omitted
     * arguments are filled in through the [[Defaults]] mirror.

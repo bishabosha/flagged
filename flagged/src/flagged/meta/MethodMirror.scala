@@ -5,8 +5,12 @@ package flagged.meta
   * derivation consumes them unchanged — with the two things types cannot carry as the term-level
   * residue: [[invoke]] (calling the method with the parsed values) and the method's default
   * arguments (via the inherited [[Defaults]]).
+  *
+  * The [[AnnotMirror]] members mirror the method as the annotated definition:
+  * `MirroredSelfAnnotations` holds the annotations on the method itself, and `MirroredAnnotations`
+  * one [[ArgumentList]]-tuple slot per parameter.
   */
-trait MethodMirror[T] extends Defaults[Any]:
+trait MethodMirror[T] extends AnnotMirror[T], Defaults[Any]:
   /** The method name. */
   type MirroredLabel <: String
 
@@ -15,12 +19,6 @@ trait MethodMirror[T] extends Defaults[Any]:
 
   /** Parameter types. */
   type MirroredElemTypes <: Tuple
-
-  /** [[ArgumentList]]-encoded annotations on the method itself. */
-  type MirroredSelfAnnotations <: Tuple
-
-  /** One [[ArgumentList]]-tuple slot per parameter. */
-  type MirroredAnnotations <: Tuple
 
   /** The method's result type. */
   type MirroredResult
@@ -39,13 +37,6 @@ object MethodMirror:
   /** The result type of a refined [[MethodMirror]] type. */
   type ResultOf[M] = M match
     case WithResult[r] => r
-
-  /** Alias pattern for the `MirroredSelfAnnotations` member, like [[WithResult]]. */
-  type WithAnnots[A <: Tuple] = MethodMirror[?] { type MirroredSelfAnnotations = A }
-
-  /** The annotations of a refined [[MethodMirror]] type. */
-  type AnnotsOf[M] <: Tuple = M match
-    case WithAnnots[a] => a
 
 /** `Mirror`-style witness for the command members of `T` (an object): its methods and, nested, its
   * member objects marked by a [[Reflectable]] annotation (`@cmd` in flagged), in declaration order.
@@ -78,7 +69,7 @@ sealed trait MethodsMirror[T]:
 object MethodsMirror:
   trait Of[T] extends MethodsMirror[T]
 
-  /** Alias pattern for the `MirroredSelfAnnotations` member, like [[MethodMirror.WithAnnots]]. */
+  /** Alias pattern for the `MirroredSelfAnnotations` member, like [[AnnotMirror.WithAnnots]]. */
   type WithAnnots[A <: Tuple] = MethodsMirror[?] { type MirroredSelfAnnotations = A }
 
   /** The annotations of a refined [[MethodsMirror]] type. */

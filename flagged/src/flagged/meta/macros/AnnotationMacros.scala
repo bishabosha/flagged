@@ -119,7 +119,14 @@ object AnnotationMacros:
 
     def slot(s: Symbol): TypeRepr = tupleType(s.annotations.reverse.flatMap(annType))
 
-    private def slotOf(annotTerms: List[Term]): TypeRepr = tupleType(annotTerms.flatMap(annType))
+    /** The two [[AnnotMirror]] type members for one mirrored definition: the [[ArgumentList]] tuple
+      * for the annotations on `self` itself, and one such tuple per element of `members` —
+      * constructor fields, enum cases, or method parameters. The single implementation behind every
+      * mirror carrying the encoding ([[AnnotMirror.Product]], [[AnnotMirror.Sum]],
+      * [[flagged.meta.MethodMirror]]).
+      */
+    def annotEncoding(self: Symbol, members: List[Symbol]): (TypeRepr, TypeRepr) =
+      (slot(self), tupleType(members.map(slot)))
 
     // the refinements are built as quoted types, like [[MethodMacros]]: the members must be true
     // aliases — match-type capture through an alias pattern does not reduce over `>: t <: t`
@@ -133,10 +140,8 @@ object AnnotationMacros:
       val params = sym.primaryConstructor.paramSymss.flatten.filter(_.isTerm)
       // case fields are the primary constructor's parameter accessors — the same declarations —
       // so the constructor's parameter symbols are the single source of a field's annotations
-      val perField = sym.caseFields.zipWithIndex.map { (_, i) =>
-        slotOf(params.lift(i).map(_.annotations.reverse).getOrElse(Nil))
-      }
-      (slot(sym).asType, tupleType(perField).asType).runtimeChecked match
+      val (selfAnns, fieldAnns) = annotEncoding(sym, params.take(sym.caseFields.length))
+      (selfAnns.asType, fieldAnns.asType).runtimeChecked match
         case ('[type msa <: Tuple; msa], '[type man <: Tuple; man]) =>
           '{
             AnnotMirror.Product.Empty.asInstanceOf[
@@ -151,7 +156,8 @@ object AnnotationMacros:
       val sym = TypeRepr.of[A].typeSymbol
       if sym.children.isEmpty then
         report.errorAndAbort(s"No sum AnnotMirror for ${TypeRepr.of[A].show}: no cases found")
-      (slot(sym).asType, tupleType(sym.children.map(slot)).asType).runtimeChecked match
+      val (selfAnns, caseAnns) = annotEncoding(sym, sym.children)
+      (selfAnns.asType, caseAnns.asType).runtimeChecked match
         case ('[type msa <: Tuple; msa], '[type man <: Tuple; man]) =>
           '{
             AnnotMirror.Sum.Empty.asInstanceOf[

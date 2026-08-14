@@ -7,7 +7,7 @@ import scala.compiletime.*
 import scala.compiletime.ops.int.+
 import scala.annotation.publicInBinary
 import flagged.Parser
-import flagged.meta.{MethodMirror, MethodsMirror}
+import flagged.meta.{AnnotMirror, MethodMirror, MethodsMirror}
 import flagged.runner.MethodEntry
 import flagged.runner.MethodEntry.{EntriesResults, HasCmd}
 import steps.result.Result
@@ -76,7 +76,7 @@ import steps.result.Result
   // literals (the cheap regime measured in `bench.RuleCostProbe`).
 
   /** Is the method behind an [[EntriesResults.MethodNode]] marked `@cmd`? */
-  private type MethodIsCmd[M] = HasCmd[MethodMirror.AnnotsOf[M]]
+  private type MethodIsCmd[M] = HasCmd[AnnotMirror.AnnotsOf[M]]
 
   /** Is the object whose tower an [[EntriesResults.ScopeNode]] holds marked `@cmd`? */
   private type ScopeIsCmd[R] = HasCmd[MethodEntry.SelfAnnotsOf[R]]
@@ -119,7 +119,7 @@ import steps.result.Result
   private type CommandSlots[ER] <: Tuple = ER match
     case EntriesResults.Empty                   => EmptyTuple
     case EntriesResults.MethodNode[?, m, ?, re] =>
-      ConsIfCmd[MethodMirror.AnnotsOf[m], CommandSlots[re]]
+      ConsIfCmd[AnnotMirror.AnnotsOf[m], CommandSlots[re]]
     case EntriesResults.ScopeNode[?, ?, sr, re, ?] =>
       ConsIfCmd[MethodEntry.SelfAnnotsOf[sr], CommandSlots[re]]
 

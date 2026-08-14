@@ -1,6 +1,6 @@
 package flagged.runner
 
-import flagged.meta.{ArgumentList, MethodMirror, MethodsMirror}
+import flagged.meta.{AnnotMirror, ArgumentList, MethodMirror, MethodsMirror}
 import flagged.meta.MethodsMirror.Entry
 
 /** `T`'s `@cmd` command tower in one bundle: the object's [[MethodsMirror]], the union of the
@@ -10,8 +10,9 @@ import flagged.meta.MethodsMirror.Entry
   *
   * Assembled by ordinary implicit derivation — no macros, no inline. A method's contribution to
   * `Out` is computed by match types ([[MethodEntry.MethodContrib]], via the alias-pattern
-  * extractors on [[MethodMirror]]); instances are typed by their singleton types so no refinement
-  * is lost. Non-`@cmd` members contribute `Nothing` — the parser never invokes them.
+  * extractors on [[AnnotMirror]] and [[MethodMirror]]); instances are typed by their singleton
+  * types so no refinement is lost. Non-`@cmd` members contribute `Nothing` — the parser never
+  * invokes them.
   *
   * Public, in its own `runner` package rather than `meta`: the generic mirrors know nothing of
   * flagged's annotations, while this bundle is defined by `@cmd`. It appears in the `using` clauses
@@ -47,7 +48,7 @@ object MethodEntry:
     ) =
     Impl[T, er.Out, mm.type, er.type](mm, er)
 
-  /** Alias pattern for the `Mirror` member, like [[MethodMirror.WithAnnots]]. */
+  /** Alias pattern for the `Mirror` member, like [[AnnotMirror.WithAnnots]]. */
   type WithMirror[M] = MethodEntry[?] { type Mirror = M }
 
   /** The mirror type of a refined [[MethodEntry]] type. */
@@ -72,7 +73,7 @@ object MethodEntry:
 
   /** An [[Entry.Method]] tag's contribution to the union: the method's result if it is `@cmd`. */
   type MethodContrib[M] = M match
-    case MethodMirror.WithAnnots[anns] => IfCmd[anns, MethodMirror.ResultOf[M]]
+    case AnnotMirror.WithAnnots[anns] => IfCmd[anns, MethodMirror.ResultOf[M]]
 
   /** The fold over one mirror's entry tags: one node per entry, in order. */
   sealed trait EntriesResults[Es <: Tuple]:
