@@ -174,8 +174,8 @@ import flagged.meta.{ArgumentList, AnnotMirror, Defaults}
 
   inline def labelsOf[L <: Tuple]: IndexedSeq[String] =
     inline erasedValue[L] match
-      case _: EmptyTuple    => Vector.empty
-      case _: (h *: t) => asIndexedSeq[String](constValueTuple[h *: t])
+      case _: EmptyTuple => Vector.empty
+      case _: (h *: t)   => asIndexedSeq[String](constValueTuple[h *: t])
 
   /** The single field rule: summon the field type's `Parser`; `Option[_]` marks it optional. The
     * parser's shape (its `Parser` subtype, which derivation requires to be statically known)
