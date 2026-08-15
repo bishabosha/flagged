@@ -4,7 +4,7 @@ import java.util.concurrent.TimeUnit
 import org.openjdk.jmh.annotations.*
 import bench.defs.MethodDefs
 
-/** Parse-and-invoke latency for method-based commands: flagged's `@run` derivation (`Parser.method`
+/** Parse-and-invoke latency for method-based commands: flagged's `@cmd` derivation (`Parser.method`
   * / `Parser.methods`) against mainargs' `ParserForMethods`. Both sides select a method, parse its
   * parameters, and invoke it, returning the method's result. Parsers are built once in setup; add
   * `-prof gc` to also measure allocation per call (`gc.alloc.rate.norm`).

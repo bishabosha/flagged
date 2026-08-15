@@ -2,7 +2,7 @@ package flagged.meta.macros
 
 import scala.quoted.*
 import flagged.meta.AnnotMirror
-import flagged.meta.Ann
+import flagged.meta.ArgumentList
 
 /** The two residual macros backing [[Defaults]] and [[AnnotMirror]]. Everything else in flagged's
   * derivation is `Mirror` + `inline`.
@@ -17,8 +17,9 @@ object AnnotationMacros:
 
   /** Synthesizes refined `AnnotMirror` types. Only *types* are computed — no annotation values are
     * constructed. Mirrored: case-class `StaticAnnotation`s applied with exactly one argument list
-    * of literal constants. Curried annotation constructors (secondary argument lists) are rejected
-    * as not generic — their shape cannot be rebuilt through `Mirror.ProductOf`.
+    * of literal constants (or tuples of literal constants, e.g. an `aliases` list). Curried
+    * annotation constructors (secondary argument lists) are rejected as not generic — their shape
+    * cannot be rebuilt through `Mirror.ProductOf`.
     *
     * Shared with [[MethodMacros]], which mirrors methods with the same encodings.
     */
@@ -32,7 +33,26 @@ object AnnotationMacros:
       case NamedArg(_, v)  => constArg(v)
       case Literal(c)      => Some(ConstantType(c))
       case Typed(inner, _) => constArg(inner)
-      case _               => None
+      case _               => constTupleArg(t)
+
+    /** A tuple-of-constants argument (`"out" *: EmptyTuple`, `("a", "b")`): its precise tuple of
+      * constant types, reconstructed from the tree — the *typed* tree, since tuple element types
+      * are widened by inference.
+      */
+    private def constTupleArg(t: Term): Option[TypeRepr] = t match
+      case _ if t.tpe <:< TypeRepr.of[EmptyTuple]              => Some(TypeRepr.of[EmptyTuple])
+      case Apply(TypeApply(Select(prefix, "*:"), _), h :: Nil) =>
+        // `h *: t` is right-associated sugar for `t.*:(h)`: the receiver is the tail
+        for
+          head <- constArg(h)
+          tail <- constTupleArg(prefix)
+        yield TypeRepr.of[*:].appliedTo(List(head, tail))
+      case Apply(TypeApply(fun, _), args)
+          if fun.symbol.name == "apply" && t.tpe <:< TypeRepr.of[Tuple] =>
+        // TupleN.apply — a literal tuple such as `("a", "b")`
+        val elems = args.map(constArg)
+        Option.when(elems.forall(_.isDefined))(tupleType(elems.flatten))
+      case _ => None
 
     /** Recognize a typer-inserted default-getter reference. */
     private def isDefaultGetterRef(t: Term): Boolean =
@@ -43,15 +63,16 @@ object AnnotationMacros:
       name.exists(_.contains("$default$"))
 
     /** Resolve the constructor arguments in declaration order: positional args by index, named args
-      * by parameter name. A provided argument yields its constant type paired with `false`; an
-      * omitted argument (or a typer-inserted default getter) yields the parameter's *index* paired
-      * with `true` — the constant is never read from trees; materialisation looks it up via the
-      * annotation's `Defaults` mirror.
+      * by parameter name. Only *explicitly provided* arguments are encoded — each yields its
+      * parameter name, constant type, and parameter index. An omitted argument (or a typer-inserted
+      * default getter) contributes nothing, provided the parameter declares a default —
+      * materialisation looks it up via the annotation's `Defaults` mirror. Returns the provided
+      * triples, or `None` when the occurrence is not mirrorable.
       */
     private def resolveArgs(
         sym: Symbol,
         args: List[Term]
-    ): Option[(List[TypeRepr], List[TypeRepr])] =
+    ): Option[List[(String, TypeRepr, Int)]] =
       val params = sym.primaryConstructor.paramSymss.flatten.filter(_.isTerm)
       val named  = args.collect { case NamedArg(n, v) => n -> v }.toMap
       // note: isInstanceOf[NamedArg] would erase to the reflect type's bound (Term)
@@ -60,28 +81,39 @@ object AnnotationMacros:
         case NamedArg(_, _) => false
         case _              => true
       }
-      def defaulted(p: Symbol, i: Int): Option[(TypeRepr, Boolean)] =
-        Option.when(p.flags.is(Flags.HasDefault))((ConstantType(IntConstant(i)), true))
-      val resolved = params.zipWithIndex.map { (p, i) =>
+      var ok       = true
+      val provided = List.newBuilder[(String, TypeRepr, Int)]
+      params.zipWithIndex.foreach { (p, i) =>
         named.get(p.name).orElse(positional.lift(i)) match
-          case Some(t) if isDefaultGetterRef(t) => defaulted(p, i)
-          case Some(t)                          => constArg(t).map((_, false))
-          case None                             => defaulted(p, i)
+          case Some(t) if isDefaultGetterRef(t) => ok &= p.flags.is(Flags.HasDefault)
+          case Some(t)                          =>
+            constArg(t) match
+              case Some(tpe) => provided += ((p.name, tpe, i))
+              case None      => ok = false
+          case None => ok &= p.flags.is(Flags.HasDefault)
       }
-      if resolved.forall(_.isDefined) then
-        val pairs = resolved.flatten
-        Some((pairs.map(_(0)), pairs.map(p => ConstantType(BooleanConstant(p(1))))))
-      else None
+      Option.when(ok)(provided.result())
 
-    /** `Ann[a, args, defaulted]` for one annotation occurrence, if it is mirrorable. */
+    /** `ArgumentList[a, names, values, indices]` for one annotation occurrence, if it is
+      * mirrorable.
+      */
     private def annType(a: Term): Option[TypeRepr] =
       val tpe = a.tpe
       val sym = tpe.typeSymbol
       val ok  = tpe <:< TypeRepr.of[scala.annotation.StaticAnnotation] && sym.flags.is(Flags.Case)
       a match
         case Apply(Select(New(_), _), args) if ok =>
-          resolveArgs(sym, args).map { (argTypes, defaultedFlags) =>
-            TypeRepr.of[Ann].appliedTo(List(tpe, tupleType(argTypes), tupleType(defaultedFlags)))
+          resolveArgs(sym, args).map { provided =>
+            TypeRepr
+              .of[ArgumentList]
+              .appliedTo(
+                List(
+                  tpe,
+                  tupleType(provided.map((n, _, _) => ConstantType(StringConstant(n)))),
+                  tupleType(provided.map(_(1))),
+                  tupleType(provided.map((_, _, i) => ConstantType(IntConstant(i))))
+                )
+              )
           }
         case _ => None
 
@@ -89,34 +121,43 @@ object AnnotationMacros:
 
     private def slotOf(annotTerms: List[Term]): TypeRepr = tupleType(annotTerms.flatMap(annType))
 
-    private def alias(t: TypeRepr): TypeBounds = TypeBounds(t, t)
-
-    /** Refine an `AnnotMirror` kind with the self and per-member annotation slots. */
-    private def refine(base: TypeRepr, self: TypeRepr, members: List[TypeRepr]): TypeRepr =
-      Refinement(
-        Refinement(base, "MirroredSelfAnnotations", alias(self)),
-        "MirroredAnnotations",
-        alias(tupleType(members))
-      )
+    // the refinements are built as quoted types, like [[MethodMacros]]: the members must be true
+    // aliases — match-type capture through an alias pattern does not reduce over `>: t <: t`
+    // bounds, and the Refinement API can only express bounds (a bare TypeRepr makes a val member
+    // instead)
 
     def product[A: Type]: Expr[AnnotMirror.Product[A]] =
       val sym = TypeRepr.of[A].typeSymbol
       if !(sym.isClassDef && sym.flags.is(Flags.Case) && !sym.flags.is(Flags.Module)) then
         report.errorAndAbort(s"No product AnnotMirror for ${TypeRepr.of[A].show}: not a case class")
-      val params   = sym.primaryConstructor.paramSymss.flatten.filter(_.isTerm)
-      val perField = sym.caseFields.zipWithIndex.map { (f, i) =>
-        val merged =
-          params.lift(i).map(_.annotations.reverse).getOrElse(Nil) ++ f.annotations.reverse
-        slotOf(merged)
+      val params = sym.primaryConstructor.paramSymss.flatten.filter(_.isTerm)
+      // case fields are the primary constructor's parameter accessors — the same declarations —
+      // so the constructor's parameter symbols are the single source of a field's annotations
+      val perField = sym.caseFields.zipWithIndex.map { (_, i) =>
+        slotOf(params.lift(i).map(_.annotations.reverse).getOrElse(Nil))
       }
-      refine(TypeRepr.of[AnnotMirror.Product[A]], slot(sym), perField).asType match
-        case '[t] =>
-          '{ (new AnnotMirror.Product[A] {}).asInstanceOf[t & AnnotMirror.Product[A]] }
+      (slot(sym).asType, tupleType(perField).asType).runtimeChecked match
+        case ('[type msa <: Tuple; msa], '[type man <: Tuple; man]) =>
+          '{
+            AnnotMirror.Product.Empty.asInstanceOf[
+              AnnotMirror.Product[A] {
+                type MirroredSelfAnnotations = msa
+                type MirroredAnnotations     = man
+              }
+            ]
+          }
 
     def sum[A: Type]: Expr[AnnotMirror.Sum[A]] =
       val sym = TypeRepr.of[A].typeSymbol
       if sym.children.isEmpty then
         report.errorAndAbort(s"No sum AnnotMirror for ${TypeRepr.of[A].show}: no cases found")
-      refine(TypeRepr.of[AnnotMirror.Sum[A]], slot(sym), sym.children.map(slot)).asType match
-        case '[t] =>
-          '{ (new AnnotMirror.Sum[A] {}).asInstanceOf[t & AnnotMirror.Sum[A]] }
+      (slot(sym).asType, tupleType(sym.children.map(slot)).asType).runtimeChecked match
+        case ('[type msa <: Tuple; msa], '[type man <: Tuple; man]) =>
+          '{
+            AnnotMirror.Sum.Empty.asInstanceOf[
+              AnnotMirror.Sum[A] {
+                type MirroredSelfAnnotations = msa
+                type MirroredAnnotations     = man
+              }
+            ]
+          }

@@ -13,7 +13,7 @@ import scala.compiletime.uninitialized
   *
   * Scenarios: `options10` (a mixed 10-field options class), `options25` (25 fields — wide
   * derivation), `commands` (a three-command interface, each command with options), `methods` (the
-  * same interface as `@run`/`@main` command methods; case-app has no method-based API, so its entry
+  * same interface as `@cmd`/`@main` command methods; case-app has no method-based API, so its entry
   * reuses the command-objects encoding, and mainargs' `commands` entry is already
   * `ParserForMethods` — its two entries measure the same source), `realistic` (the docker-style
   * interface of `bench.defs.RealisticDefs` — one subcommand level, one large command).
@@ -67,7 +67,8 @@ object BenchSources:
     case ("mainargs", "options10") => mainargsOptions10
     case ("caseapp", "options10")  => caseappOptions10
     case ("baseline", "options10") => baselineOptions10
-    case ("flagged", "options25")  => wide("import flagged.*", " derives Parser.Command", "")
+    case ("flagged", "options25")  =>
+      wide("import flagged.*", " derives Parser.Command", "", fieldPrefix = "@opt ")
     case ("mainargs", "options25") =>
       wide(
         "import mainargs.{main, arg, ParserForClass}",
@@ -109,12 +110,21 @@ object BenchSources:
       |    tag: Option[String] = None""".stripMargin
 
   private val flaggedOptions10 =
-    s"""import flagged.*
-       |case class Config(
-       |$fields10
-       |) derives Parser.Command
-       |object Use { val parser = summon[Parser.Command[Config]] }
-       |""".stripMargin
+    """import flagged.*
+      |case class Config(
+      |    @opt foo: String = "x",
+      |    @opt bar: Int = 0,
+      |    @opt baz: Boolean = false,
+      |    @opt qux: List[String] = Nil,
+      |    @opt host: String = "localhost",
+      |    @opt port: Int = 80,
+      |    @opt verbose: Boolean = false,
+      |    @opt retries: Int = 3,
+      |    @opt timeout: Double = 1.5,
+      |    @opt tag: Option[String] = None
+      |) derives Parser.Command
+      |object Use { val parser = summon[Parser.Command[Config]] }
+      |""".stripMargin
 
   private val mainargsOptions10 =
     s"""import mainargs.{main, arg, Flag, ParserForClass}
@@ -152,9 +162,10 @@ object BenchSources:
       imports: String,
       derivesClause: String,
       use: String,
-      classPrefix: String = ""
+      classPrefix: String = "",
+      fieldPrefix: String = ""
   ): String =
-    val fields = (1 to 25).map(i => s"    f$i: Int = $i").mkString(",\n")
+    val fields = (1 to 25).map(i => s"    ${fieldPrefix}f$i: Int = $i").mkString(",\n")
     s"""$imports
        |${classPrefix}case class Wide(
        |$fields
@@ -168,9 +179,9 @@ object BenchSources:
   private val flaggedCommands =
     """import flagged.*
       |enum Cli derives Parser.CommandGroup:
-      |  case Add(@positional name: String, url: String = "")
-      |  case Remove(@positional name: String, force: Boolean = false)
-      |  case Ls(verbose: Boolean = false, limit: Int = 10)
+      |  case Add(name: String, @opt url: String = "")
+      |  case Remove(name: String, @opt force: Boolean = false)
+      |  case Ls(@opt verbose: Boolean = false, @opt limit: Int = 10)
       |object Use { val parser = summon[Parser.CommandGroup[Cli]] }
       |""".stripMargin
 
@@ -207,9 +218,9 @@ object BenchSources:
   private val flaggedMethods =
     """import flagged.*
       |object Cli:
-      |  @run def add(@positional name: String, url: String = ""): Unit = ()
-      |  @run def remove(@positional name: String, force: Boolean = false): Unit = ()
-      |  @run def ls(verbose: Boolean = false, limit: Int = 10): Unit = ()
+      |  @cmd def add(name: String, @opt url: String = ""): Unit = ()
+      |  @cmd def remove(name: String, @opt force: Boolean = false): Unit = ()
+      |  @cmd def ls(@opt verbose: Boolean = false, @opt limit: Int = 10): Unit = ()
       |object Use { val parser = Parser.methods(Cli) }
       |""".stripMargin
 
@@ -236,39 +247,39 @@ object BenchSources:
     """import flagged.*
       |enum Docker derives Parser.CommandGroup:
       |  case Run(
-      |      name: Option[String] = None,
-      |      @short('e') env: List[String] = Nil,
-      |      @short('p') publish: List[String] = Nil,
-      |      @short('v') volume: List[String] = Nil,
-      |      @short('l') label: List[String] = Nil,
-      |      @short('w') workdir: Option[String] = None,
-      |      @short('u') user: Option[String] = None,
-      |      entrypoint: Option[String] = None,
-      |      network: String = "default",
-      |      restart: String = "no",
-      |      @short('m') memory: Option[String] = None,
-      |      cpus: Option[Double] = None,
-      |      pull: String = "missing",
-      |      @short('d') detach: Boolean = false,
-      |      rm: Boolean = false,
-      |      @short('i') interactive: Boolean = false,
-      |      @short('t') tty: Boolean = false,
-      |      readOnly: Boolean = false,
-      |      @positional image: String,
-      |      @positional cmd: List[String] = Nil
+      |      @opt name: Option[String] = None,
+      |      @opt(short = 'e') env: List[String] = Nil,
+      |      @opt(short = 'p') publish: List[String] = Nil,
+      |      @opt(short = 'v') volume: List[String] = Nil,
+      |      @opt(short = 'l') label: List[String] = Nil,
+      |      @opt(short = 'w') workdir: Option[String] = None,
+      |      @opt(short = 'u') user: Option[String] = None,
+      |      @opt entrypoint: Option[String] = None,
+      |      @opt network: String = "default",
+      |      @opt restart: String = "no",
+      |      @opt(short = 'm') memory: Option[String] = None,
+      |      @opt cpus: Option[Double] = None,
+      |      @opt pull: String = "missing",
+      |      @opt(short = 'd') detach: Boolean = false,
+      |      @opt rm: Boolean = false,
+      |      @opt(short = 'i') interactive: Boolean = false,
+      |      @opt(short = 't') tty: Boolean = false,
+      |      @opt readOnly: Boolean = false,
+      |      image: String,
+      |      cmd: List[String] = Nil
       |  )
       |  case Pull(
-      |      platform: Option[String] = None,
-      |      @short('q') quiet: Boolean = false,
-      |      @short('a') allTags: Boolean = false,
-      |      @positional image: String
+      |      @opt platform: Option[String] = None,
+      |      @opt(short = 'q') quiet: Boolean = false,
+      |      @opt(short = 'a') allTags: Boolean = false,
+      |      image: String
       |  )
       |  case Ps(
-      |      @short('a') all: Boolean = false,
-      |      @short('q') quiet: Boolean = false,
-      |      @short('f') filter: List[String] = Nil,
-      |      @short('n') last: Int = -1,
-      |      format: Option[String] = None
+      |      @opt(short = 'a') all: Boolean = false,
+      |      @opt(short = 'q') quiet: Boolean = false,
+      |      @opt(short = 'f') filter: List[String] = Nil,
+      |      @opt(short = 'n') last: Int = -1,
+      |      @opt format: Option[String] = None
       |  )
       |object Use { val parser = summon[Parser.CommandGroup[Docker]] }
       |""".stripMargin

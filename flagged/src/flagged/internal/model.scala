@@ -18,8 +18,9 @@ import scala.collection.immutable.IntMap
   * `caps.freeze`'s capture-stripping reaches through the transparent inline only for unbound
   * temporaries, not already-bound locals.
   */
-private[flagged] transparent inline def frozen(inline x: caps.Mutable | Array[?])
-    : caps.Mutable | Array[?] =
+private[flagged] transparent inline def frozen(
+    inline x: caps.Mutable | Array[?]
+): caps.Mutable | Array[?] =
   caps.freeze(x)
 
 /** A pure [[IArray]] from a pure array. `IArray.unsafeFromArray`'s result is always fresh under
@@ -29,6 +30,12 @@ private[flagged] transparent inline def frozen(inline x: caps.Mutable | Array[?]
   */
 private[flagged] inline def frozenIArray[T](x: Array[T]^{}): IArray[T] =
   x.asInstanceOf[IArray[T]]
+
+/** An [[IndexedSeq]] from a materialised tuple's elements — the runtime tail of the
+  * `compiletime.constValueTuple`-based walks over label and alias columns.
+  */
+@publicInBinary private[flagged] def asIndexedSeq[T](t: Tuple): IndexedSeq[T] =
+  IndexedSeq.from(t.productIterator.asInstanceOf[Iterator[T]])
 
 /** Exposes the engine's value array as the `Product` a `Mirror#fromProduct` consumes — the
   * generated constructor call reads `productElement(n)` only, so no tuple is built or copied. The
@@ -126,7 +133,7 @@ private[flagged] final case class SubGroup(
     optional: Boolean,
     default: Option[() -> Any],
     cases: Vector[SubCase],
-    defaultCase: Option[SubCase] = None // @default: run when no command token is given
+    defaultCase: Option[SubCase] = None // @cmd(default = true): run when no command token is given
 )
 
 /** An options group spliced into a parent command: the child command's option specs live re-indexed

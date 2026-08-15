@@ -4,8 +4,8 @@ import java.time.{Instant, LocalDate}
 
 // java.time value instances exist only on the JVM (see PathSuite for java.nio.file.Path)
 case class JvmConfig(
-    day: Option[LocalDate] = None,
-    at: Option[Instant] = None
+    @opt day: Option[LocalDate] = None,
+    @opt at: Option[Instant] = None
 ) derives Parser.Command
 
 class PlatformJvmSuite extends munit.FunSuite:

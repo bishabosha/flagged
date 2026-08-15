@@ -13,7 +13,7 @@ import scala.collection.mutable
   *   1. route and validate each selected command level, stopping before a child when its parent has
   *      errors;
   *   2. after the complete selected chain validates, materialise defaults from leaf to root;
-  *   3. build each command into its parent's subcommand slot, invoking an `@run` method only during
+  *   3. build each command into its parent's subcommand slot, invoking an `@cmd` method only during
   *      this final unwind.
   *
   * Per-level mutable state lives in one final [[Frame]]. This avoids the `ObjectRef`, `IntRef`,

@@ -1,9 +1,9 @@
 package flagged.runner
 
-import flagged.meta.{Ann, MethodMirror, MethodsMirror}
+import flagged.meta.{ArgumentList, MethodMirror, MethodsMirror}
 import flagged.meta.MethodsMirror.Entry
 
-/** `T`'s `@run` command tower in one bundle: the object's [[MethodsMirror]], the union of the
+/** `T`'s `@cmd` command tower in one bundle: the object's [[MethodsMirror]], the union of the
   * reachable method result types as `Out`, and one [[MethodEntry.EntriesResults]] node per entry,
   * where a scope node holds the nested object's own `MethodEntry`. Everything is summoned once,
   * here — consumers take the bundle instead of zipping a mirror with its results at every level.
@@ -11,10 +11,10 @@ import flagged.meta.MethodsMirror.Entry
   * Assembled by ordinary implicit derivation — no macros, no inline. A method's contribution to
   * `Out` is computed by match types ([[MethodEntry.MethodContrib]], via the alias-pattern
   * extractors on [[MethodMirror]]); instances are typed by their singleton types so no refinement
-  * is lost. Non-`@run` members contribute `Nothing` — the parser never invokes them.
+  * is lost. Non-`@cmd` members contribute `Nothing` — the parser never invokes them.
   *
   * Public, in its own `runner` package rather than `meta`: the generic mirrors know nothing of
-  * flagged's annotations, while this bundle is defined by `@run`. It appears in the `using` clauses
+  * flagged's annotations, while this bundle is defined by `@cmd`. It appears in the `using` clauses
   * of the `Parser.method`/`Parser.methods`/`Flagged.Entry` entry points, so user code summons it.
   */
 sealed trait MethodEntry[T]:
@@ -54,25 +54,25 @@ object MethodEntry:
   type MirrorOf[R] = R match
     case WithMirror[m] => m
 
-  /** The [[Ann]]-encoded annotations on the object a [[MethodEntry]] describes. */
+  /** The [[ArgumentList]]-encoded annotations on the object a [[MethodEntry]] describes. */
   type SelfAnnotsOf[R] = MethodsMirror.AnnotsOf[MirrorOf[R]]
 
-  /** Is `flagged.run` itself among the [[Ann]]-encoded annotations? Other
+  /** Is `flagged.cmd` itself among the [[ArgumentList]]-encoded annotations? Other
     * [[flagged.meta.Reflectable]] markers do not count.
     */
-  type HasRun[Anns <: Tuple] <: Boolean = Anns match
-    case EmptyTuple                  => false
-    case Ann[flagged.run, ?, ?] *: ? => true
-    case ? *: t                      => HasRun[t]
+  type HasCmd[Anns <: Tuple] <: Boolean = Anns match
+    case EmptyTuple                              => false
+    case ArgumentList[flagged.cmd, ?, ?, ?] *: ? => true
+    case ? *: t                                  => HasCmd[t]
 
-  /** `R` when the annotations carry `@run`, `Nothing` otherwise. */
-  type IfRun[Anns <: Tuple, R] = HasRun[Anns] match
+  /** `R` when the annotations carry `@cmd`, `Nothing` otherwise. */
+  type IfCmd[Anns <: Tuple, R] = HasCmd[Anns] match
     case true  => R
     case false => Nothing
 
-  /** An [[Entry.Method]] tag's contribution to the union: the method's result if it is `@run`. */
+  /** An [[Entry.Method]] tag's contribution to the union: the method's result if it is `@cmd`. */
   type MethodContrib[M] = M match
-    case MethodMirror.WithAnnots[anns] => IfRun[anns, MethodMirror.ResultOf[M]]
+    case MethodMirror.WithAnnots[anns] => IfCmd[anns, MethodMirror.ResultOf[M]]
 
   /** The fold over one mirror's entry tags: one node per entry, in order. */
   sealed trait EntriesResults[Es <: Tuple]:
@@ -112,7 +112,7 @@ object MethodEntry:
           Ts,
           sr.type,
           rest.type,
-          IfRun[sr.mirror.MirroredSelfAnnotations, sr.Out] | rest.Out
+          IfCmd[sr.mirror.MirroredSelfAnnotations, sr.Out] | rest.Out
         ]
       ) =
       ScopeNode(sr, rest)

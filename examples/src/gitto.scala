@@ -6,39 +6,39 @@ import flagged.*
   * whichever command declares a field of this type.
   */
 case class Output(
-    @short('q') @help("Operate quietly") quiet: Boolean = false,
-    @short('v') @help("Increase verbosity (repeatable)") verbose: Count = Count(0)
+    @opt(help = "Operate quietly", short = 'q') quiet: Boolean = false,
+    @opt(help = "Increase verbosity (repeatable)", short = 'v') verbose: Count = Count(0)
 ) derives Parser.Shared
 
 /** A git-like CLI demonstrating nested subcommands derived from enums. */
-@name("gitto")
-@help("gitto — a tiny, definitely-not-git version control tool")
+@cmd(name = "gitto", help = "gitto — a tiny, definitely-not-git version control tool")
 enum Gitto derives Parser.CommandGroup:
-  @help("Clone a repository into a new directory")
+  @cmd(help = "Clone a repository into a new directory")
   case Clone(
-      @positional @help("Repository URL") repo: String,
-      @positional @help("Target directory") dir: Option[String] = None,
-      @short('d') @help("Create a shallow clone of that depth") depth: Option[Int] = None,
+      @opt(help = "Repository URL", positional = true) repo: String,
+      @opt(help = "Target directory", positional = true) dir: Option[String] = None,
+      @opt(help = "Create a shallow clone of that depth", short = 'd') depth: Option[Int] = None,
       output: Output = Output()
   )
-  @help("Manage the set of tracked repositories")
+  @cmd(help = "Manage the set of tracked repositories")
   case Remote(action: RemoteAction)
-  @help("Show the working tree status")
+  @cmd(help = "Show the working tree status")
   case Status(
-      @short('s') @help("Give output in short format") short: Boolean = false,
+      @opt(help = "Give output in short format", short = 's') short: Boolean = false,
       output: Output = Output()
   )
 
 enum RemoteAction derives Parser.CommandGroup:
-  @help("Add a remote named <name> for the repository at <url>")
+  @cmd(help = "Add a remote named <name> for the repository at <url>")
   case Add(
-      @positional name: String,
-      @positional url: String,
-      @short('f') @help("Fetch the remote after adding it") fetch: Boolean = false
+      // unannotated fields are positional by default, like @main parameters
+      name: String,
+      url: String,
+      @opt(help = "Fetch the remote after adding it", short = 'f') fetch: Boolean = false
   )
-  @help("Remove the remote named <name>")
-  case Remove(@positional name: String)
-  @help("List all remotes")
+  @cmd(help = "Remove the remote named <name>")
+  case Remove(name: String)
+  @cmd(help = "List all remotes")
   case ListAll
 
 @main def gittoMain(args: String*): Unit =

@@ -1,66 +1,62 @@
 package flagged
 
 object calc:
-  @run
-  def scale(@short('n') num: Int, factor: Int = 2, verbose: Boolean = false): Int =
+  @cmd
+  def scale(@opt(short = 'n') num: Int, @opt factor: Int = 2, @opt verbose: Boolean = false): Int =
     if verbose then num * factor else num * factor
 
 object toolbox:
-  @run
-  @help("Adds two numbers")
-  def add(a: Int, b: Int = 0): Int = a + b
+  @cmd(help = "Adds two numbers")
+  def add(@opt a: Int, @opt b: Int = 0): Int = a + b
 
-  @run
-  @name("rm")
-  def remove(@positional path: String, force: Boolean = false): String =
+  @cmd(name = "rm")
+  def remove(path: String, @opt force: Boolean = false): String =
     if force then s"rm -f $path" else s"rm $path"
 
-  @run
+  @cmd
   object remote:
-    @run
-    def add(name: String, url: String = ""): String = s"remote:$name:$url"
+    @cmd
+    def add(@opt name: String, @opt url: String = ""): String = s"remote:$name:$url"
 
-    @run
+    @cmd
     def prune(): String = "pruned"
 
-  def helper(x: Int): Int = x // not @run: not a command
+  def helper(x: Int): Int = x // not @cmd: not a command
 
 // a user-defined marker: annotations deriving from meta.Reflectable are mirrored, but only
-// @run itself makes a member a flagged command
-final case class cmd() extends meta.Reflectable derives meta.Defaults
+// @cmd itself makes a member a flagged command
+final case class marker() extends meta.Reflectable derives meta.Defaults
 
 object customMarker:
-  @cmd def double(x: Int): Int = x * 2
+  @marker def double(x: Int): Int = x * 2
 
 object mixed:
-  @run def go(x: Int): Int    = x + 1
-  @cmd def other(y: Int): Int = y
+  @cmd def go(@opt x: Int): Int  = x + 1
+  @marker def other(y: Int): Int = y
 
 object defaulted:
-  @run
-  @default
-  def status(@short('s') short: Boolean = false): String = if short then "st" else "status"
+  @cmd(default = true)
+  def status(@opt(short = 's') short: Boolean = false): String = if short then "st" else "status"
 
-  @run
-  def build(target: String = "all"): String = s"build:$target"
+  @cmd
+  def build(@opt target: String = "all"): String = s"build:$target"
 
 object defaultedNested:
-  @run
-  @default
+  @cmd(default = true)
   object grp:
-    @run @default def go(x: Int = 3): Int = x
-    @run def stop(): Int                  = -1
+    @cmd(default = true) def go(@opt x: Int = 3): Int = x
+    @cmd def stop(): Int                              = -1
 
-  @run def other(y: Int = 1): Int = y
+  @cmd def other(@opt y: Int = 1): Int = y
 
 object guarded:
   var invocations = 0
 
-  @run def go(x: Int = 0): Int =
+  @cmd def go(@opt x: Int = 0): Int =
     invocations += 1
     x
 
-  @run def noop(): Int = 0
+  @cmd def noop(): Int = 0
 
 class MethodsSuite extends munit.FunSuite:
 
@@ -76,7 +72,7 @@ class MethodsSuite extends munit.FunSuite:
   val single = Parser.method(calc)
   val multi  = Parser.methods(toolbox)
 
-  test("a single @run method parses its parameters as options") {
+  test("a single @cmd method parses its @opt parameters as options") {
     assertEquals(ok(single.parse(Seq("--num", "3", "--factor", "4"))), 12)
   }
 
@@ -94,12 +90,12 @@ class MethodsSuite extends munit.FunSuite:
     assert(m.contains("--num") && m.contains("banana"), m)
   }
 
-  test("a group of @run methods parses as subcommands, kebab-named") {
+  test("a group of @cmd methods parses as subcommands, kebab-named") {
     assertEquals(ok(multi.parse(Seq("add", "--a", "2", "--b", "3"))), 5)
     assertEquals(ok(multi.parse(Seq("add", "--a", "2"))), 2)
   }
 
-  test("a grouped @run method is not invoked when an ancestor has parse errors") {
+  test("a grouped @cmd method is not invoked when an ancestor has parse errors") {
     guarded.invocations = 0
     val m = err(Flagged.parse[guarded.type](Seq("--bogus", "go")))
     assert(m.contains("unknown option '--bogus'"), m)
@@ -114,12 +110,19 @@ class MethodsSuite extends munit.FunSuite:
     assertEquals(guarded.invocations, 0)
   }
 
-  test("@name renames a method command; @positional works on parameters") {
+  test("@cmd(name) renames a method command; unannotated parameters are positional") {
     assertEquals(ok(multi.parse(Seq("rm", "x.txt"))), "rm x.txt")
     assertEquals(ok(multi.parse(Seq("rm", "x.txt", "--force"))), "rm -f x.txt")
   }
 
-  test("nested @run objects become nested subcommands") {
+  test("@cmd method parameters are positional by default, like @main") {
+    object mainLike:
+      @cmd def copy(src: String, dest: String, force: Boolean = false): String =
+        s"$src->$dest${if force then "!" else ""}"
+    assertEquals(ok(Parser.method(mainLike).parse(Seq("a.txt", "b.txt", "true"))), "a.txt->b.txt!")
+  }
+
+  test("nested @cmd objects become nested subcommands") {
     assertEquals(ok(multi.parse(Seq("remote", "add", "--name", "origin"))), "remote:origin:")
     assertEquals(ok(multi.parse(Seq("remote", "prune"))), "pruned")
   }
@@ -129,7 +132,7 @@ class MethodsSuite extends munit.FunSuite:
     assert(m.contains("unknown command 'helper'"), m)
   }
 
-  test("group help lists methods with @help text") {
+  test("group help lists methods with @cmd(help) text") {
     multi.parse(Seq("--help")) match
       case Result.Err(ParseError.Help(t)) =>
         assert(t.contains("add") && t.contains("Adds two numbers"), t)
@@ -152,12 +155,14 @@ class MethodsSuite extends munit.FunSuite:
     assertEquals(r, 1)
   }
 
-  test("Parser.method on an object with several @run methods is a compile error") {
+  test("Parser.method on an object with several @cmd methods is a compile error") {
     val e = compileErrors("Parser.method(toolbox)")
-    assert(e.contains("exactly one @run method"), e)
+    assert(e.contains("exactly one @cmd method"), e)
   }
 
-  test("@default names the method run when no command token is given, with args forwarded") {
+  test(
+    "@cmd(default = true) names the method run when no command token is given, with args forwarded"
+  ) {
     val p = Parser.methods(defaulted)
     assertEquals(ok(p.parse(Nil)), "status")
     assertEquals(ok(p.parse(Seq("-s"))), "st")
@@ -168,47 +173,47 @@ class MethodsSuite extends munit.FunSuite:
     assert(help.contains("[<command>]"), help)
   }
 
-  test("@default on a nested @run object defaults into that group") {
+  test("@cmd(default = true) on a nested @cmd object defaults into that group") {
     val p = Parser.methods(defaultedNested)
-    assertEquals(ok(p.parse(Nil)), 3)             // grp, then grp's own @default
+    assertEquals(ok(p.parse(Nil)), 3)             // grp, then grp's own default
     assertEquals(ok(p.parse(Seq("--x", "9"))), 9) // forwarded through both levels
     assertEquals(ok(p.parse(Seq("grp", "stop"))), -1)
     assertEquals(ok(p.parse(Seq("other", "--y", "2"))), 2)
   }
 
-  test("more than one @default method is a compile error") {
+  test("more than one @cmd(default = true) method is a compile error") {
     val e = compileErrors(
       "object o:\n" +
-        "  @run @default def a(x: Int = 0): Int = x\n" +
-        "  @run @default def b(y: Int = 1): Int = y\n" +
+        "  @cmd(default = true) def a(x: Int = 0): Int = x\n" +
+        "  @cmd(default = true) def b(y: Int = 1): Int = y\n" +
         "Parser.methods(o)"
     )
-    assert(e.contains("only one @default command is supported"), e)
+    assert(e.contains("only one @cmd(default = true) command is supported"), e)
   }
 
-  test("a @default method and a @default nested object together are a compile error") {
+  test("a @cmd(default = true) method and nested object together are a compile error") {
     val e = compileErrors(
       "object o:\n" +
-        "  @run @default def a(x: Int = 0): Int = x\n" +
-        "  @run @default object g:\n" +
-        "    @run def b(y: Int = 1): Int = y\n" +
+        "  @cmd(default = true) def a(x: Int = 0): Int = x\n" +
+        "  @cmd(default = true) object g:\n" +
+        "    @cmd def b(y: Int = 1): Int = y\n" +
         "Parser.methods(o)"
     )
-    assert(e.contains("only one @default command is supported"), e)
+    assert(e.contains("only one @cmd(default = true) command is supported"), e)
   }
 
-  test("@default on a lone @run method is a compile error") {
+  test("@cmd(default = true) on a lone @cmd method is a compile error") {
     val e = compileErrors(
-      "object o:\n  @run @default def only(x: Int = 0): Int = x\nParser.method(o)"
+      "object o:\n  @cmd(default = true) def only(x: Int = 0): Int = x\nParser.method(o)"
     )
-    assert(e.contains("@default has no effect on a single @run method"), e)
+    assert(e.contains("@cmd(default = true) has no effect on a single @cmd method"), e)
   }
 
   test("duplicate constant command names are a compile error") {
     val e = compileErrors(
       "object o:\n" +
-        "  @run @name(\"x\") def a(p: Int = 0): Int = p\n" +
-        "  @run @name(\"x\") def b(q: Int = 1): Int = q\n" +
+        "  @cmd(name = \"x\") def a(p: Int = 0): Int = p\n" +
+        "  @cmd(name = \"x\") def b(q: Int = 1): Int = q\n" +
         "Parser.methods(o)"
     )
     assert(e.contains("duplicate command name"), e)
@@ -220,7 +225,7 @@ class MethodsSuite extends munit.FunSuite:
     val e = compileErrors(
       "class Host:\n" +
         "  object cmds:\n" +
-        "    @run def go(x: Int = 1): Int = x\n" +
+        "    @cmd def go(x: Int = 1): Int = x\n" +
         "val h = new Host\n" +
         "Parser.methods(h.cmds)"
     )
@@ -229,21 +234,21 @@ class MethodsSuite extends munit.FunSuite:
     assert(e.contains("macro expansion was stopped"), e)
   }
 
-  test("@default on a non-@run member is ignored, like the member itself") {
+  test("a marker annotation on a non-@cmd member is ignored, like the member itself") {
     val e = compileErrors(
       "object o:\n" +
-        "  @run @default def a(x: Int = 0): Int = x\n" +
-        "  @cmd @default def b(y: Int = 1): Int = y\n" +
+        "  @cmd(default = true) def a(x: Int = 0): Int = x\n" +
+        "  @marker def b(y: Int = 1): Int = y\n" +
         "Parser.methods(o)"
     )
     assertEquals(e, "")
   }
 
-  test("meta.Reflectable annotations are mirrored, but only @run makes a command") {
+  test("meta.Reflectable annotations are mirrored, but only @cmd makes a command") {
     val mm = summon[meta.MethodsMirror[customMarker.type]]
     assertEquals(mm.method(0).invoke(Array(4)), 8)
     val e = compileErrors("Flagged.parse[customMarker.type](Nil)")
-    assert(e.nonEmpty, "expected a compile error for an object with no @run members")
+    assert(e.nonEmpty, "expected a compile error for an object with no @cmd members")
   }
 
   test("the mirror is one level deep: method(i) throws on a Scope entry") {
@@ -255,29 +260,29 @@ class MethodsSuite extends munit.FunSuite:
     assertEquals(rm.method(1).invoke(Array.empty[Any]), "pruned")
   }
 
-  test("non-@run mirrored members are invisible to the parser") {
-    // one @run method + one @cmd method: the run-view is a lone method, parsed flat
+  test("non-@cmd mirrored members are invisible to the parser") {
+    // one @cmd method + one @marker method: the command view is a lone method, parsed flat
     assertEquals(ok(Flagged.parse[mixed.type](Seq("--x", "1"))), 2)
     assertEquals(ok(Parser.method(mixed).parse(Seq("--x", "3"))), 4)
   }
 
-  test("Flagged.parse falls back to @run methods when no Parser exists") {
+  test("Flagged.parse falls back to @cmd methods when no Parser exists") {
     assertEquals(ok(Flagged.parse[calc.type](Seq("-n", "3"))), 6)
     assertEquals(ok(Flagged.parse[toolbox.type](Seq("add", "--a", "2", "--b", "3"))), 5)
   }
 
-  test("a Parser given takes precedence over @run derivation") {
+  test("a Parser given takes precedence over @cmd derivation") {
     given Parser.Value[calc.type] = Parser.of("calc")(_ => Result.Ok(calc))
     assertEquals(ok(Flagged.parse[calc.type](Seq("anything"))), calc)
   }
 
-  test("Flagged.help renders for an @run object") {
+  test("Flagged.help renders for a @cmd object") {
     val t = Flagged.help[toolbox.type]
     assert(t.contains("Usage: toolbox"), t)
     assert(t.contains("add") && t.contains("rm") && t.contains("remote"), t)
   }
 
-  test("Flagged.parse accepts a prog override for an @run object") {
+  test("Flagged.parse accepts a prog override for a @cmd object") {
     Flagged.parse[calc.type](Seq("--help"), "myscale") match
       case Result.Err(ParseError.Help(t)) => assert(t.contains("Usage: myscale"), t)
       case other                          => fail(s"expected help, got $other")

@@ -16,10 +16,10 @@ trait MethodMirror[T] extends Defaults[Any]:
   /** Parameter types. */
   type MirroredElemTypes <: Tuple
 
-  /** [[Ann]]-encoded annotations on the method itself. */
+  /** [[ArgumentList]]-encoded annotations on the method itself. */
   type MirroredSelfAnnotations <: Tuple
 
-  /** One [[Ann]]-tuple slot per parameter. */
+  /** One [[ArgumentList]]-tuple slot per parameter. */
   type MirroredAnnotations <: Tuple
 
   /** The method's result type. */
@@ -48,7 +48,7 @@ object MethodMirror:
     case WithAnnots[a] => a
 
 /** `Mirror`-style witness for the command members of `T` (an object): its methods and, nested, its
-  * member objects marked by a [[Reflectable]] annotation (`@run` in flagged), in declaration order.
+  * member objects marked by a [[Reflectable]] annotation (`@cmd` in flagged), in declaration order.
   *
   * The mirror is one level deep: nested objects appear only as [[MethodsMirror.Entry.Scope]] tags
   * in [[MirroredEntries]], and callers descend by summoning a `MethodsMirror` for the scope's own
@@ -58,7 +58,7 @@ sealed trait MethodsMirror[T]:
   /** The object's name. */
   type MirroredLabel <: String
 
-  /** [[Ann]]-encoded annotations on the object itself. */
+  /** [[ArgumentList]]-encoded annotations on the object itself. */
   type MirroredSelfAnnotations <: Tuple
 
   /** One [[MethodsMirror.Entry]] tag per member, in declaration order:
