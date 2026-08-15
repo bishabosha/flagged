@@ -8,7 +8,7 @@ I created Flagged to be a candidate library for the [Scala Toolkit](https://gith
 The initial motivation was a lack of momentum on issue [scala/toolkit#65](https://github.com/scala/toolkit/issues/65), on which discussion paused (since July 2025) after a request to compare [com-lihaoyi/mainargs](https://github.com/com-lihaoyi/mainargs) and [alexarchambault/case-app](https://github.com/alexarchambault/case-app). This library aims to provide the best aspects of both libraries (in particular arbitrary nested-subcommands) with as little manual setup as possible.
 
 So my personal goals with introducing Flagged was to combine the feature set of both libraries but with a Scala-3-first design:
-- 100% declarative setup, with a single entry point to "run or exit".
+- 100% declarative setup, integrating with `@main def foo(args: String*)` to forward `args` to a single entry point and "run or exit".
 - support arbitrary nested subcommands (with `--help` scoped to the current subcommand)
 - use standard language features as much as possible
 - validate the construction of the schema at compiletime
@@ -84,10 +84,10 @@ Options:
 
 - Supported option syntax: `--name value` and `--name=value`
 - short aliases with separate (`-n Jamie`), attached (`-nJamie`), or assignment (`-n=Jamie`) values
-- short flags can be combined (`-er`, `-rn 3`)
+- short flags can be combined (`-er3`)
 - options may appear after positionals (permutation, as in GNU getopt).
 - Repeated scalar options are last-wins (e.g. for `--verbose=false --verbose`, verbose is true)
-  - so shell aliases can set up some default options.
+  - this makes it possible for shell aliases to provde some default options that callers can override.
 - Repeated options can accumulate via collection types, or `Count` for flags.
 - `--` ends option parsing, following [POSIX Utility Syntax Guidelines, guideline 10]:
   the first `--` is dropped and everything after it is positional, even when it begins
@@ -103,13 +103,11 @@ Options:
 
 ### Declaring options
 
-A field with no annotation is a **positional argument by default**, exactly like a
+A parameter with no annotation is a **positional argument by default**, exactly like a
 `@scala.main` parameter — so `@main` methods migrate without changing their command line. An
-`@opt` annotation (bare, or with any arguments) turns the field into a named option,
-`--kebab-cased` after the field name, unless it sets `positional = true` explicitly. An
-unannotated `Boolean` reads a positional `true`/`false` token; a pure flag with no value parser
-(`Count`, custom `Parser.flag`) cannot be positional, so leaving it unannotated is a compile
-error asking for an `@opt`. The one exception is a `derives Parser.Shared` options group: it
+`@opt` annotation (bare, or with any arguments) turns the parameter into a named option (with name encoded as `kebab-case`). `@opt(positional = true)` can still be set explicitly.
+
+The one exception is a `derives Parser.Shared` options group: it
 cannot contain positionals, so its unannotated fields stay named options.
 
 The field's `Parser` instance decides its shape:
@@ -119,7 +117,7 @@ The field's `Parser` instance decides its shape:
 | `x: A` | positional argument (`@main`-style); ordering rules checked at compile time |
 | `x: Boolean` | positional `true`/`false` token |
 | `@opt x: Boolean` | flag `--x` (also `--x=false`) |
-| `@opt x: Count` | counting flag: `-vvv` → `Count(3)` (the `@opt` is required) |
+| `@opt(short = 'v') x: Count` | counting flag: `-vvv` → `Count(3)` |
 | `@opt x: A` | required option `--x <a>` |
 | `@opt x: A = default` | optional, default shown in help |
 | `@opt x: Option[A]` | optional, `None` when absent |
