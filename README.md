@@ -239,6 +239,15 @@ handle aborts yourself, `Flagged.parse` returns a `Result[T, ParseError]` (from
 [lampepfl/steps](https://github.com/lampepfl/steps)) instead of exiting, and
 `Flagged.help[A]` renders the help text without parsing anything.
 
+Each of these resolves the grammar on every call. To parse repeatedly, resolve it
+once with `Flagged.entry[A]` — the returned entry point holds the derived parser and
+offers the same `parse`/`parseOrExit`/`help` methods:
+
+```scala
+val cli = Flagged.entry[Config] // derivation cost paid once, here
+val cfg = cli.parseOrExit(args)
+```
+
 ### Platforms
 
 Scala 3 only — the design depends on Scala 3 inline derivation. Cross-builds for the
