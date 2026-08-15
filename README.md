@@ -256,7 +256,7 @@ the same command line keeps working:
 @main def serve(host: String, port: Int = 8080, files: String*): Unit = ...
 
 // after
-@cmd def serve(host: String, port: Int = 8080, files: Seq[String] = Nil): Unit = ...
+@cmd def serve(host: String, port: Int = 8080, files: String*): Unit = ...
 
 @main def run(args: String*): Unit = Flagged.parseOrExit[this.type](args)
 ```
@@ -264,9 +264,9 @@ the same command line keeps working:
 - **The command line does not change.** Unannotated parameters stay positional in
   declaration order — exactly the `@main` rule — and defaults keep arguments optional.
   (A case class with the same fields `derives Parser.Command` works identically.)
-- **A vararg parameter becomes a collection.** `files: String*` is not a valid command
-  parameter; declare it `files: Seq[String] = Nil` instead — an unannotated collection
-  field is a repeated positional that collects the remaining arguments.
+- **Vararg parameters keep working.** `files: String*` mirrors as a `Seq[String]` field —
+  a repeated positional that collects the remaining arguments, and may be empty — on both
+  `@cmd` methods and case classes.
 - **Custom `FromString` instances keep working.** Any
   `scala.util.CommandLineParser.FromString[A]` in scope is embedded as a low-priority
   `Parser.Value[A]`: each occurrence parses one token, and an
