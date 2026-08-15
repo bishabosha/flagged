@@ -104,7 +104,8 @@ Options:
 ### Declaring options
 
 A parameter with no annotation is a **positional argument by default**, exactly like a
-`@scala.main` parameter — so `@main` methods migrate without changing their command line. An
+`@scala.main` parameter — so `@main` methods migrate without changing their command line
+(see [Migrating from `@main`](#migrating-from-main)). An
 `@opt` annotation (bare, or with any arguments) turns the parameter into a named option (with name encoded as `kebab-case`). `@opt(positional = true)` can still be set explicitly.
 
 The one exception is a `derives Parser.Shared` options group: it
@@ -216,7 +217,9 @@ A single `@cmd` method will become the name of the root program, otherwise a gro
   `FiniteDuration` (`"30s"`, `"5.minutes"`), following platform availability.
   A custom parser is a one-liner (`Parser.of`), and every parser supports
   `map`/`emap` — including whole commands, which gives cross-field validation before
-  your code runs. Flag and repeated shapes are pluggable too (`Parser.flag`,
+  your code runs. `scala.util.CommandLineParser.FromString` instances (the `@main`
+  typeclass) are picked up as a low-priority fallback
+  (see [Migrating from `@main`](#migrating-from-main)). Flag and repeated shapes are pluggable too (`Parser.flag`,
   `Parser.repeated`), so occurrence bounds and non-empty constraints are expressible.
 - **Option groups:** a `derives Parser.Shared` case-class field splices that group's options into the
   surrounding command and reconstructs the group as a value. Groups nest, work inside
@@ -241,6 +244,45 @@ handle aborts yourself, `Flagged.parse` returns a `Result[T, ParseError]` (from
 Scala 3 only — the design depends on Scala 3 inline derivation. Cross-builds for the
 JVM, Scala.js, and Scala Native; `Parser` instances follow platform availability
 (`java.time` types are JVM-only, `Path` is JVM and Scala Native).
+
+## Migrating from `@main`
+
+A `@main` method's parameters are positional, parsed by
+`scala.util.CommandLineParser.FromString` instances. Flagged's defaults are chosen so
+the same command line keeps working:
+
+```scala
+// before
+@main def serve(host: String, port: Int = 8080, files: String*): Unit = ...
+
+// after
+@cmd def serve(host: String, port: Int = 8080, files: Seq[String] = Nil): Unit = ...
+
+@main def run(args: String*): Unit = Flagged.parseOrExit[this.type](args)
+```
+
+- **The command line does not change.** Unannotated parameters stay positional in
+  declaration order — exactly the `@main` rule — and defaults keep arguments optional.
+  (A case class with the same fields `derives Parser.Command` works identically.)
+- **A vararg parameter becomes a collection.** `files: String*` is not a valid command
+  parameter; declare it `files: Seq[String] = Nil` instead — an unannotated collection
+  field is a repeated positional that collects the remaining arguments.
+- **Custom `FromString` instances keep working.** Any
+  `scala.util.CommandLineParser.FromString[A]` in scope is embedded as a low-priority
+  `Parser.Value[A]`: each occurrence parses one token, and an
+  `IllegalArgumentException` message becomes the parse error. Flagged's built-in
+  instances and any `Parser` given you define take priority over the bridge. The
+  bridge shows the generic `<value>` metavar in help — define an instance with
+  `Parser.of` (or rename with `.withTypeName`) when you want better help text and
+  errors.
+- **What you gain immediately:** `--help`, error messages with did-you-mean hints, and
+  the annotations (`@opt`, `@cmd`) to grow named options and subcommands without
+  breaking the positional interface.
+
+Two behavioral differences to be aware of: tokens beginning with `-` are options in
+Flagged (negative numbers are still recognised as values; anything else `-`-prefixed
+must come after `--`), and `--help`/`--help-all` (plus `--version` when declared) are
+reserved option names.
 
 ## How-to
 

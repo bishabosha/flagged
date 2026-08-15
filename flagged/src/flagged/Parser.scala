@@ -620,7 +620,7 @@ object Parser extends ParserLowPriority, internal.PlatformValues:
         catch case _: IllegalArgumentException => eval.raise(s"'$s' is not a valid UUID")
 
 /** Lower-priority instances, overridden by the dedicated ones in [[Parser]]. */
-sealed trait ParserLowPriority:
+sealed trait ParserLowPriority extends ParserFromStringCompat:
 
   /** Repeated shape for any collection an implicit [[scala.collection.Factory]] can build (`Set`,
     * `ArraySeq`, sorted collections, `Array`, ...). The dedicated instances in [[Parser]] (`List`,
@@ -632,3 +632,27 @@ sealed trait ParserLowPriority:
     type Elem = A
     def typeName: String             = elem.typeName
     private[flagged] def collector() = Parser.BuilderCollector(elem, factory.newBuilder)
+
+/** Lowest-priority: the `@main` migration bridge, below the dedicated instances in [[Parser]] and
+  * the collection instances in [[ParserLowPriority]].
+  */
+sealed trait ParserFromStringCompat:
+
+  /** Embeds a [[scala.util.CommandLineParser.FromString]] — the typeclass behind `@main`
+    * parameters — as a single-token value parser, so instances written for a `@main` method keep
+    * working after migrating. Each occurrence parses one token, and an `IllegalArgumentException`
+    * (the `FromString` failure contract) reports its message as the parse error. Repeated shapes
+    * compose on top, so a vararg parameter migrated to a collection field reuses the same element
+    * instance. The help metavar is the generic `value`; a dedicated instance ([[Parser.of]], or
+    * `withTypeName` on this one) is the upgrade path — any dedicated instance takes priority over
+    * this bridge.
+    */
+  given [A] => (fs: scala.util.CommandLineParser.FromString[A]) => Parser.Value[A]:
+    def typeName                                                               = "value"
+    override private[flagged] def readInto(s: String, out: Array[Any]^, i: Int) =
+      Result.task:
+        try out(i) = fs.fromString(s)
+        catch
+          case e: IllegalArgumentException =>
+            val m = e.getMessage
+            eval.raise(if m == null || m.isEmpty then s"'$s' cannot be parsed" else m)
