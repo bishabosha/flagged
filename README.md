@@ -262,8 +262,12 @@ the same command line keeps working:
 ```
 
 - **The command line does not change.** Unannotated parameters stay positional in
-  declaration order — exactly the `@main` rule — and defaults keep arguments optional.
-  (A case class with the same fields `derives Parser.Command` works identically.)
+  declaration order — exactly the `@main` rule. (A case class with the same fields
+  `derives Parser.Command` works identically.)
+- **Defaults start working.** `@main` compiles a default parameter but never uses it:
+  every argument must still be provided (`Illegal command line: more arguments
+  expected`). Flagged makes a defaulted argument genuinely optional — every command
+  line the `@main` accepted still parses, and shorter ones now work too.
 - **Vararg parameters keep working.** `files: String*` mirrors as a `Seq[String]` field —
   a repeated positional that collects the remaining arguments, and may be empty — on both
   `@cmd` methods and case classes.
