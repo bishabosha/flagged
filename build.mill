@@ -272,13 +272,14 @@ object bench extends BaseModule, JmhModule, FlaggedFromJar:
 object examples extends BaseModule:
   def moduleDeps = Seq(flagged.stable.jvm)
 
-/** Derives the unchecked publishable sources onto a git branch: creates `branch` from `base` (or
-  * reuses it if it already exists), replaces the flagged source folders with the [[Uncheck]]
-  * rewrite of the current working tree's checked sources, carries the test sources over
-  * unconverted, strips the capture-checked-only region from `.scalafmt.conf`, adds the README
-  * derivation notice, reformats the result, and commits. If the branch is already checked out in
-  * another (clean) worktree, the commit is made there so that checkout stays in sync; otherwise
-  * all work happens in a temporary git worktree and the current checkout is untouched.
+/** Derives the unchecked publishable branch: creates `branch` from `base` (or reuses it if it
+  * already exists), mirrors the current working tree onto it — documentation, benchmarks,
+  * examples, CI config: everything except each branch's own build files — then replaces the
+  * flagged source folders with the [[Uncheck]] rewrite of the checked sources, strips the
+  * capture-checked-only region from `.scalafmt.conf`, adds the README derivation notice,
+  * reformats the result, and commits. If the branch is already checked out in another (clean)
+  * worktree, the commit is made there so that checkout stays in sync; otherwise all work happens
+  * in a temporary git worktree and the current checkout is untouched.
   */
 def deriveStable(
     branch: String = "mutable-spec-stable",
@@ -336,18 +337,29 @@ def deriveStable(
       else git("worktree", "add", wt.toString, "-b", branch, base)
       (wt, true)
   try
+    // each branch keeps its own build definition (this branch's build carries the
+    // capture-checking setup and this task; the derived branch's build compiles the plain
+    // sources) — so these are neither copied from the source branch nor deleted on the target;
+    // `.claude` is local tool configuration, likewise left alone
+    val branchSpecific =
+      Seq("build.mill", "mill", "mill.bat", ".mill-version", "uncheck-plugin", ".claude")
+
+    // mirror the working tree (tracked and untracked-but-not-ignored files): delete-then-copy
+    // so files removed on the source branch also disappear from the derived branch (`git rm`
+    // prunes emptied directories)
+    os.proc("git", "rm", "-rq", "--", ".", branchSpecific.map(p => s":(exclude)$p"))
+      .call(cwd = wt)
+    for
+      rel <- git("ls-files", "--cached", "--others", "--exclude-standard").out.lines()
+      p    = os.RelPath(rel)
+      if !branchSpecific.contains(p.segments.head)
+      if os.isFile(repo / p) // --cached lists files even when deleted in a dirty working tree
+    do os.copy.over(repo / p, wt / p, createFolders = true)
+
     for (name, gen) <- generated do
       val target = wt / "flagged" / name
       os.remove.all(target)
       os.copy(gen, target, createFolders = true)
-
-    val testSrc    = repo / "flagged" / "test"
-    val testTarget = wt / "flagged" / "test"
-    os.remove.all(testTarget)
-    for
-      p <- os.walk(testSrc)
-      if os.isFile(p) && !p.relativeTo(testSrc).segments.contains(".scala-build")
-    do os.copy(p, testTarget / p.relativeTo(testSrc), createFolders = true)
 
     val conf        = os.read(repo / ".scalafmt.conf")
     val derivedConf =
@@ -363,15 +375,17 @@ def deriveStable(
     val notice       =
       s"""$noticeHeader
          |
-         |The library sources on this branch are mechanically derived from the capture-checked sources on
-         |the [`$sourceBranch`](https://github.com/bishabosha/flagged/tree/$sourceBranch) branch, where the
-         |parser engine and other mutable internals are verified under the experimental `captureChecking`
-         |and `separationChecking` language modes. The `Uncheck` rewrite in that branch's `build.mill`
-         |strips the capture-checking surface — the language imports, `update`/`consume` modifiers, capture
-         |annotations (`^`, `^{...}`, `->`), and `caps.*` calls — producing the equivalent unchecked code
-         |here, so the published artifacts carry no dependency on experimental standard-library API. Make
-         |source changes on `$sourceBranch` and re-derive them with `mill deriveStable` rather than editing
-         |these files directly.
+         |This branch is mechanically derived from the
+         |[`$sourceBranch`](https://github.com/bishabosha/flagged/tree/$sourceBranch) branch — the development
+         |branch, where the parser engine and other mutable internals are verified under the experimental
+         |`captureChecking` and `separationChecking` language modes. Everything except the build files
+         |(`build.mill`, the mill launcher, and the `uncheck-plugin` compiler plugin) is mirrored from
+         |there: documentation, benchmarks, and examples verbatim, and the library sources via the
+         |`Uncheck` rewrite in that branch's `build.mill`, which strips the capture-checking surface — the
+         |language imports, `update`/`consume` modifiers, capture annotations (`^`, `^{...}`, `->`), and
+         |`caps.*` calls — so the published artifacts carry no dependency on experimental standard-library
+         |API. Make changes on `$sourceBranch` and re-derive them with `mill deriveStable` rather than
+         |editing this branch directly.
          |""".stripMargin
     val readmePath = wt / "README.md"
     val readme     = os.read(readmePath)
@@ -381,7 +395,7 @@ def deriveStable(
       else
         val at = readme.indexOf("\n## ")
         if at < 0 then readme + "\n" + notice
-        else readme.take(at + 1) + notice + readme.drop(at + 1)
+        else readme.take(at + 1) + notice + "\n" + readme.drop(at + 1)
     os.write.over(readmePath, updated)
 
     val toFormat =
@@ -392,16 +406,18 @@ def deriveStable(
       .worker()
       .reformat(toFormat, PathRef(wt / ".scalafmt.conf"))
 
+    // the mirror stages deletions via `git rm`, so stage everything before deciding whether
+    // anything actually changed (a file deleted and restored identical nets out clean)
+    os.proc("git", "add", "-A").call(cwd = wt)
     if os.proc("git", "status", "--porcelain").call(cwd = wt).out.trim().isEmpty then
       s"$branch is already up to date with $sourceBranch@$head"
     else
-      os.proc("git", "add", "-A").call(cwd = wt)
       val fromRev = s"$sourceBranch@$head" + (if dirty then " (dirty working tree)" else "")
       os.proc(
         "git",
         "commit",
         "-m",
-        s"derive unchecked sources from $sourceBranch\n\nGenerated by `mill deriveStable` from $fromRev via the Uncheck rewrite."
+        s"derive from $sourceBranch\n\nGenerated by `mill deriveStable` from $fromRev: the working tree mirrored except build files, with library sources via the Uncheck rewrite."
       ).call(cwd = wt)
       val sha = os.proc("git", "rev-parse", "--short", "HEAD").call(cwd = wt).out.trim()
       s"derived $branch@$sha from $fromRev (base $base)"
