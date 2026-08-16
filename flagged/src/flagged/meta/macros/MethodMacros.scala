@@ -40,6 +40,11 @@ object MethodMacros:
       tpe.asType match
         case '[pt] => '{ $e.asInstanceOf[pt] }.asTerm
 
+    /** Whether `t` is a vararg parameter's type inside a `MethodType`: `scala.<repeated>[E]`. */
+    private def isRepeated(t: TypeRepr): Boolean = t match
+      case AppliedType(tycon, _) => tycon.typeSymbol == defn.RepeatedParamClass
+      case _                     => false
+
     /** The reflectable members of `owner`'s module class, in declaration order: method symbols and
       * nested module (value) symbols carrying a [[flagged.meta.Reflectable]] annotation.
       */
@@ -64,8 +69,13 @@ object MethodMacros:
         case _: PolyType =>
           report.errorAndAbort(s"command method ${m.name}: type parameters are not supported")
         case _ => None // parameterless `def m`
-      val params                    = m.paramSymss.flatten.filter(_.isTerm)
-      val paramTypes                = mt.map(_.paramTypes).getOrElse(Nil)
+      val params   = m.paramSymss.flatten.filter(_.isTerm)
+      val rawTypes = mt.map(_.paramTypes).getOrElse(Nil)
+      // a trailing vararg (`scala.<repeated>[E]`) mirrors as `Seq[E]` — the normalization `Mirror`
+      // synthesis applies to a vararg case-class field — so it takes the ordinary repeated shape;
+      // the marker survives only in the term residue, where [[invokeBody]] re-splats
+      val paramTypes = rawTypes.map: t =>
+        if isRepeated(t) then TypeRepr.of[Seq].appliedTo(t.typeArgs) else t
       val resType                   = mt.map(_.resType).getOrElse(Ref(mod).tpe.memberType(m))
       val labels: List[TypeRepr]    = params.map(p => ConstantType(StringConstant(p.name)))
       val paramAnns: List[TypeRepr] = params.map(slot)
@@ -89,7 +99,11 @@ object MethodMacros:
           else
             Apply(
               sel,
-              paramTypes.zipWithIndex.map((pt, i) => cast('{ $args(${ Expr(i) }) }, pt))
+              paramTypes.zip(rawTypes).zipWithIndex.map { case ((pt, raw), i) =>
+                val arg = cast('{ $args(${ Expr(i) }) }, pt)
+                // splat the mirrored Seq back into the vararg parameter: `xs*`
+                if isRepeated(raw) then Typed(arg, Inferred(raw)) else arg
+              }
             )
         call.asExprOf[Any]
 
