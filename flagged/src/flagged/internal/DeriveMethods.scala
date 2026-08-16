@@ -34,7 +34,7 @@ import steps.result.Result
       error("no @cmd methods or nested @cmd objects found in " + constValue[r.mirror.MirroredLabel])
     else
       checkSumRules[r.Entries]
-      val eb = Vector.newBuilder[(String, TargetAnnots, Command)]
+      val eb = Vector.newBuilder[(String, flagged.cmd, Command)]
       entriesInto[T, r.Entries](r.mirror, r.entries, 0, eb)
       val es = eb.result()
       Assemble.sum(
@@ -156,7 +156,9 @@ import steps.result.Result
   private inline def singleOf[T, M <: MethodMirror[T]](m: M): (Command, String) =
     checkNoDefault[m.MirroredSelfAnnotations]
     val anns = Annots.targetAnnotsOf[m.MirroredSelfAnnotations]
-    (methodCmd[T, M](m, anns), anns.name.getOrElse(Assemble.kebab(constValue[m.MirroredLabel])))
+    val prog =
+      if anns.name.isEmpty then Assemble.kebab(constValue[m.MirroredLabel]) else anns.name
+    (methodCmd[T, M](m, anns), prog)
 
   /** One `(label, annotations, command)` per `@cmd` member, in declaration order — the three
     * parallel columns [[Assemble.sum]] consumes.
@@ -165,7 +167,7 @@ import steps.result.Result
       g: MethodsMirror[T],
       er: ER,
       i: Int,
-      b: scala.collection.mutable.Growable[(String, TargetAnnots, Command)]
+      b: scala.collection.mutable.Growable[(String, flagged.cmd, Command)]
   ): Unit =
     inline erasedValue[ER] match
       case _: EntriesResults.Empty                   => ()
@@ -194,7 +196,7 @@ import steps.result.Result
     */
   private inline def scopeEntryInto[S, SR <: MethodEntry[S]](
       sr: SR,
-      b: scala.collection.mutable.Growable[(String, TargetAnnots, Command)]
+      b: scala.collection.mutable.Growable[(String, flagged.cmd, Command)]
   ): Unit =
     inline if constValue[ScopeIsCmd[SR]] then
       b += ((
@@ -203,11 +205,11 @@ import steps.result.Result
         group[S, SR](sr)
       ))
 
-  private inline def methodEntry[T, M <: MethodMirror[T]](m: M): (String, TargetAnnots, Command) =
+  private inline def methodEntry[T, M <: MethodMirror[T]](m: M): (String, flagged.cmd, Command) =
     val anns = Annots.targetAnnotsOf[m.MirroredSelfAnnotations]
     (constValue[m.MirroredLabel], anns, methodCmd[T, M](m, anns))
 
-  private inline def methodCmd[T, M <: MethodMirror[T]](m: M, onMethod: TargetAnnots): Command =
+  private inline def methodCmd[T, M <: MethodMirror[T]](m: M, onMethod: flagged.cmd): Command =
     Derive
       .fieldsOf[m.MirroredElemLabels, m.MirroredElemTypes, m.MirroredAnnotations](m)
       .resultInto(

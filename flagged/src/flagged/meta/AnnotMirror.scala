@@ -120,6 +120,17 @@ object AnnotMirror:
         finish(argsOf[A, m.MirroredElemTypes, vs, idx]) :: findAllImpl[A, t, B](finish)
       case _: (_ *: t) => findAllImpl[A, t, B](finish)
 
+  /** Materialise one sparsely mirrored occurrence of `A` from its argument columns alone: the
+    * explicit constants land in their parameter positions, every omitted position comes from the
+    * [[Defaults]] mirror.
+    */
+  inline def materialize[
+      A <: Annotation: {Mirror.ProductOf as m, Defaults},
+      Vs <: Tuple,
+      Is <: Tuple
+  ]: A =
+    m.fromProduct(argsOf[A, m.MirroredElemTypes, Vs, Is])
+
   /** The full constructor-argument tuple for one sparsely mirrored annotation: the explicit
     * constants are materialised from their singleton types into the positions named by `Is`, and
     * every other position comes from the annotation's [[Defaults]] mirror.

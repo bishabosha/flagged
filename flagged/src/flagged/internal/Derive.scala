@@ -759,7 +759,7 @@ import flagged.meta.{ArgumentList, AnnotMirror, Defaults}
           constValue[L & String],
           summonInline[Parser[Unwrap[F]]],
           constValue[IsOpt[F]],
-          FieldAnnots.empty
+          Annots.bareOpt
         )
         plainRes
 

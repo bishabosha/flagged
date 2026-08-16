@@ -1,7 +1,7 @@
 package flagged
 
 import flagged.meta.{ArgumentList, AnnotMirror}
-import flagged.internal.{Derive, FieldAnnots, MaybeChar, TargetAnnots}
+import flagged.internal.Derive
 import scala.deriving.Mirror
 import scala.annotation.targetName
 import flagged.internal.Annots
@@ -14,15 +14,15 @@ class MetaSuite extends munit.FunSuite:
 
   // the derivation extracts one slot at a time, as the field walk reaches each field; these
   // collect the same per-field records for a whole class so they can be asserted together
-  inline def selfAnnotsOf[A]: TargetAnnots =
+  inline def selfAnnotsOf[A]: cmd =
     scala.compiletime.summonFrom:
       case am: AnnotMirror.Product[A] => Annots.targetAnnotsOf[am.MirroredSelfAnnotations]
 
-  inline def fieldAnnotsOf[A]: IndexedSeq[FieldAnnots] =
+  inline def fieldAnnotsOf[A]: IndexedSeq[opt] =
     scala.compiletime.summonFrom:
       case am: AnnotMirror.Product[A] => eachSlot[am.MirroredAnnotations]
 
-  inline def eachSlot[Slots]: IndexedSeq[FieldAnnots] =
+  inline def eachSlot[Slots]: IndexedSeq[opt] =
     inline scala.compiletime.erasedValue[Slots] match
       case _: EmptyTuple => Vector.empty
       // extraction is shape-blind: the positional-by-default rule is applied by the derivation,
@@ -101,12 +101,12 @@ class MetaSuite extends munit.FunSuite:
     @cmd(help = "a greeter")
     case class G(@opt(help = "who", short = 'n') name: String = "world", quiet: Boolean = false)
 
-    assertEquals(selfAnnotsOf[G], TargetAnnots(None, Some("a greeter")))
+    assertEquals(selfAnnotsOf[G], cmd(help = "a greeter"))
     assertEquals(
       fieldAnnotsOf[G],
       Vector(
-        FieldAnnots(None, MaybeChar('n'), Some("who"), positional = false),
-        FieldAnnots.empty
+        opt(help = "who", short = 'n'),
+        opt()
       )
     )
   }
@@ -117,19 +117,11 @@ class MetaSuite extends munit.FunSuite:
 
     assertEquals(
       selfAnnotsOf[A],
-      TargetAnnots(Some("prog"), None, false, aliases = Vector("p", "pr"))
+      cmd(name = "prog", aliases = ("p", "pr"))
     )
     assertEquals(
       fieldAnnotsOf[A],
-      Vector(
-        FieldAnnots(
-          Some("ex"),
-          MaybeChar.empty,
-          None,
-          positional = false,
-          aliases = Vector("extra")
-        )
-      )
+      Vector(opt(name = "ex", aliases = "extra" *: EmptyTuple))
     )
     // materialisation through find rebuilds the tuple value (and defaults for the rest)
     val am = AnnotMirror.ofProduct[A]
@@ -141,15 +133,15 @@ class MetaSuite extends munit.FunSuite:
 
   test("an unannotated slot reads back as all-defaults") {
     case class P(a: Int = 0, b: String = "")
-    assertEquals(fieldAnnotsOf[P], Vector(FieldAnnots.empty, FieldAnnots.empty))
+    assertEquals(fieldAnnotsOf[P], Vector(opt(), opt()))
   }
 
   test("bare @opt and @cmd slots share the empty records, like unannotated slots") {
     @cmd case class B(@opt a: Int = 0, b: String = "")
-    assert(selfAnnotsOf[B] eq TargetAnnots.empty)
+    assert(selfAnnotsOf[B] eq Annots.bareCmd)
     val recs = fieldAnnotsOf[B]
-    assert(recs(0) eq FieldAnnots.empty) // bare @opt: no constructor call
-    assert(recs(1) eq FieldAnnots.empty) // no annotation, under the helper's named default
+    assert(recs(0) eq Annots.bareOpt) // bare @opt: no constructor call
+    assert(recs(1) eq Annots.bareOpt) // no annotation, under the helper's named default
   }
 
   test("all-unannotated sum cases share Vector.empty, read back as all-defaults") {
@@ -157,18 +149,18 @@ class MetaSuite extends munit.FunSuite:
       case A, B
     val a = Annots.sumAnnots[Plain]
     assert(a.perCase.isEmpty)
-    assertEquals(a.caseAnnots(1), TargetAnnots.empty)
+    assertEquals(a.caseAnnots(1), cmd())
   }
 
   test("annotation extraction for an enum captures per-case annotations") {
     val a = Annots.sumAnnots[Git]
-    assertEquals(a.onType, TargetAnnots(None, Some("A tiny git-like tool")))
+    assertEquals(a.onType, cmd(help = "A tiny git-like tool"))
     assertEquals(
       a.perCase.map(_.help),
       Vector(
-        Some("Clone a repository"),
-        Some("Manage remotes"),
-        Some("Show status")
+        "Clone a repository",
+        "Manage remotes",
+        "Show status"
       )
     )
   }
@@ -179,9 +171,9 @@ class MetaSuite extends munit.FunSuite:
     val ann = summon[AnnotMirror.Product[Old]]
     summon[ann.MirroredSelfAnnotations =:= EmptyTuple] // no @targetName in the self slot
 
-    assertEquals(selfAnnotsOf[Old], TargetAnnots.empty)
+    assertEquals(selfAnnotsOf[Old], cmd())
     assertEquals(
       fieldAnnotsOf[Old],
-      Vector(FieldAnnots(None, MaybeChar('x'), None, positional = false))
+      Vector(opt(short = 'x'))
     )
   }

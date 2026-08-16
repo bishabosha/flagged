@@ -52,8 +52,8 @@ private[flagged] enum SubEntry:
       i += 1
     b.result()
 
-  def progName(label: String, onType: TargetAnnots): String =
-    onType.name.getOrElse(kebab(label))
+  def progName(label: String, onType: flagged.cmd): String =
+    if onType.name.isEmpty then kebab(label) else onType.name
 
   private def invalid(msg: String): Nothing =
     throw new IllegalArgumentException(s"flagged: invalid CLI definition: $msg")
@@ -66,7 +66,8 @@ private[flagged] enum SubEntry:
       annots: Annots.Sum[?]
   ): Parser.Enumerated[Any] =
     val pairs = Vector.tabulate(caseLabels.length) { i =>
-      (annots.caseAnnots(i).name.getOrElse(kebab(caseLabels(i))), values(i))
+      val name = annots.caseAnnots(i).name
+      (if name.isEmpty then kebab(caseLabels(i)) else name, values(i))
     }
     val joined   = pairs.iterator.map(_(0)).mkString("|")
     val typeName = if joined.length <= 40 then joined else kebab(typeLabel)
@@ -123,12 +124,18 @@ private[flagged] enum SubEntry:
   ): Command =
     val cases = Vector.tabulate(entries.length) { i =>
       val anns = annots.caseAnnots(i)
-      val help = anns.help.getOrElse("")
+      val help = anns.help
       val cmd  = entries(i) match
         case SubEntry.Leaf(v) => Command.leaf(v, help)
         case SubEntry.Node(p) => p.command
         case SubEntry.Cmd(c)  => c
-      SubCase(anns.name.getOrElse(kebab(caseLabels(i))), help, cmd, anns.hidden, anns.aliases)
+      SubCase(
+        if anns.name.isEmpty then kebab(caseLabels(i)) else anns.name,
+        help,
+        cmd,
+        anns.hidden,
+        Annots.aliasStrings(anns.aliases)
+      )
     }
     // kebab-derived command names can collide only at the value level (constant @cmd name/alias
     // duplicates are compile errors); a silent collision would shadow the later command
@@ -140,7 +147,7 @@ private[flagged] enum SubEntry:
       val i = annots.perCase.indexWhere(_.default)
       if i < 0 then None else Some(cases(i))
     Command(
-      annots.onType.help.getOrElse(""),
+      annots.onType.help,
       Command.noOpts,
       Command.noPos,
       Some(SubGroup(0, false, None, cases, defaultCase)),
@@ -216,27 +223,28 @@ private[flagged] enum SubEntry:
         if shorts.contains(spec.short) then invalid(s"duplicate short option '-$c'${origin(from)}")
         shorts = shorts.updated(spec.short, spec)
 
-    update def addField(label: String, parser: Parser[?], optional: Boolean, anns: FieldAnnots): Unit =
+    update def addField(label: String, parser: Parser[?], optional: Boolean, anns: flagged.opt): Unit =
       val i = index
       index += 1
       val default =
         if defaults.hasDefault(i) then Some(() => defaults.defaultArgument(i)) else None
       def bad(msg: String): Nothing                = invalid(s"field '$label': $msg")
+      def fieldName: String                        = if anns.name.isEmpty then kebab(label) else anns.name
       def named(metavar: String, mode: Mode): Unit =
-        val long = anns.name.getOrElse(kebab(label))
+        val long = fieldName
         if long == "help" then bad("option name 'help' is reserved")
         addOpt(
           OptSpec(
             long,
-            anns.short,
-            anns.help.getOrElse(""),
+            MaybeChar.encode(anns.short),
+            anns.help,
             metavar,
             i,
             mode,
             default,
             anns.hidden,
-            anns.group,
-            anns.aliases
+            if anns.group.isEmpty then None else Some(anns.group),
+            Annots.aliasStrings(anns.aliases)
           ),
           from = null
         )
@@ -246,13 +254,13 @@ private[flagged] enum SubEntry:
         if required then
           if optionalPosSeen then
             invalid(
-              s"positional '${anns.name.getOrElse(kebab(label))}': required positionals must come before optional ones"
+              s"positional '$fieldName': required positionals must come before optional ones"
             )
         else optionalPosSeen = true
         if poss == null then poss = new Array[PosSpec](n)
         poss(possN) = PosSpec(
-          anns.name.getOrElse(kebab(label)),
-          anns.help.getOrElse(""),
+          fieldName,
+          anns.help,
           metavar,
           i,
           mode,
@@ -272,19 +280,19 @@ private[flagged] enum SubEntry:
           // checked derivation (the factory is private), which rejects positionals, trailing,
           // subcommands, and greedy options at compile time
           val inner  = sh.impl
-          val prefix = anns.name
+          val prefix = anns.name // "" means unprefixed
           inner.opts.foreach { o =>
             // a prefixed splice renames its options (--net-host) and drops their short aliases,
             // so the same group can be spliced more than once
-            val long    = prefix.fold(o.long)(pre => s"$pre-${o.long}")
+            val long    = if prefix.isEmpty then o.long else s"$prefix-${o.long}"
             val short   = if prefix.isEmpty then o.short else MaybeChar.empty
-            val aliases = o.aliases.map(a => prefix.fold(a)(pre => s"$pre-$a"))
+            val aliases = if prefix.isEmpty then o.aliases else o.aliases.map(a => s"$prefix-$a")
             addOpt(
               o.copy(
                 long = long,
                 short = short,
                 index = storage + o.index,
-                group = o.group.orElse(anns.group),
+                group = o.group.orElse(if anns.group.isEmpty then None else Some(anns.group)),
                 aliases = aliases
               ),
               from = label
@@ -319,16 +327,16 @@ private[flagged] enum SubEntry:
           else named(pr.helpMetavar, mode)
 
         case r: Parser.Repeated[?] =>
-          val mode = Mode.Repeated(r, anns.split, anns.greedy)
+          val mode = Mode.Repeated(r, MaybeChar.encode(anns.split), anns.greedy)
           if anns.positional then positional(r.typeName, mode, required = false)
           else named(r.typeName, mode)
 
         case t: Parser.Trailing[?] =>
           // at most one, and never next to positionals or subcommands: compile-checked
-          trailing = TrailingSpec(i, anns.help.getOrElse(""), t, optional, default)
+          trailing = TrailingSpec(i, anns.help, t, optional, default)
 
     update def resultInto(
-        onType: TargetAnnots,
+        onType: flagged.cmd,
         build: (Array[Any]^, Int, Int) -> Result[Unit, String],
         version: Option[() -> String]
     ): Command =
@@ -341,7 +349,7 @@ private[flagged] enum SubEntry:
 
       // `build` receives the whole storage plus the parent's own field count — no trimming
       Command(
-        onType.help.getOrElse(""),
+        onType.help,
         allOpts,
         allPos,
         if sub == null then None else Some(sub),
