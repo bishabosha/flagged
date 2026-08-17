@@ -1,4 +1,4 @@
-//| mvnDeps: ["com.lihaoyi::mill-contrib-jmh:1.1.7"]
+//| mvnDeps: ["com.lihaoyi::mill-contrib-jmh:1.2.0-RC1-46-16168f"]
 //| bspScriptIgnore: ["**/.scala-build/"]
 package build
 
@@ -33,6 +33,8 @@ trait BaseJsWasmModule extends BaseJsModule:
   override def moduleKind: T[ModuleKind]             = Task { ModuleKind.ESModule }
   override def moduleSplitStyle: T[ModuleSplitStyle] = Task { ModuleSplitStyle.FewestModules }
   override def scalaJSExperimentalUseWebAssembly: T[Boolean] = Task { true }
+  // the Wasm backend requires ES2022 since Scala.js 1.22 (needs mill > 1.2.0-RC1 for the enum case)
+  override def esFeatures = Task { super.esFeatures().withESVersion(ESVersion.ES2022) }
 
 trait BaseNativeModule extends BaseModule, ScalaNativeModule:
   def scalaNativeVersion = Versions.scalaNative
