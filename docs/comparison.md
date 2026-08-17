@@ -7,7 +7,7 @@ This document compares the features of Flagged to:
 - scallop (5.1.0)
 - and picocli (4.7.6, the de-facto Java standard).
 
-Comparisons to mainargs, case-app, scopt, scallop, and picocli entries are based on their documentation, but also concrete tests (the `realistic` scenario tests the same schema accross all libraries). `flagged/test/src/flagged/ParitySuite.scala` also documents specific behavior.
+Comparisons to mainargs, case-app, scopt, scallop, and picocli entries are based on their documentation, but also concrete tests (the `realistic` scenario tests the same schema across all libraries). `flagged/test/src/flagged/ParitySuite.scala` also documents specific behavior.
 
 JMH benchmarks comparing derivation compile time, runtime parser construction, the one-shot construct-and-parse cost, and parse latency/allocation live in `bench/` (see `bench/README.md`, current numbers in `bench/results.md`).
 
@@ -18,7 +18,7 @@ according to a schema. They differ in how to construct the schema, when validati
 
 | Library | Overview |
 | --- | --- |
-| flagged | Type class model, automatic derivation of option parser for case-class/enum/`@cmd` annotated methods. Compile time validation of the schema, except to check for name collisions |
+| flagged | Type class model, automatic derivation of option parser for case classes (`derives Parser.Command`), subcommand enums (`derives Parser.CommandGroup`), and `@cmd` annotated methods; one-call entry via `Flagged.parseOrExit`, or `Flagged.entry` to resolve the grammar once and parse many times. Compile-time validation of the schema, including duplicate names when they are constants (dynamic names are checked at parser construction) |
 | mainargs | Type class model, automatic derivation of option parser for case class / `@main` annotated methods. Automatic assembly of subcommands (1-level, methods only) |
 | case-app | Type class model, automatic derivation of option parser for case class. Mixin traits used to assemble subcommands, override features. |
 | scopt | Type class model (for values only), options parser constructed with builder pattern. Arbitrary nesting of subcommands supported. Validation at runtime. |
@@ -57,7 +57,7 @@ according to a schema. They differ in how to construct the schema, when validati
 | Help markers: defaults / required / repeatable | yes / yes / yes | case-app: `*` for repeatable; picocli: opt-in templates (`${DEFAULT-VALUE}`, `requiredOptionMarker`) |
 | Did-you-mean suggestions | commands and options | picocli ("possible solutions") |
 | Error aggregation | all error kinds together | case-app: all kinds; mainargs: missing + unknown + duplicate; scopt, picocli: unknown options together, else first; scallop: first error |
-| Duplicate name detection | compile time (constant names) + construction | case-app: opt-in runtime (`ensureNoDuplicates`); scallop, picocli: at model build/`verify()`; mainargs: none documented |
+| Duplicate name detection | compile time (constant names, `@cmd` command names included) + construction (dynamic names) | case-app: opt-in runtime (`ensureNoDuplicates`); scallop, picocli: at model build/`verify()`; mainargs: none documented |
 | Hidden options / commands | `@opt(hidden = true)` / `@cmd(hidden = true)`, revealed by `--help-all` | mainargs, scallop, picocli `hidden = true`; case-app `@Hidden`, `--full-help`; scopt `.hidden()` |
 | Help sections | `@opt(group = ...)` (also on spliced groups) | case-app `@Group`, sorted; scallop `group()`; picocli `@ArgGroup(heading = ...)` |
 | Name & version in help | `@version("1.0")` literal, or bare `@version` via a `Versioned` instance; `--version` | case-app `@AppName`/`@AppVersion`; scopt `head(...)`/`version(...)`; scallop `version(...)`; picocli `@Command(version = ...)` |
