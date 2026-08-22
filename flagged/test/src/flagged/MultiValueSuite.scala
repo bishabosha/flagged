@@ -5,40 +5,42 @@ package flagged
 case class Pt(x: Int, y: Int) derives Parser.Product
 
 case class Plot(
-    @short('p') point: (Int, Int) = (0, 0),
-    corner: Option[(Int, Int)] = None,
-    label: String = ""
+    @opt(short = 'p') point: (Int, Int) = (0, 0),
+    @opt corner: Option[(Int, Int)] = None,
+    @opt label: String = ""
 ) derives Parser.Command
 
-case class Move(origin: Pt = Pt(0, 0), target: Pt) derives Parser.Command
+case class Move(@opt origin: Pt = Pt(0, 0), @opt target: Pt) derives Parser.Command
 
 case class PosProduct(
-    @positional at: (Int, Int),
-    @positional rest: List[String] = Nil
+    at: (Int, Int),
+    rest: List[String] = Nil
 ) derives Parser.Command
 
-case class MixedProduct(span: (Int, String, Double)) derives Parser.Command
+case class MixedProduct(@opt span: (Int, String, Double)) derives Parser.Command
 
-// ---- @split --------------------------------------------------------------------
+// ---- @opt(split) ---------------------------------------------------------------
 
 case class SplitOpts(
-    @short('n') @split nums: List[Int] = Nil,
-    @split(';') tags: Set[String] = Set.empty,
-    @split defines: Map[String, Int] = Map.empty
+    @opt(short = 'n', split = ',') nums: List[Int] = Nil,
+    @opt(split = ';') tags: Set[String] = Set.empty,
+    @opt(split = ',') defines: Map[String, Int] = Map.empty
 ) derives Parser.Command
 
-case class SplitPositional(@positional @split nums: List[Int] = Nil) derives Parser.Command
+case class SplitPositional(
+    @opt(positional = true, split = ',') nums: List[Int] = Nil
+) derives Parser.Command
 
-// ---- @greedy -------------------------------------------------------------------
+// ---- @opt(greedy) --------------------------------------------------------------
 
 case class GreedyOpts(
-    @short('n') @greedy nums: List[Int] = Nil,
-    @short('w') @greedy words: Vector[String] = Vector.empty,
-    @short('v') verbose: Boolean = false
+    @opt(short = 'n', greedy = true) nums: List[Int] = Nil,
+    @opt(short = 'w', greedy = true) words: Vector[String] = Vector.empty,
+    @opt(short = 'v') verbose: Boolean = false
 ) derives Parser.Command
 
 case class GreedyTrailing(
-    @greedy nums: List[Int] = Nil,
+    @opt(greedy = true) nums: List[Int] = Nil,
     cmd: Trailing = Trailing()
 ) derives Parser.Command
 
@@ -136,7 +138,7 @@ class MultiValueSuite extends munit.FunSuite:
     assert(hp.contains("--point <int> <int>"), hp)
   }
 
-  // ---- @split ------------------------------------------------------------------
+  // ---- @opt(split) -------------------------------------------------------------
 
   test("split divides one value into elements") {
     assertEquals(
@@ -178,7 +180,7 @@ class MultiValueSuite extends munit.FunSuite:
     )
   }
 
-  // ---- @greedy -----------------------------------------------------------------
+  // ---- @opt(greedy) ------------------------------------------------------------
 
   test("greedy consumes following free tokens") {
     assertEquals(
@@ -233,43 +235,46 @@ class MultiValueSuite extends munit.FunSuite:
 
   // ---- compile-time rules ------------------------------------------------------
 
-  test("@split requires a repeated field") {
-    val e = compileErrors("case class C(@split x: Int = 0) derives Parser.Command")
-    assert(e.contains("@split requires a field with a repeated Parser"), e)
+  test("@opt(split) requires a repeated field") {
+    val e = compileErrors("case class C(@opt(split = ',') x: Int = 0) derives Parser.Command")
+    assert(e.contains("@opt(split) requires a field with a repeated Parser"), e)
   }
 
-  test("@greedy requires a repeated field") {
-    val e = compileErrors("case class C(@greedy x: String = \"\") derives Parser.Command")
-    assert(e.contains("@greedy requires a field with a repeated Parser"), e)
+  test("@opt(greedy) requires a repeated field") {
+    val e =
+      compileErrors("case class C(@opt(greedy = true) x: String = \"\") derives Parser.Command")
+    assert(e.contains("@opt(greedy) requires a field with a repeated Parser"), e)
   }
 
-  test("@split cannot combine with @greedy") {
-    val e = compileErrors("case class C(@split @greedy x: List[Int] = Nil) derives Parser.Command")
-    assert(e.contains("@split cannot be combined with @greedy"), e)
-  }
-
-  test("@greedy on a positional is rejected") {
+  test("@opt(split) cannot combine with @opt(greedy)") {
     val e = compileErrors(
-      "case class C(@positional @greedy x: List[Int] = Nil) derives Parser.Command"
+      "case class C(@opt(split = ',', greedy = true) x: List[Int] = Nil) derives Parser.Command"
+    )
+    assert(e.contains("@opt(split) cannot be combined with @opt(greedy)"), e)
+  }
+
+  test("@opt(greedy) on a positional is rejected") {
+    val e = compileErrors(
+      "case class C(@opt(positional = true, greedy = true) x: List[Int] = Nil) derives Parser.Command"
     )
     assert(e.contains("a repeated positional is already greedy"), e)
   }
 
-  test("@greedy cannot coexist with positional fields") {
+  test("@opt(greedy) cannot coexist with positional fields") {
     val e = compileErrors(
-      "case class C(@greedy x: List[Int] = Nil, @positional y: String) derives Parser.Command"
+      "case class C(@opt(greedy = true) x: List[Int] = Nil, y: String) derives Parser.Command"
     )
     assert(e.contains("cannot have positional fields"), e)
   }
 
-  test("@greedy cannot coexist with a subcommand field") {
+  test("@opt(greedy) cannot coexist with a subcommand field") {
     val e = compileErrors(
-      "case class C(@greedy x: List[Int] = Nil, action: SimpleCmd) derives Parser.Command"
+      "case class C(@opt(greedy = true) x: List[Int] = Nil, action: SimpleCmd) derives Parser.Command"
     )
     assert(e.contains("cannot have a subcommand field"), e)
   }
 
   test("Option of a product is fine, product in a collection is not") {
-    val e = compileErrors("case class C(pts: List[(Int, Int)] = Nil) derives Parser.Command")
+    val e = compileErrors("case class C(@opt pts: List[(Int, Int)] = Nil) derives Parser.Command")
     assert(e.nonEmpty, "expected a missing-instance error")
   }

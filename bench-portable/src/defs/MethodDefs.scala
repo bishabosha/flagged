@@ -1,18 +1,18 @@
 package bench.defs
 
-import flagged.{run, short, positional, Parser}
+import flagged.{cmd, opt, Parser}
 import mainargs.{main, arg, Flag, ParserForMethods}
 
-// ---- method-based commands: flagged `@run` vs mainargs `@main` ----------------
+// ---- method-based commands: flagged `@cmd` vs mainargs `@main` ----------------
 // Bodies fold every parameter into the result so invocation cannot be elided.
 
 /** Lone command method — the same grammar as the `simple` scenario. */
 object FMethodApp:
-  @run def send(
-      @short('f') foo: String = "x",
-      bar: Int = 0,
-      @short('b') baz: Boolean = false,
-      qux: List[String] = Nil
+  @cmd def send(
+      @opt(short = 'f') foo: String = "x",
+      @opt bar: Int = 0,
+      @opt(short = 'b') baz: Boolean = false,
+      @opt qux: List[String] = Nil
   ): Int = foo.length + bar + (if baz then 1 else 0) + qux.size
 
 object MMethodApp:
@@ -25,10 +25,11 @@ object MMethodApp:
 
 /** Three commands dispatching on the first token — the compile bench's `commands` interface. */
 object FMethodCli:
-  @run def add(@positional name: String, url: String = ""): Int          = name.length + url.length
-  @run def remove(@positional name: String, force: Boolean = false): Int =
+  @cmd def add(name: String, @opt url: String = ""): Int =
+    name.length + url.length
+  @cmd def remove(name: String, @opt force: Boolean = false): Int =
     name.length + (if force then 1 else 0)
-  @run def ls(verbose: Boolean = false, limit: Int = 10): Int = limit
+  @cmd def ls(@opt verbose: Boolean = false, @opt limit: Int = 10): Int = limit
 
 object MMethodCli:
   @main def add(name: String, url: String = ""): Int        = name.length + url.length

@@ -4,7 +4,7 @@ import java.nio.file.Paths
 
 // java.nio.file.Path is available on the JVM and Scala Native, not on Scala.js
 case class PathConfig(
-    path: java.nio.file.Path = Paths.get(".")
+    @opt path: java.nio.file.Path = Paths.get(".")
 ) derives Parser.Command
 
 class PathSuite extends munit.FunSuite:

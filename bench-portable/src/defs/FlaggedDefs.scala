@@ -5,106 +5,106 @@ import flagged.*
 // ---- three-way scenarios ------------------------------------------------------
 
 case class FSimple(
-    @short('f') foo: String = "x",
-    bar: Int = 0,
-    @short('b') baz: Boolean = false,
-    qux: List[String] = Nil
+    @opt(short = 'f') foo: String = "x",
+    @opt bar: Int = 0,
+    @opt(short = 'b') baz: Boolean = false,
+    @opt qux: List[String] = Nil
 ) derives Parser.Command
 
 // ---- flagged x case-app -------------------------------------------------------
 
 case class FVerbosity(
-    @short('v') verbose: Count = Count(0),
-    target: String = "all"
+    @opt(short = 'v') verbose: Count = Count(0),
+    @opt target: String = "all"
 ) derives Parser.Command
 
 case class FLog(
-    @short('q') quiet: Boolean = false,
+    @opt(short = 'q') quiet: Boolean = false,
     logLevel: String = "info"
 ) derives Parser.Shared
 
 case class FWithGroup(
-    host: String = "localhost",
-    port: Int = 80,
+    @opt host: String = "localhost",
+    @opt port: Int = 80,
     log: FLog = FLog()
 ) derives Parser.Command
 
 // ---- flagged x mainargs -------------------------------------------------------
 
 case class FNums(
-    @short('s') scale: Int = 1,
-    @positional nums: List[Int] = Nil
+    @opt(short = 's') scale: Int = 1,
+    nums: List[Int] = Nil
 ) derives Parser.Command
 
 case class FDefines(
-    @short('D') define: Map[String, Int] = Map.empty
+    @opt(short = 'D') define: Map[String, Int] = Map.empty
 ) derives Parser.Command
 
 // ---- baseline comparisons -------------------------------------------------------
 
 case class FWide25(
-    opt1: String = "",
-    opt2: String = "",
-    opt3: String = "",
-    opt4: String = "",
-    opt5: String = "",
-    opt6: String = "",
-    opt7: String = "",
-    opt8: String = "",
-    opt9: String = "",
-    opt10: String = "",
-    opt11: String = "",
-    opt12: String = "",
-    opt13: String = "",
-    opt14: String = "",
-    opt15: String = "",
-    opt16: String = "",
-    opt17: String = "",
-    opt18: String = "",
-    opt19: String = "",
-    opt20: String = "",
-    opt21: String = "",
-    opt22: String = "",
-    opt23: String = "",
-    opt24: String = "",
-    opt25: String = ""
+    @opt opt1: String = "",
+    @opt opt2: String = "",
+    @opt opt3: String = "",
+    @opt opt4: String = "",
+    @opt opt5: String = "",
+    @opt opt6: String = "",
+    @opt opt7: String = "",
+    @opt opt8: String = "",
+    @opt opt9: String = "",
+    @opt opt10: String = "",
+    @opt opt11: String = "",
+    @opt opt12: String = "",
+    @opt opt13: String = "",
+    @opt opt14: String = "",
+    @opt opt15: String = "",
+    @opt opt16: String = "",
+    @opt opt17: String = "",
+    @opt opt18: String = "",
+    @opt opt19: String = "",
+    @opt opt20: String = "",
+    @opt opt21: String = "",
+    @opt opt22: String = "",
+    @opt opt23: String = "",
+    @opt opt24: String = "",
+    @opt opt25: String = ""
 ) derives Parser.Command
 
 /** The grammar of an `@main` method with 25 `String` parameters. */
 case class FPos25(
-    @positional a1: String,
-    @positional a2: String,
-    @positional a3: String,
-    @positional a4: String,
-    @positional a5: String,
-    @positional a6: String,
-    @positional a7: String,
-    @positional a8: String,
-    @positional a9: String,
-    @positional a10: String,
-    @positional a11: String,
-    @positional a12: String,
-    @positional a13: String,
-    @positional a14: String,
-    @positional a15: String,
-    @positional a16: String,
-    @positional a17: String,
-    @positional a18: String,
-    @positional a19: String,
-    @positional a20: String,
-    @positional a21: String,
-    @positional a22: String,
-    @positional a23: String,
-    @positional a24: String,
-    @positional a25: String
+    a1: String,
+    a2: String,
+    a3: String,
+    a4: String,
+    a5: String,
+    a6: String,
+    a7: String,
+    a8: String,
+    a9: String,
+    a10: String,
+    a11: String,
+    a12: String,
+    a13: String,
+    a14: String,
+    a15: String,
+    a16: String,
+    a17: String,
+    a18: String,
+    a19: String,
+    a20: String,
+    a21: String,
+    a22: String,
+    a23: String,
+    a24: String,
+    a25: String
 ) derives Parser.Command
 
 /** The grammar `@main def run(foo: String, bar: Int, baz: Boolean, qux: String*)` expresses. */
 case class FMainStyle(
-    @positional foo: String,
-    @positional bar: Int,
-    @positional baz: Boolean,
-    @positional qux: List[String] = Nil
+    foo: String,
+    bar: Int,
+    baz: Boolean,
+    qux: List[String] = Nil
 ) derives Parser.Command
 
 object FlaggedDefs:
