@@ -15,20 +15,21 @@ jobs:
       matrix:
         include:
           - platform: jvm
-            mill-targets: mill.scalalib.scalafmt/checkFormatAll + flagged.jvm.test + examples.compile + bench.compile
+            mill-targets: mill.scalalib.scalafmt/checkFormatAll + flagged.jvm.test + flagged.jvm.checkCompatibility + examples.compile + bench.compile
             node-version: ''
             install-native-deps: false
           - platform: js
-            mill-targets: flagged.js.test + flagged.jsWasm.compile + bench-portable.js.compile
+            mill-targets: flagged.js.test + flagged.js.checkCompatibility + flagged.jsWasm.compile + bench-portable.js.compile
             node-version: '22'
             install-native-deps: false
           - platform: native
-            mill-targets: flagged.native.test + bench-portable.native.compile
+            mill-targets: flagged.native.test + flagged.native.checkCompatibility + bench-portable.native.compile
             node-version: ''
             install-native-deps: true
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: recursive
           fetch-depth: 0
       - uses: coursier/cache-action@v6
       - uses: actions/setup-java@v4
@@ -51,6 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: recursive
           fetch-depth: 0
       - uses: coursier/cache-action@v6
       - uses: actions/setup-java@v4

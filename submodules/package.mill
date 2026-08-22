@@ -1,0 +1,87 @@
+// Compiles TASTy-MiMa and tasty-query from the checkouts in this directory.
+//
+// The published tasty-query reads TASTy 28.8 while Scala 3.9 emits 28.9; scalacenter/tasty-query
+// #470 adds 28.9 support but is unreleased, so it is consumed from source until it lands.
+//
+// `tastyMima.mill` loads the result reflectively rather than putting it on the build's own
+// classpath, so these checkouts are only needed by the task that uses them: `checkCompatibility`
+// alone fails when they are missing, and a fresh worktree compiles and tests without fetching
+// anything.
+package build.submodules
+
+import mill.*
+import mill.api.{BuildCtx, Result}
+import mill.scalalib.*
+
+object `package` extends Module:
+
+  /** Scala the vendored sources are compiled at — upstream's own choice, unrelated both to the
+    * version this project builds with and to the TASTy versions the result can read.
+    */
+  val toolScalaVersion = "3.8.3"
+
+  /** Compiles source folders from a submodule checkout. */
+  trait Vendored extends JavaModule:
+    def submodule: String
+    def submoduleSourceFolders: Seq[os.SubPath]
+
+    def submoduleDir = BuildCtx.workspaceRoot / "submodules" / submodule
+
+    /** Vendored code is upstream's to format, and `scalafmt/checkFormatAll` resolves `__.sources`,
+      * so these are declared as generated sources: compiled, but not ours to check.
+      */
+    override def generatedSources = Task.Sources(submoduleSourceFolders.map(submoduleDir / _)*)
+
+    override def sources   = Task.Sources()
+    override def resources = Task.Sources()
+
+    override def compile = Task {
+      submoduleCheckout()
+      super.compile()
+    }
+
+    /** An uninitialised submodule is an empty directory, which would otherwise compile to an empty
+      * jar and fail later as a missing class. Fail here, where the cause is still visible.
+      */
+    def submoduleCheckout: T[Unit] = Task.Input {
+      val missing = submoduleSourceFolders.filterNot(folder => os.exists(submoduleDir / folder))
+      if missing.isEmpty then Result.Success(())
+      else
+        Result.Failure(
+          s"""The `submodules/$submodule` checkout is missing or incomplete — no
+             |${missing.map(folder => s"  submodules/$submodule/$folder").mkString("\n")}
+             |
+             |`checkCompatibility` builds TASTy-MiMa and tasty-query from these checkouts. Run
+             |
+             |    git submodule update --init --recursive
+             |
+             |and try again. Nothing else in the build needs them.""".stripMargin
+        )
+    }
+
+  /** Upstream's own options, minus their fatal-warning flags — a warning in vendored sources is
+    * upstream's business, not a reason to fail this build.
+    */
+  trait VendoredScalaModule extends ScalaModule, Vendored:
+    def scalaVersion = toolScalaVersion
+
+    override def scalacOptions = Seq("-deprecation", "-feature", "-Yexplicit-nulls")
+
+  object tastyQuery extends VendoredScalaModule:
+    def submodule              = "tasty-query"
+    def submoduleSourceFolders = Seq(
+      os.sub / "tasty-query/shared/src/main/scala",
+      os.sub / "tasty-query/jvm/src/main/scala"
+    )
+
+  /** `tastymima.intf`, the pure-Java surface TASTy-MiMa's callers configure it through. */
+  object tastyMimaInterface extends JavaModule, Vendored:
+    def submodule              = "tasty-mima"
+    def submoduleSourceFolders = Seq(os.sub / "tasty-mima-interface/src/main/java")
+
+  object tastyMima extends VendoredScalaModule:
+    def submodule              = "tasty-mima"
+    def submoduleSourceFolders = Seq(os.sub / "tasty-mima/src/main/scala")
+    def moduleDeps             = Seq(tastyMimaInterface, tastyQuery)
+
+    override def scalacOptions = super.scalacOptions() ++ Seq("-source:future")
