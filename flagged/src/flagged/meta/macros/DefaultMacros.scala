@@ -19,7 +19,14 @@ object DefaultMacros:
               .methodMember(s"apply$$default$$${i + 1}")
               .headOption
               .orElse(comp.methodMember(s"$$lessinit$$greater$$default$$${i + 1}").headOption)
-              .map(dm => i -> Ref(comp).select(dm))
+              .map { dm =>
+                val ref = Ref(comp).select(dm)
+                // a generic class's getters take its type parameters: apply A's arguments
+                val call = ref.tpe.widenTermRefByName match
+                  case _: PolyType => TypeApply(ref, TypeRepr.of[A].typeArgs.map(Inferred(_)))
+                  case _           => ref
+                i -> call
+              }
           else None
         }
       else Nil

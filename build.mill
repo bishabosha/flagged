@@ -146,7 +146,9 @@ object flagged extends Module:
       def munitVersion = Versions.munit
 
   object jvm extends FlaggedModule, JvmNativeSources:
-    object test extends FlaggedTests
+    object test extends FlaggedTests:
+      // WarningsSuite (test/src-jvm) drives the dotty compiler to assert emitted diagnostics
+      def mvnDeps = super.mvnDeps() ++ Seq(mvn"org.scala-lang::scala3-compiler:${Versions.scala}")
 
   object js extends FlaggedModule, BaseJsModule:
     object test extends FlaggedTests, ScalaJSTests
@@ -202,6 +204,9 @@ object flagged extends Module:
       def checked = flagged.jvm
       object test extends StableTests:
         def checkedTest = flagged.jvm.test
+        // the shared WarningsSuite drives the dotty compiler to assert emitted diagnostics
+        def mvnDeps = super.mvnDeps() ++
+          Seq(mvn"org.scala-lang::scala3-compiler:${Versions.scala}")
 
     object js extends StableModule, BaseJsModule:
       def checked = flagged.js

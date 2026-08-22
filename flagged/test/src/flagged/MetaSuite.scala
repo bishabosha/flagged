@@ -10,6 +10,15 @@ import flagged.internal.Annots
 final case class tagged(label: String = "none", level: Int = 1)
     extends scala.annotation.StaticAnnotation derives meta.Defaults
 
+// referenced from annotation arguments below: a constant-typed `final val` is a constant
+final val TestSep = "."
+
+// as is an `inline val`
+inline val TestPrefix = "pre"
+
+// type-parameterised test annotation: mirrors at its applied type
+final case class poly[T](default: T, note: String = "") extends scala.annotation.StaticAnnotation
+
 class MetaSuite extends munit.FunSuite:
 
   // the derivation extracts one slot at a time, as the field walk reaches each field; these
@@ -183,5 +192,91 @@ class MetaSuite extends munit.FunSuite:
     assertEquals(
       fieldAnnotsOf[Old],
       Vector(FieldAnnots(None, MaybeChar('x'), None, positional = false))
+    )
+
+    // a runtime value can never be encoded as a singleton type: the occurrences are left out of
+    // the mirror — and, unlike the shapes above, with a compile-time warning (suppressed here)
+    // that lists every dropped occurrence and where it sits
+    val rt = List("a", "b").mkString
+    @scala.annotation.nowarn("msg=is ignored") @tagged(label = rt)
+    case class NonConst(@opt(help = rt) x: Int = 0)
+    val ann2 = summon[AnnotMirror.Product[NonConst]]
+    summon[ann2.MirroredSelfAnnotations =:= EmptyTuple]
+    summon[ann2.MirroredAnnotations =:= (EmptyTuple *: EmptyTuple)]
+  }
+
+  test("constant-folded expressions and final-val references mirror as constants") {
+    // the typer folds pure operations on constants: the argument's *type* is the folded
+    // constant even though its tree is an application
+    @tagged(label = "con" + "cat") case class Folded(x: Int = 0)
+    val am = AnnotMirror.ofProduct[Folded]
+    summon[
+      am.MirroredSelfAnnotations =:=
+        (ArgumentList[tagged, "label" *: EmptyTuple, "concat" *: EmptyTuple, 0 *: EmptyTuple] *:
+          EmptyTuple)
+    ]
+    assertEquals(
+      AnnotMirror.findExact[tagged, am.MirroredSelfAnnotations],
+      Some(tagged("concat", 1))
+    )
+
+    // folding through a constant `final val` reference, and over non-string primitives
+    @tagged(label = "v" + TestSep + "1", level = 2 + 3) case class Mixed(x: Int = 0)
+    val am2 = AnnotMirror.ofProduct[Mixed]
+    assertEquals(
+      AnnotMirror.findExact[tagged, am2.MirroredSelfAnnotations],
+      Some(tagged("v.1", 5))
+    )
+
+    // a bare reference to a constant-typed `final val`
+    @tagged(label = TestSep) case class Ref(x: Int = 0)
+    val am3 = AnnotMirror.ofProduct[Ref]
+    assertEquals(
+      AnnotMirror.findExact[tagged, am3.MirroredSelfAnnotations],
+      Some(tagged(".", 1))
+    )
+
+    // folding applies element-wise inside tuple arguments too
+    @cmd(aliases = ("ali" + "as", "a")) case class Tup(x: Int = 0)
+    val am4 = AnnotMirror.ofProduct[Tup]
+    assertEquals(
+      AnnotMirror.find[cmd, am4.MirroredSelfAnnotations].map(_.aliases),
+      Some(("alias", "a"))
+    )
+
+    // an `inline val` reference is a guaranteed constant, alone or in a fold
+    @tagged(label = TestPrefix) case class Inl(x: Int = 0)
+    val am5 = AnnotMirror.ofProduct[Inl]
+    assertEquals(
+      AnnotMirror.findExact[tagged, am5.MirroredSelfAnnotations],
+      Some(tagged("pre", 1))
+    )
+    @tagged(label = TestPrefix + TestSep + "1") case class InlFold(x: Int = 0)
+    val am6 = AnnotMirror.ofProduct[InlFold]
+    assertEquals(
+      AnnotMirror.findExact[tagged, am6.MirroredSelfAnnotations],
+      Some(tagged("pre.1", 1))
+    )
+  }
+
+  test("type-parameterised annotations mirror at their applied type") {
+    @poly(default = 3, note = "n" + "b") case class WithPoly(x: Int = 0)
+    val am = AnnotMirror.ofProduct[WithPoly]
+    summon[
+      am.MirroredSelfAnnotations =:=
+        (ArgumentList[poly[Int], ("default", "note"), (3, "nb"), (0, 1)] *: EmptyTuple)
+    ]
+    given di: meta.Defaults[poly[Int]] = meta.Defaults.derived
+    assertEquals(
+      AnnotMirror.findExact[poly[Int], am.MirroredSelfAnnotations],
+      Some(poly(3, "nb"))
+    )
+    // the omitted `note` materialises from the Defaults mirror at the applied type
+    @poly(default = 'c') case class WithChar(x: Int = 0)
+    val am2                             = AnnotMirror.ofProduct[WithChar]
+    given dc: meta.Defaults[poly[Char]] = meta.Defaults.derived
+    assertEquals(
+      AnnotMirror.findExact[poly[Char], am2.MirroredSelfAnnotations],
+      Some(poly('c', ""))
     )
   }
