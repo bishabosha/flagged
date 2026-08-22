@@ -1,6 +1,6 @@
 package bench.defs
 
-import flagged.{short, positional, Parser}
+import flagged.{opt, Parser}
 import mainargs.{main, arg, Flag, Leftover, ParserForMethods}
 import caseapp.{ExtraName, Parser as CParser}
 
@@ -16,39 +16,39 @@ import caseapp.{ExtraName, Parser as CParser}
 
 enum FDocker derives Parser.CommandGroup:
   case Run(
-      name: Option[String] = None,
-      @short('e') env: List[String] = Nil,
-      @short('p') publish: List[String] = Nil,
-      @short('v') volume: List[String] = Nil,
-      @short('l') label: List[String] = Nil,
-      @short('w') workdir: Option[String] = None,
-      @short('u') user: Option[String] = None,
-      entrypoint: Option[String] = None,
-      network: String = "default",
-      restart: String = "no",
-      @short('m') memory: Option[String] = None,
-      cpus: Option[Double] = None,
-      pull: String = "missing",
-      @short('d') detach: Boolean = false,
-      rm: Boolean = false,
-      @short('i') interactive: Boolean = false,
-      @short('t') tty: Boolean = false,
-      readOnly: Boolean = false,
-      @positional image: String,
-      @positional cmd: List[String] = Nil
+      @opt name: Option[String] = None,
+      @opt(short = 'e') env: List[String] = Nil,
+      @opt(short = 'p') publish: List[String] = Nil,
+      @opt(short = 'v') volume: List[String] = Nil,
+      @opt(short = 'l') label: List[String] = Nil,
+      @opt(short = 'w') workdir: Option[String] = None,
+      @opt(short = 'u') user: Option[String] = None,
+      @opt entrypoint: Option[String] = None,
+      @opt network: String = "default",
+      @opt restart: String = "no",
+      @opt(short = 'm') memory: Option[String] = None,
+      @opt cpus: Option[Double] = None,
+      @opt pull: String = "missing",
+      @opt(short = 'd') detach: Boolean = false,
+      @opt rm: Boolean = false,
+      @opt(short = 'i') interactive: Boolean = false,
+      @opt(short = 't') tty: Boolean = false,
+      @opt readOnly: Boolean = false,
+      image: String,
+      cmd: List[String] = Nil
   )
   case Pull(
-      platform: Option[String] = None,
-      @short('q') quiet: Boolean = false,
-      @short('a') allTags: Boolean = false,
-      @positional image: String
+      @opt platform: Option[String] = None,
+      @opt(short = 'q') quiet: Boolean = false,
+      @opt(short = 'a') allTags: Boolean = false,
+      image: String
   )
   case Ps(
-      @short('a') all: Boolean = false,
-      @short('q') quiet: Boolean = false,
-      @short('f') filter: List[String] = Nil,
-      @short('n') last: Int = -1,
-      format: Option[String] = None
+      @opt(short = 'a') all: Boolean = false,
+      @opt(short = 'q') quiet: Boolean = false,
+      @opt(short = 'f') filter: List[String] = Nil,
+      @opt(short = 'n') last: Int = -1,
+      @opt format: Option[String] = None
   )
 
 final case class MRun(

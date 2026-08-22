@@ -1,6 +1,6 @@
 package flagged
 
-import flagged.meta.{Ann, AnnotMirror}
+import flagged.meta.{ArgumentList, AnnotMirror}
 import flagged.internal.{Derive, FieldAnnots, MaybeChar, TargetAnnots}
 import scala.deriving.Mirror
 import scala.annotation.targetName
@@ -25,16 +25,19 @@ class MetaSuite extends munit.FunSuite:
   inline def eachSlot[Slots]: IndexedSeq[FieldAnnots] =
     inline scala.compiletime.erasedValue[Slots] match
       case _: EmptyTuple => Vector.empty
-      case _: (h *: t)   => Annots.fieldAnnotsOf[h] +: eachSlot[t]
+      // extraction is shape-blind: the positional-by-default rule is applied by the derivation,
+      // which knows the field's parser shape — here the named-option default reads the raw record
+      case _: (h *: t) => Annots.fieldAnnotsOf[h](false) +: eachSlot[t]
 
-  test("find extracts a typed annotation from a mirrored slot at compile time") {
-    type Slot =
-      Ann[short, 'v' *: EmptyTuple, false *: EmptyTuple] *:
-        Ann[help, "text" *: EmptyTuple, false *: EmptyTuple] *: EmptyTuple
-    val s: Option[Char]   = AnnotMirror.find[short, Slot].map(_.value)
-    val n: Option[String] = AnnotMirror.find[name, Slot].map(_.value)
-    assertEquals(s, Some('v'))
-    assertEquals(n, None)
+  test("find extracts a typed annotation from a sparse mirrored slot at compile time") {
+    // hand-written mirror type for `@opt(help = "text", short = 'v')`: only the provided
+    // argument columns are encoded — help is opt's parameter 1, short parameter 2
+    type Slot = ArgumentList[opt, ("help", "short"), ("text", 'v'), (1, 2)] *: EmptyTuple
+    val o = AnnotMirror.find[opt, Slot]
+    assertEquals(o.map(_.short), Some('v'))
+    assertEquals(o.map(_.help), Some("text"))
+    assertEquals(o.map(_.name), Some("")) // omitted: filled in from the default
+    assertEquals(AnnotMirror.find[version, Slot].map(_.value), None)
   }
 
   test("Defaults is an index switch that throws on invalid indices") {
@@ -51,9 +54,10 @@ class MetaSuite extends munit.FunSuite:
   inline def fromMirror[A: Mirror.ProductOf](t: NamedTuple.From[A]): A =
     summon[Mirror.ProductOf[A]].fromProduct(t.asInstanceOf[Product])
 
-  test("defaulted positions are looked up through the Defaults mirror") {
-    // hand-written mirror type: label defaulted (index 0), level provided
-    type Slot = Ann[tagged, (0, 7), (true, false)] *: EmptyTuple
+  test("omitted positions are looked up through the Defaults mirror") {
+    // hand-written sparse mirror type: label omitted, level provided at parameter index 1
+    type Slot = ArgumentList[tagged, "level" *: EmptyTuple, 7 *: EmptyTuple, 1 *: EmptyTuple] *:
+      EmptyTuple
     assertEquals(AnnotMirror.findExact[tagged, Slot], Some(tagged("none", 7)))
     assertEquals(AnnotMirror.find[tagged, Slot].map(fromMirror[tagged]), Some(tagged("none", 7)))
   }
@@ -94,8 +98,8 @@ class MetaSuite extends munit.FunSuite:
   }
 
   test("annotation extraction for a case class is fully typed") {
-    @help("a greeter")
-    case class G(@short('n') @help("who") name: String = "world", quiet: Boolean = false)
+    @cmd(help = "a greeter")
+    case class G(@opt(help = "who", short = 'n') name: String = "world", quiet: Boolean = false)
 
     assertEquals(selfAnnotsOf[G], TargetAnnots(None, Some("a greeter")))
     assertEquals(
@@ -107,9 +111,45 @@ class MetaSuite extends munit.FunSuite:
     )
   }
 
+  test("aliases arguments mirror as constant tuples and materialise back") {
+    @cmd(name = "prog", aliases = ("p", "pr"))
+    case class A(@opt(name = "ex", aliases = "extra" *: EmptyTuple) x: Int = 0)
+
+    assertEquals(
+      selfAnnotsOf[A],
+      TargetAnnots(Some("prog"), None, false, aliases = Vector("p", "pr"))
+    )
+    assertEquals(
+      fieldAnnotsOf[A],
+      Vector(
+        FieldAnnots(
+          Some("ex"),
+          MaybeChar.empty,
+          None,
+          positional = false,
+          aliases = Vector("extra")
+        )
+      )
+    )
+    // materialisation through find rebuilds the tuple value (and defaults for the rest)
+    val am = AnnotMirror.ofProduct[A]
+    assertEquals(
+      AnnotMirror.find[cmd, am.MirroredSelfAnnotations].map(_.aliases),
+      Some(("p", "pr"))
+    )
+  }
+
   test("an unannotated slot reads back as all-defaults") {
     case class P(a: Int = 0, b: String = "")
     assertEquals(fieldAnnotsOf[P], Vector(FieldAnnots.empty, FieldAnnots.empty))
+  }
+
+  test("bare @opt and @cmd slots share the empty records, like unannotated slots") {
+    @cmd case class B(@opt a: Int = 0, b: String = "")
+    assert(selfAnnotsOf[B] eq TargetAnnots.empty)
+    val recs = fieldAnnotsOf[B]
+    assert(recs(0) eq FieldAnnots.empty) // bare @opt: no constructor call
+    assert(recs(1) eq FieldAnnots.empty) // no annotation, under the helper's named default
   }
 
   test("all-unannotated sum cases share Vector.empty, read back as all-defaults") {
@@ -135,7 +175,7 @@ class MetaSuite extends munit.FunSuite:
 
   test("non-constant and non-case-class annotations are not mirrored") {
     // @targetName is not a case class; nothing flagged-relevant should surface
-    @targetName("Foo") case class Old(@short('x') a: Int = 0)
+    @targetName("Foo") case class Old(@opt(short = 'x') a: Int = 0)
     val ann = summon[AnnotMirror.Product[Old]]
     summon[ann.MirroredSelfAnnotations =:= EmptyTuple] // no @targetName in the self slot
 

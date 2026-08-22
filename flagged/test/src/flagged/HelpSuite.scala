@@ -1,7 +1,7 @@
 package flagged
 
 case class OwnsHelpAll(
-    @name("help-all") all: Boolean = false
+    @opt(name = "help-all") all: Boolean = false
 ) derives Parser.Command
 
 class HelpSuite extends munit.FunSuite:

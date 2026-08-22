@@ -4,15 +4,17 @@ Command-line argument parsing and schema validation for Scala 3. Supports deriva
 
 ## Derived sources
 
-The library sources on this branch are mechanically derived from the capture-checked sources on
-the [`mutable-spec`](https://github.com/bishabosha/flagged/tree/mutable-spec) branch, where the
-parser engine and other mutable internals are verified under the experimental `captureChecking`
-and `separationChecking` language modes. The `Uncheck` rewrite in that branch's `build.mill`
-strips the capture-checking surface — the language imports, `update`/`consume` modifiers, capture
-annotations (`^`, `^{...}`, `->`), and `caps.*` calls — producing the equivalent unchecked code
-here, so the published artifacts carry no dependency on experimental standard-library API. Make
-source changes on `mutable-spec` and re-derive them with `mill deriveStable` rather than editing
-these files directly.
+This branch is mechanically derived from the
+[`mutable-spec`](https://github.com/bishabosha/flagged/tree/mutable-spec) branch — the development
+branch, where the parser engine and other mutable internals are verified under the experimental
+`captureChecking` and `separationChecking` language modes. Everything except the build files
+(`build.mill`, the mill launcher, and the `uncheck-plugin` compiler plugin) is mirrored from
+there: documentation, benchmarks, and examples verbatim, and the library sources via the
+`Uncheck` rewrite in that branch's `build.mill`, which strips the capture-checking surface — the
+language imports, `update`/`consume` modifiers, capture annotations (`^`, `^{...}`, `->`), and
+`caps.*` calls — so the published artifacts carry no dependency on experimental standard-library
+API. Make changes on `mutable-spec` and re-derive them with `mill deriveStable` rather than
+editing this branch directly.
 
 ## Why a new library?
 
@@ -20,7 +22,7 @@ I created Flagged to be a candidate library for the [Scala Toolkit](https://gith
 The initial motivation was a lack of momentum on issue [scala/toolkit#65](https://github.com/scala/toolkit/issues/65), on which discussion paused (since July 2025) after a request to compare [com-lihaoyi/mainargs](https://github.com/com-lihaoyi/mainargs) and [alexarchambault/case-app](https://github.com/alexarchambault/case-app). This library aims to provide the best aspects of both libraries (in particular arbitrary nested-subcommands) with as little manual setup as possible.
 
 So my personal goals with introducing Flagged was to combine the feature set of both libraries but with a Scala-3-first design:
-- 100% declarative setup, with a single entry point to "run or exit".
+- 100% declarative setup, integrating with `@main def foo(args: String*)` to forward `args` to a single entry point and "run or exit".
 - support arbitrary nested subcommands (with `--help` scoped to the current subcommand)
 - use standard language features as much as possible
 - validate the construction of the schema at compiletime
@@ -37,11 +39,11 @@ So my personal goals with introducing Flagged was to combine the feature set of 
 ```scala
 import flagged.*
 
-@help("Greet someone from the command line")
+@cmd(help = "Greet someone from the command line")
 case class Greet(
-    @short('n') @help("Who to greet") name: String = "world",
-    @short('e') @help("Add excitement") excited: Boolean = false,
-    @short('r') @help("How many times to greet") repeat: Int = 1
+    @opt(help = "Who to greet", short = 'n') name: String = "world",
+    @opt(help = "Add excitement", short = 'e') excited: Boolean = false,
+    @opt(help = "How many times to greet", short = 'r') repeat: Int = 1
 ) derives Parser.Command
 
 @main def greet(args: String*): Unit =
@@ -55,12 +57,11 @@ equivalent, using methods:
 ```scala
 import flagged.*
 
-@run
-@help("Greet someone from the command line")
+@cmd(help = "Greet someone from the command line")
 def greet(
-    @short('n') @help("Who to greet") name: String = "world",
-    @short('e') @help("Add excitement") excited: Boolean = false,
-    @short('r') @help("How many times to greet") repeat: Int = 1
+    @opt(help = "Who to greet", short = 'n') name: String = "world",
+    @opt(help = "Add excitement", short = 'e') excited: Boolean = false,
+    @opt(help = "How many times to greet", short = 'r') repeat: Int = 1
 ): Unit = {
   for _ <- 1 to repeat do
     println(s"Hello, ${name}${if excited then "!" else "."}")
@@ -97,10 +98,10 @@ Options:
 
 - Supported option syntax: `--name value` and `--name=value`
 - short aliases with separate (`-n Jamie`), attached (`-nJamie`), or assignment (`-n=Jamie`) values
-- short flags can be combined (`-er`, `-rn 3`)
+- short flags can be combined (`-er3`)
 - options may appear after positionals (permutation, as in GNU getopt).
 - Repeated scalar options are last-wins (e.g. for `--verbose=false --verbose`, verbose is true)
-  - so shell aliases can set up some default options.
+  - this makes it possible for shell aliases to provde some default options that callers can override.
 - Repeated options can accumulate via collection types, or `Count` for flags.
 - `--` ends option parsing, following [POSIX Utility Syntax Guidelines, guideline 10]:
   the first `--` is dropped and everything after it is positional, even when it begins
@@ -116,67 +117,85 @@ Options:
 
 ### Declaring options
 
-Each case class field becomes a named option, `--kebab-cased` after the field name.
+A parameter with no annotation is a **positional argument by default**, exactly like a
+`@scala.main` parameter — so `@main` methods migrate without changing their command line
+(see [Migrating from `@main`](#migrating-from-main)). An
+`@opt` annotation (bare, or with any arguments) turns the parameter into a named option (with name encoded as `kebab-case`). `@opt(positional = true)` can still be set explicitly.
+
+The one exception is a `derives Parser.Shared` options group: it
+cannot contain positionals, so its unannotated fields stay named options.
+
 The field's `Parser` instance decides its shape:
 
 | Field shape | Meaning |
 |---|---|
-| `x: Boolean` | flag `--x` (also `--x=false`) |
-| `x: Count` | counting flag: `-vvv` → `Count(3)` |
-| `x: A` | required option `--x <a>` |
-| `x: A = default` | optional, default shown in help |
-| `x: Option[A]` | optional, `None` when absent |
-| `x: Iterable[A]` | `--x a --x b` repeatable option with `A` as value |
-| `@split(',') x: Iterable[A]` | `--x a,b --x c` repeatable option with `A` as value, token splits on separator char. |
-| `@greedy x: Iterable[A]` | `--x a b c --x d` repeatable option that greedily consumes arguments as `A`. |
-| `x: Map[K, V]` | repeatable `--x key=value` entries |
-| `x: (A, B)` (any tuple of `Value` types, or a case class deriving `Parser.Product`) | fixed multi-token value: `--x 1 2` |
+| `x: A` | positional argument (`@main`-style); ordering rules checked at compile time |
+| `x: Boolean` | positional `true`/`false` token |
+| `@opt x: Boolean` | flag `--x` (also `--x=false`) |
+| `@opt(short = 'v') x: Count` | counting flag: `-vvv` → `Count(3)` |
+| `@opt x: A` | required option `--x <a>` |
+| `@opt x: A = default` | optional, default shown in help |
+| `@opt x: Option[A]` | optional, `None` when absent |
+| `@opt x: Iterable[A]` | `--x a --x b` repeatable option with `A` as value |
+| `@opt(split = ',') x: Iterable[A]` | `--x a,b --x c` repeatable option with `A` as value, token splits on separator char. |
+| `@opt(greedy = true) x: Iterable[A]` | `--x a b c --x d` repeatable option that greedily consumes arguments as `A`. |
+| `@opt x: Map[K, V]` | repeatable `--x key=value` entries |
+| `@opt x: (A, B)` (any tuple of `Value` types, or a case class deriving `Parser.Product`) | fixed multi-token value: `--x 1 2` |
 | `x: E` (enum deriving `Parser.CommandGroup`) | nested subcommands |
-| `x: E` (enum deriving `Parser.Enumerated`) | value matched by case name (`--color red`) |
+| `@opt x: E` (enum deriving `Parser.Enumerated`) | value matched by case name (`--color red`) |
 | `x: P` (case class deriving `Parser.Shared`) | options group spliced into this command |
 | `x: Trailing` | the raw arguments after `--`, verbatim |
-| `@positional x: A` | positional argument (same rules) |
 
-Annotations control both metadata for help-text, and fine-tune parser details:
+(The unannotated value shapes — `Iterable`, `Map`, tuples, `Enumerated` — parse positionally
+with the same element semantics.)
 
-#### Parser Tuning
-- `@positional`: parse a field as an unnamed argument,
-- `@split` (divide a repeated option's value at a separator, `,` by default: `--env A,B,C`),
-- `@greedy` (a repeated option consumes the following free tokens: `--nums 10 20 99`; compile error if the command also declares positional or subcommand fields, which would make the grammar ambiguous),
+All customisation lives in two annotations with named arguments — sparsely mirrored, so an
+argument left at its default costs nothing at derivation.
 
-#### Metadata
-- `@name("...")`: long-name override and provide aliases,
-- `@short('x')`: provide a short-name,
-- `@help("...")`: provide a description,
-- `@hidden`: omit option from help, shown by `--help-all`,
-- `@group`: assign an option to a titled help section,
-- `@version`: add a `--version` flag, that will print the version. Data is sourced from either a literal argument (e.g. `@version("0.1.0")`), or bare `@version` reads a given `Versioned` instance when printed,
-- `@default`: annotate one command of a group — a subcommand case, a `@run` method, or a `@run` object — parser will route here if no command token is detected.
+#### `@opt` — on a field (or method parameter)
+- `@opt`: parse the field as a named option (any `@opt` means "named" unless it says otherwise),
+- `@opt(positional = true)`: keep a field positional while attaching metadata such as `help`,
+- `@opt(split = ',')` (divide a repeated option's value at the separator: `--env A,B,C`),
+- `@opt(greedy = true)` (a repeated option consumes the following free tokens: `--nums 10 20 99`; compile error if the command also declares positional or subcommand fields, which would make the grammar ambiguous),
+- `@opt(name = "...")`: long-name override; `aliases = ("...", ...)` adds more,
+- `@opt(short = 'x')`: provide a short-name,
+- `@opt(help = "...")`: provide a description,
+- `@opt(hidden = true)`: omit option from help, shown by `--help-all`,
+- `@opt(group = "...")`: assign an option to a titled help section.
+
+#### `@cmd` — on a command or command group (type, enum case, method, or object)
+- marks a method or nested object as a command for `Parser.method`/`Parser.methods`,
+- `@cmd(name = "...")`: command-name (or program-name) override; `aliases = ("...", ...)` adds more,
+- `@cmd(help = "...")`: provide a description,
+- `@cmd(hidden = true)`: omit a subcommand from help, shown by `--help-all`,
+- `@cmd(default = true)`: annotate one command of a group — a subcommand case, a `@cmd` method, or a `@cmd` object — parser will route here if no command token is detected.
+
+#### `@version` — on the top-level type
+- add a `--version` flag, that will print the version. Data is sourced from either a literal argument (e.g. `@version("0.1.0")`), or bare `@version` reads a given `Versioned` instance when printed.
 
 ### Subcommands
 
-Model groups of commands as an enum (or multiple `@run` methods in the same object);
+Model groups of commands as an enum (or multiple `@cmd` methods in the same object);
 
-a case with a singular field of an enum type (or a `@run` annotated object) will be treated as a nested subcommand group.
+a case with a singular field of an enum type (or a `@cmd` annotated object) will be treated as a nested subcommand group.
 
 ```scala
-@name("gitto")
-@help("gitto — a tiny version control tool")
+@cmd(name = "gitto", help = "gitto — a tiny version control tool")
 enum Gitto derives Parser.CommandGroup:
-  @help("Clone a repository into a new directory")
+  @cmd(help = "Clone a repository into a new directory")
   case Clone(
-      @positional @help("Repository URL") repo: String,
-      @positional dir: Option[String] = None,
-      @short('d') depth: Option[Int] = None
+      @opt(help = "Repository URL", positional = true) repo: String,
+      dir: Option[String] = None, // unannotated: positional, like a @main parameter
+      @opt(short = 'd') depth: Option[Int] = None
   )
-  @help("Manage remotes")
+  @cmd(help = "Manage remotes")
   case Remote(action: RemoteAction)
-  @help("Show the working tree status")
-  case Status(@short('s') short: Boolean = false)
+  @cmd(help = "Show the working tree status")
+  case Status(@opt(short = 's') short: Boolean = false)
 
 enum RemoteAction derives Parser.CommandGroup:
-  case Add(@positional name: String, @positional url: String)
-  case Remove(@positional name: String)
+  case Add(name: String, url: String)
+  case Remove(name: String)
 
 @main def gitto(args: String*): Unit =
   Flagged.parseOrExit[Gitto](args) match
@@ -190,20 +209,20 @@ Derivation only handles a single class/enum, any field will need its own Parser 
 
 ### Command methods
 
-Annotate methods with `@run` to make them reflectable as a command to a derived Parser. Arguments are otherwise handled identically to derivation for a class.
+Annotate methods with `@cmd` to make them reflectable as a command to a derived Parser. Arguments are otherwise handled identically to derivation for a class.
 
 ```scala
-@run @help("Add an entry")
-def add(@positional text: String, urgent: Boolean = false): Int = ...
+@cmd(help = "Add an entry")
+def add(text: String, @opt urgent: Boolean = false): Int = ... // text: positional, as with @main
 
-@run @name("ls")
-def list(all: Boolean = false): List[String] = ...
+@cmd(name = "ls")
+def list(@opt all: Boolean = false): List[String] = ...
 
 @main def run(args: String*): Unit =
   val result: Int | List[String] = Flagged.parseOrExit[this.type](args, prog = "todo")
 ```
 
-A single `@run` method will become the name of the root program, otherwise a group of `@run` methods will take the name of the scope defining the methods, (overridden with the `prog` argument of `Flagged.parse*` methods.)
+A single `@cmd` method will become the name of the root program, otherwise a group of `@cmd` methods will take the name of the scope defining the methods, (overridden with the `prog` argument of `Flagged.parse*` methods.)
 
 ### Values, groups, errors
 
@@ -212,11 +231,13 @@ A single `@run` method will become the name of the root program, otherwise a gro
   `FiniteDuration` (`"30s"`, `"5.minutes"`), following platform availability.
   A custom parser is a one-liner (`Parser.of`), and every parser supports
   `map`/`emap` — including whole commands, which gives cross-field validation before
-  your code runs. Flag and repeated shapes are pluggable too (`Parser.flag`,
+  your code runs. `scala.util.CommandLineParser.FromString` instances (the `@main`
+  typeclass) are picked up as a low-priority fallback
+  (see [Migrating from `@main`](#migrating-from-main)). Flag and repeated shapes are pluggable too (`Parser.flag`,
   `Parser.repeated`), so occurrence bounds and non-empty constraints are expressible.
 - **Option groups:** a `derives Parser.Shared` case-class field splices that group's options into the
   surrounding command and reconstructs the group as a value. Groups nest, work inside
-  subcommand cases, can be optional (`Option[Group]`), and can be prefixed (`@name`
+  subcommand cases, can be optional (`Option[Group]`), and can be prefixed (`@opt(name = ...)`
   on the field) to be spliced more than once.
 - **Errors accumulate:** unknown options, invalid values, missing option values, and
   missing required arguments are collected and reported in one failure, one per line,
@@ -232,11 +253,63 @@ handle aborts yourself, `Flagged.parse` returns a `Result[T, ParseError]` (from
 [lampepfl/steps](https://github.com/lampepfl/steps)) instead of exiting, and
 `Flagged.help[A]` renders the help text without parsing anything.
 
+Each of these resolves the grammar on every call. To parse repeatedly, resolve it
+once with `Flagged.entry[A]` — the returned entry point holds the derived parser and
+offers the same `parse`/`parseOrExit`/`help` methods:
+
+```scala
+val cli = Flagged.entry[Config] // derivation cost paid once, here
+val cfg = cli.parseOrExit(args)
+```
+
 ### Platforms
 
 Scala 3 only — the design depends on Scala 3 inline derivation. Cross-builds for the
 JVM, Scala.js, and Scala Native; `Parser` instances follow platform availability
 (`java.time` types are JVM-only, `Path` is JVM and Scala Native).
+
+## Migrating from `@main`
+
+A `@main` method's parameters are positional, parsed by
+`scala.util.CommandLineParser.FromString` instances. Flagged's defaults are chosen so
+the same command line keeps working:
+
+```scala
+// before
+@main def serve(host: String, port: Int = 8080, files: String*): Unit = ...
+
+// after
+@cmd def serve(host: String, port: Int = 8080, files: String*): Unit = ...
+
+@main def run(args: String*): Unit = Flagged.parseOrExit[this.type](args)
+```
+
+- **The command line does not change.** Unannotated parameters stay positional in
+  declaration order — exactly the `@main` rule. (A case class with the same fields
+  `derives Parser.Command` works identically.)
+- **Defaults start working.** `@main` compiles a default parameter but never uses it:
+  every argument must still be provided (`Illegal command line: more arguments
+  expected`). Flagged makes a defaulted argument genuinely optional — every command
+  line the `@main` accepted still parses, and shorter ones now work too.
+- **Vararg parameters keep working.** `files: String*` mirrors as a `Seq[String]` field —
+  a repeated positional that collects the remaining arguments, and may be empty — on both
+  `@cmd` methods and case classes.
+- **Custom `FromString` instances keep working.** Any
+  `scala.util.CommandLineParser.FromString[A]` in scope is embedded as a low-priority
+  `Parser.Value[A]`: each occurrence parses one token, and an
+  `IllegalArgumentException` message becomes the parse error. Flagged's built-in
+  instances and any `Parser` given you define take priority over the bridge. The
+  bridge shows the generic `<value>` metavar in help — define an instance with
+  `Parser.of` (or rename with `.withTypeName`) when you want better help text and
+  errors.
+- **What you gain immediately:** `--help`, error messages with did-you-mean hints, and
+  the annotations (`@opt`, `@cmd`) to grow named options and subcommands without
+  breaking the positional interface.
+
+Two behavioral differences to be aware of: tokens beginning with `-` are options in
+Flagged (negative numbers are still recognised as values; anything else `-`-prefixed
+must come after `--`), and `--help`/`--help-all` (plus `--version` when declared) are
+reserved option names.
 
 ## How-to
 
@@ -279,17 +352,17 @@ to it rather than merging grammars), and the parse result is wrapped in the case
 
 ```scala
 // from another module or classpath
-case class ExternalTool(@short('f') force: Boolean = false, @positional target: String)
+case class ExternalTool(@opt(short = 'f') force: Boolean = false, target: String)
     derives Parser.Command
 
 enum Cli derives Parser.CommandGroup:
   case Build(release: Boolean = false)
-  @name("ext") @help("Run the external tool")
+  @cmd(name = "ext", help = "Run the external tool")
   case External(tool: ExternalTool)
 // cli ext -f thing   →   Cli.External(ExternalTool(force = true, target = "thing"))
 ```
 
-`@name`/`@help`/`@hidden` on the *case* rename and document the embedded command
+`@cmd(name/help/hidden)` on the *case* renames and documents the embedded command
 locally; annotations on the field itself are a compile error (they could not take
 effect).
 
@@ -298,18 +371,18 @@ effect).
 A field whose type derives `Parser.Shared` splices that group's options into the
 surrounding command — they parse as if declared inline, and the group is
 reconstructed as a value. `Shared` derivation enforces the invariants that make
-splicing always safe (no positional, trailing, subcommand, or `@greedy` fields), at
+splicing always safe (no positional, trailing, subcommand, or greedy fields), at
 compile time:
 
 ```scala
-case class LogOpts(@short('q') quiet: Boolean = false, logLevel: String = "info") derives Parser.Shared
+case class LogOpts(@opt(short = 'q') quiet: Boolean = false, logLevel: String = "info") derives Parser.Shared
 
 case class Serve(port: Int = 8080, logging: LogOpts = LogOpts()) derives Parser.Command
 // serve --port 9000 -q --log-level debug
 ```
 
 Groups nest and work inside subcommand cases. An `Option[LogOpts]` field parses to
-`None` unless one of the group's options occurs; `@name("log")` on the field
+`None` unless one of the group's options occurs; `@opt(name = "log")` on the field
 prefixes the group's option names (`--log-quiet`), so the same group can be spliced
 more than once. Spliced groups cannot contain positional fields.
 
@@ -319,7 +392,7 @@ Declare a `Trailing` field: everything after `--` will be accumulated there (use
 for wrapper programs like in `docker run img -- cmd args...`):
 
 ```scala
-case class Run(@short('i') image: String = "alpine", cmd: Trailing = Trailing()) derives Parser.Command
+case class Run(@opt(short = 'i') image: String = "alpine", cmd: Trailing = Trailing()) derives Parser.Command
 // run -i ubuntu -- echo --not-an-option   →   Run("ubuntu", Trailing(Vector("echo", "--not-an-option")))
 ```
 
@@ -330,14 +403,14 @@ help it appears as `[-- <args>]` in the usage line.
 ### Take several values for one option
 
 - product types like Tuple with multiple arguments to one option (one parser per field)
-- use `@split` to build a collection from a single argument (all elements share the same parser)
-- use `@greedy` for a collection of arbitrary length (all elements share the same parser)
+- use `@opt(split = ...)` to build a collection from a single argument (all elements share the same parser)
+- use `@opt(greedy = true)` for a collection of arbitrary length (all elements share the same parser)
 
 ```scala
 case class Render(
-    @short('p') point: (Int, Int) = (0, 0),      // --point 3 4
-    @split env: List[String] = Nil,              // --env A=1,B=2   (also -e X --env Y,Z)
-    @greedy nums: List[Int] = Nil                // --nums 10 20 99 7
+    @opt(short = 'p') point: (Int, Int) = (0, 0),      // --point 3 4
+    @opt(split = ',') env: List[String] = Nil,         // --env A=1,B=2   (also -e X --env Y,Z)
+    @opt(greedy = true) nums: List[Int] = Nil          // --nums 10 20 99 7
 ) derives Parser.Command
 ```
 
@@ -375,11 +448,12 @@ given Parser.Command[Fetch] = Parser.Command.derived[Fetch].emap(cfg =>
 ### Make a subcommand optional or default
 
 An `Option[E]`-typed command field makes the command optional, and a field default
-(`action: Action = Action.List`) works too. `@default` on one command of a group —
-an enum case, a `@run` method, or a `@run` object — marks the command run when no
-command token is given, with the remaining arguments forwarded to it. Every group
-takes its own `@default`, so a group that is itself the default keeps forwarding down
-to its default; a second `@default` in the same group is a compile error.
+(`action: Action = Action.List`) works too. `@cmd(default = true)` on one command of
+a group — an enum case, a `@cmd` method, or a `@cmd` object — marks the command run
+when no command token is given, with the remaining arguments forwarded to it. Every
+group takes its own default, so a group that is itself the default keeps forwarding
+down to its default; a second `@cmd(default = true)` in the same group is a compile
+error.
 
 ### Handle results without exiting
 
@@ -400,16 +474,16 @@ on parse results.
 ### Use Flagged from a script
 
 `parseOrExit` takes any `Seq[String]`, so it works wherever your arguments come
-from; pass `prog` to set the program name when there is no `@name` annotation:
+from; pass `prog` to set the program name when there is no `@cmd(name = ...)` annotation:
 
 ```scala
 // backup.sc — run with scala CLI
 import flagged.*
 
 case class Backup(
-    @short('d') @help("Destination directory") dest: String,
-    @short('n') @help("Print actions without copying") dryRun: Boolean = false,
-    @positional sources: List[String] = Nil
+    @opt(help = "Destination directory", short = 'd') dest: String,
+    @opt(help = "Print actions without copying", short = 'n') dryRun: Boolean = false,
+    sources: List[String] = Nil // unannotated: repeated positional
 ) derives Parser.Command
 
 val cfg = Flagged.parseOrExit[Backup](args.toSeq, prog = "backup")

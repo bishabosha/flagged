@@ -6,9 +6,9 @@
 import flagged.*
 
 case class Backup(
-    @short('d') @help("Destination directory") dest: String,
-    @short('n') @help("Print actions without copying") dryRun: Boolean = false,
-    @positional @help("Directories to back up") sources: List[String] = Nil
+    @opt(help = "Destination directory", short = 'd') dest: String,
+    @opt(help = "Print actions without copying", short = 'n') dryRun: Boolean = false,
+    @opt(help = "Directories to back up", positional = true) sources: List[String] = Nil
 ) derives Parser.Command
 
 val cfg  = Flagged.parseOrExit[Backup](args.toSeq, prog = "backup")
