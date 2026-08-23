@@ -27,7 +27,9 @@ class WarningsSuite extends munit.FunSuite:
     val reporter = new Reporter:
       def doReport(dia: Diagnostic)(using Context): Unit =
         if dia.level >= interfaces.Diagnostic.ERROR then errors += dia.message
-        else if dia.level == interfaces.Diagnostic.WARNING then warnings += dia.message
+        // the position guard drops the driver's positionless run summary ("1 warning found")
+        else if dia.level == interfaces.Diagnostic.WARNING && dia.pos.exists then
+          warnings += dia.message
     Driver().process(
       Array("-d", out.toString, "-classpath", sys.props("java.class.path"), srcFile.toString),
       reporter
