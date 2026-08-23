@@ -236,12 +236,29 @@ class MetaSuite extends munit.FunSuite:
       Some(tagged(".", 1))
     )
 
-    // folding applies element-wise inside tuple arguments too
-    @cmd(aliases = ("ali" + "as", "a")) case class Tup(x: Int = 0)
+    // folding applies element-wise inside tuple arguments too: a TupleN literal mixing a
+    // concat, a fold over a `final val`, and an `inline val` reference...
+    @cmd(aliases = ("ali" + "as", TestSep + "a", TestPrefix)) case class Tup(x: Int = 0)
     val am4 = AnnotMirror.ofProduct[Tup]
     assertEquals(
       AnnotMirror.find[cmd, am4.MirroredSelfAnnotations].map(_.aliases),
-      Some(("alias", "a"))
+      Some(("alias", ".a", "pre"))
+    )
+    // ...and the `*:` cons form with a folded head, encoded as the folded constant type
+    @cmd(aliases = ("con" + "s") *: EmptyTuple) case class Cons(x: Int = 0)
+    val am4b = AnnotMirror.ofProduct[Cons]
+    summon[
+      am4b.MirroredSelfAnnotations =:=
+        (ArgumentList[
+          cmd,
+          "aliases" *: EmptyTuple,
+          ("cons" *: EmptyTuple) *: EmptyTuple,
+          4 *: EmptyTuple
+        ] *: EmptyTuple)
+    ]
+    assertEquals(
+      AnnotMirror.find[cmd, am4b.MirroredSelfAnnotations].map(_.aliases),
+      Some("cons" *: EmptyTuple)
     )
 
     // an `inline val` reference is a guaranteed constant, alone or in a fold
