@@ -1,0 +1,13 @@
+--- a/build.mill
++++ b/build.mill
+@@ -67,7 +67,9 @@
+       def munitVersion = Versions.munit
+ 
+   object jvm extends FlaggedModule, PublishSettings, JvmNativeSources:
+-    object test extends FlaggedTests
++    object test extends FlaggedTests:
++      // WarningsSuite (test/src-jvm) drives the dotty compiler to assert emitted diagnostics
++      def mvnDeps = super.mvnDeps() ++ Seq(mvn"org.scala-lang::scala3-compiler:${Versions.scala}")
+ 
+   object js extends FlaggedModule, BaseJsModule, PublishSettings:
+     object test extends FlaggedTests, ScalaJSTests
