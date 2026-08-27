@@ -13,10 +13,23 @@ enum ValueSeparator:
     case Equals => '='
     case Colon  => ':'
 
+/** How long option names are prefixed: `--name` only ([[DoubleDash]], the default), or after either
+  * a single or a double dash ([[AnyDash]]) — the javac/scalac convention, where `-Werror`,
+  * `-source:3.4`, and their `--` spellings all resolve to the same setting. Under [[AnyDash]] a
+  * single-dash token is matched against the long names first; only an unmatched token parses as a
+  * short-option cluster, so declared shorts keep working. `-help` (and `-version`, for a
+  * [[Versioned]] command) resolve like their double-dash forms.
+  */
+enum LongPrefix:
+  case DoubleDash, AnyDash
+
 /** Parse-time settings, accepted by every `parse` entry point ([[Parser.parse]], [[Flagged.parse]],
   * [[Flagged.parseOrExit]], ...) and applied to the whole command line, subcommands included.
   */
-final case class ParserSettings(valueSeparator: ValueSeparator = ValueSeparator.Equals)
+final case class ParserSettings(
+    valueSeparator: ValueSeparator = ValueSeparator.Equals,
+    longPrefix: LongPrefix = LongPrefix.DoubleDash
+)
 
 object ParserSettings:
   /** The default settings — the shared instance behind every `settings` default argument. */

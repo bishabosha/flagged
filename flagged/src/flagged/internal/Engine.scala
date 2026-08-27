@@ -31,8 +31,7 @@ private[flagged] object Engine:
       from: Int,
       settings: flagged.ParserSettings
   ): ParseResult[Any] =
-    val sep          = settings.valueSeparator.char
-    val root: Frame^ = Frame(cmd, prog, path, args, from, null, null, -1, false, sep)
+    val root: Frame^ = Frame(cmd, prog, path, args, from, null, null, -1, false, settings)
     Result
       .task:
         var frame: Frame^ = root
@@ -56,7 +55,7 @@ private[flagged] object Engine:
               selected.name,
               group.index,
               group.optional,
-              sep
+              settings
             )
 
         // Every frame builds into its own spare result slot — `finishInto` takes one storage
@@ -86,7 +85,7 @@ private[flagged] object Engine:
       pathName: String,
       val parentOutIndex: Int,
       val parentOptional: Boolean,
-      sep: Char // the option-value separator from ParserSettings, threaded root to leaf
+      settings: flagged.ParserSettings // threaded root to leaf, so subcommands agree
   ) extends Mentions, caps.Mutable:
     private val n = command.arity
 
@@ -128,6 +127,8 @@ private[flagged] object Engine:
 
     private val shortLookup = command.shortLookup
     private val posSpecs    = command.positionals
+    private val sep         = settings.valueSeparator.char
+    private val dashLong    = settings.longPrefix == flagged.LongPrefix.AnyDash
 
     private def appendPath(b: mutable.Builder[String, Vector[String]]): Unit =
       if parent != null then parent.appendPath(b)
@@ -385,8 +386,54 @@ private[flagged] object Engine:
                   offerValue(spec, value, key)
                   consumeGreedy(spec)
         else
+          var handled = false
+          if dashLong then
+            // single-dash long names (javac/scalac style): the long lookup's keys carry a `--`
+            // prefix, so prepending one dash turns `-Werror` into its key; a miss falls through
+            // to the short-cluster loop, keeping declared shorts working
+            val eq   = token.indexOf(sep)
+            val key  = "-" + (if eq == -1 then token else token.substring(0, eq))
+            val spec = command.longLookup.get(key)
+            if spec != null then
+              handled = true
+              val display = key.substring(1)
+              if eq != -1 then offerValue(spec, token.substring(eq + 1), display)
+              else if isFlag(spec) then offerBare(spec)
+              else
+                spec.mode match
+                  case Mode.Product(parser, _) =>
+                    offerProduct(spec, parser, display, null)
+                  case _ =>
+                    val value = takeValue(display)
+                    if value != null then
+                      offerValue(spec, value, display)
+                      consumeGreedy(spec)
+            else if key == "--help" then
+              return ParseError.Help(HelpFmt.render(command, prog, path, showHidden = false))
+            else if key == "--help-all" then
+              return ParseError.Help(HelpFmt.render(command, prog, path, showHidden = true))
+            else if key == "--version" && command.version.nonEmpty then
+              return ParseError.Help(command.version.get())
+            else if token.length > 2 && token(1) != 'h' && shortSpec(token(1)) == null then
+              // neither a long name nor the start of a short cluster: report the whole token,
+              // suggesting long names — a typo'd '-sourc' must not read as unknown '-s'
+              handled = true
+              if defaultSubCase != null then selectSub(defaultSubCase, idx - 1)
+              else
+                val candidates = Vector.newBuilder[String]
+                command.opts.foreach { option =>
+                  if !option.hidden then
+                    candidates += option.long
+                    candidates ++= option.aliases
+                }
+                val display    = if eq == -1 then token else token.substring(0, eq)
+                val suggestion = Runtime
+                  .suggest(display.drop(1), candidates.result())
+                  .map(s => s" (did you mean '-$s'?)")
+                  .getOrElse("")
+                report(s"unknown option '$display'$suggestion")
           var i    = 1
-          var stop = false
+          var stop = handled
           while i < token.length && !stop do
             val c    = token(i)
             val spec = shortSpec(c)
