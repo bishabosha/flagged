@@ -75,14 +75,20 @@ sealed trait Parser[A]:
     case c: Parser.Command[?] => c.impl
     case _                    => Assemble.singleValueCommand(this)
 
-  /** Parse `args`, reporting help/errors as values on the `Err` channel. */
-  final def parse(args: Seq[String]): ParseResult[A] = parse(args, typeName)
-
-  final def parse(args: Seq[String], prog: String): ParseResult[A] =
+  /** Parse `args`, reporting help/errors as values on the `Err` channel. `prog` is the program
+    * name shown in usage, help, and error messages; empty (the default) derives it from the type,
+    * method, or object name.
+    */
+  final def parse(
+      args: Seq[String],
+      prog: String = "",
+      settings: ParserSettings = ParserSettings.default
+  ): ParseResult[A] =
     val indexed = args match
       case xs: IndexedSeq[?] => xs.asInstanceOf[IndexedSeq[String]]
       case _                 => ArraySeq.unsafeWrapArray(args.toArray)
-    Engine.run(command, prog, Vector.empty, indexed, 0).asInstanceOf[ParseResult[A]]
+    val name = if prog.isEmpty then typeName else prog
+    Engine.run(command, name, Vector.empty, indexed, 0, settings).asInstanceOf[ParseResult[A]]
 
   /** The rendered top-level help screen. */
   final def help: String = help(typeName)

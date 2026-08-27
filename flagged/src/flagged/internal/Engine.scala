@@ -28,9 +28,11 @@ private[flagged] object Engine:
       prog: String,
       path: IndexedSeq[String],
       args: IndexedSeq[String],
-      from: Int
+      from: Int,
+      settings: flagged.ParserSettings
   ): ParseResult[Any] =
-    val root: Frame^ = Frame(cmd, prog, path, args, from, null, null, -1, false)
+    val sep          = settings.valueSeparator.char
+    val root: Frame^ = Frame(cmd, prog, path, args, from, null, null, -1, false, sep)
     Result
       .task:
         var frame: Frame^ = root
@@ -53,7 +55,8 @@ private[flagged] object Engine:
               frame,
               selected.name,
               group.index,
-              group.optional
+              group.optional,
+              sep
             )
 
         // Every frame builds into its own spare result slot — `finishInto` takes one storage
@@ -82,7 +85,8 @@ private[flagged] object Engine:
       val parent: Frame^,
       pathName: String,
       val parentOutIndex: Int,
-      val parentOptional: Boolean
+      val parentOptional: Boolean,
+      sep: Char // the option-value separator from ParserSettings, threaded root to leaf
   ) extends Mentions, caps.Mutable:
     private val n = command.arity
 
@@ -343,7 +347,7 @@ private[flagged] object Engine:
               idx = args.length
             case None => noMoreOpts = true
         else if token.startsWith("--") then
-          val eq          = token.indexOf('=')
+          val eq          = token.indexOf(sep)
           val key         = if eq == -1 then token else token.substring(0, eq)
           val inlineValue = if eq == -1 then null else token.substring(eq + 1)
           if key == "--help" then
@@ -403,7 +407,7 @@ private[flagged] object Engine:
                   val attached = i + 1 < token.length
                   val raw      =
                     if attached then
-                      if token(i + 1) == '=' then token.substring(i + 2)
+                      if token(i + 1) == sep then token.substring(i + 2)
                       else token.substring(i + 1)
                     else takeValue(spec.shortDisplay)
                   if raw != null then
