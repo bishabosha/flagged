@@ -1,6 +1,6 @@
 // scala-cli script usage: parse the script's `args` array directly. From the repo root:
 //   ./mill flagged.jvm.compile && scala-cli run examples/src/backup.sc -- --dest /tmp --dry-run src1 src2
-//> using scala 3.9.0-RC4
+//> using scala 3.9.0
 //> using dep ch.epfl.lamp::steps::0.2.1
 //> using jars ../../out/flagged/jvm/compile.dest/classes
 import flagged.*

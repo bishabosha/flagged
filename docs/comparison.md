@@ -29,7 +29,7 @@ according to a schema. They differ in how to construct the schema, when validati
 
 | Feature | Supported by Flagged? | And other libraries? |
 | --- | --- | --- |
-| `--name value` / `--name=value` | yes / yes | all (scopt also `--name:value`) |
+| `--name value` / `--name=value` | yes / yes; `ParserSettings(ValueSeparator.Colon)` switches the separator to `--name:value` | all (scopt also `--name:value`) |
 | Short option values `-s value` / `-svalue` / `-s=value` | all three forms | mainargs, picocli: all three; scopt: no attached form; scallop: no `=` form; case-app: separate only |
 | Short-flag bundling (`-abc`, `-ovalue` at end) | yes | mainargs, scallop, picocli; scopt: flags only |
 | `--` end of options | yes, plus typed `Trailing` (absent vs present-but-empty) | all except mainargs (`--` is a plain value); case-app raw `unparsed` |
