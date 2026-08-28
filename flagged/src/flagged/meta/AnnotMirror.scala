@@ -40,6 +40,11 @@ sealed trait ArgumentList[A <: Annotation, Names <: Tuple, Values <: Tuple, Indi
   * compile-time-constant arguments (single constants, or tuples of constants such as an `aliases`
   * list) are mirrored — the same restriction a compiler intrinsic would need so that every provided
   * argument has a singleton type and the annotation can be rebuilt through its `Mirror.ProductOf`.
+  * A constant argument need not be a literal: constant-folded expressions (`"usage: " + "..."`) and
+  * references to constant-typed `final val`s qualify. A type-parameterised annotation mirrors at
+  * its applied type (`Mirror.ProductOf` supports those). An occurrence that fails the restriction —
+  * a non-constant argument, a curried constructor — is left out of the mirror with a compile-time
+  * warning.
   */
 sealed trait AnnotMirror[T]:
   /** Tuple of [[ArgumentList]] types: the annotations on `T` itself. */

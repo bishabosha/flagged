@@ -146,7 +146,9 @@ object flagged extends Module:
       def munitVersion = Versions.munit
 
   object jvm extends FlaggedModule, JvmNativeSources:
-    object test extends FlaggedTests
+    object test extends FlaggedTests:
+      // WarningsSuite (test/src-jvm) drives the dotty compiler to assert emitted diagnostics
+      def mvnDeps = super.mvnDeps() ++ Seq(mvn"org.scala-lang::scala3-compiler:${Versions.scala}")
 
   object js extends FlaggedModule, BaseJsModule:
     object test extends FlaggedTests, ScalaJSTests
@@ -202,6 +204,9 @@ object flagged extends Module:
       def checked = flagged.jvm
       object test extends StableTests:
         def checkedTest = flagged.jvm.test
+        // the shared WarningsSuite drives the dotty compiler to assert emitted diagnostics
+        def mvnDeps = super.mvnDeps() ++
+          Seq(mvn"org.scala-lang::scala3-compiler:${Versions.scala}")
 
     object js extends StableModule, BaseJsModule:
       def checked = flagged.js
@@ -286,6 +291,11 @@ object examples extends BaseModule:
   * last sync of `branch` into `base`: the newest derive commit reachable from `base` records the
   * source revision it was generated from, and PRs merged after that revision are listed — all of
   * them when `base` carries no derive commit yet.
+  *
+  * Build files stay branch-specific, so a change on this branch that the derived branch's build
+  * also needs travels as `stable-build.patch` — a unified diff against the derived branch's
+  * files, applied during derivation: skipped once the derived branch already carries it, and an
+  * error when it matches neither way (regenerate or delete it then).
   */
 def deriveStable(
     branch: String = "mutable-spec-stable",
@@ -401,9 +411,18 @@ def deriveStable(
     // each branch keeps its own build definition (this branch's build carries the
     // capture-checking setup and this task; the derived branch's build compiles the plain
     // sources) — so these are neither copied from the source branch nor deleted on the target;
-    // `.claude` is local tool configuration, likewise left alone
+    // `.claude` is local tool configuration, likewise left alone; `stable-build.patch` is
+    // derivation machinery (applied below, never mirrored)
     val branchSpecific =
-      Seq("build.mill", "mill", "mill.bat", ".mill-version", "uncheck-plugin", ".claude")
+      Seq(
+        "build.mill",
+        "mill",
+        "mill.bat",
+        ".mill-version",
+        "uncheck-plugin",
+        ".claude",
+        "stable-build.patch"
+      )
 
     // mirror the working tree (tracked and untracked-but-not-ignored files): delete-then-copy
     // so files removed on the source branch also disappear from the derived branch (`git rm`
@@ -421,6 +440,23 @@ def deriveStable(
       val target = wt / "flagged" / name
       os.remove.all(target)
       os.copy(gen, target, createFolders = true)
+
+    // carry pending build deltas to the derived branch's own build files (see the task doc);
+    // the patch travels over stdin — `repo` stringifies sandbox-relative under mill, useless
+    // as an argument to a subprocess running in `wt`
+    val buildPatch = repo / "stable-build.patch"
+    val patch      = if os.exists(buildPatch) then os.read(buildPatch) else ""
+    if patch.trim.nonEmpty then
+      def tryApply(extra: String*): os.CommandResult =
+        os.proc("git", "apply", extra)
+          .call(cwd = wt, check = false, stdin = patch, stderr = os.Pipe)
+      val applied = tryApply()
+      if applied.exitCode != 0 && tryApply("--reverse", "--check").exitCode != 0 then
+        sys.error(
+          s"stable-build.patch neither applies to '$branch' nor is already applied there — " +
+            "regenerate it against that branch's build files, or delete it if it is spent\n" +
+            applied.err.text()
+        )
 
     val conf        = os.read(repo / ".scalafmt.conf")
     val derivedConf =

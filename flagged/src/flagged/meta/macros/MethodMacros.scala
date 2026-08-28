@@ -247,6 +247,7 @@ object MethodMacros:
             "(commands are invoked without a receiver, so a per-instance object has none)"
         )
       val (refined, instance) = groupMirror[T](mod, mod.name)
+      reportDropped()
       refined.asType match
         case '[t] =>
           '{ $instance.asInstanceOf[t & MethodsMirror.Of[T]] }.asExprOf[MethodsMirror.Of[T]]
