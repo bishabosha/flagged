@@ -1,6 +1,15 @@
 --- a/build.mill
 +++ b/build.mill
-@@ -67,7 +67,9 @@
+@@ -12,7 +12,7 @@ import mill.scalanativelib.api.{LTO, ReleaseMode}
+ import mill.contrib.jmh.JmhModule
+ 
+ object Versions:
+-  val scala       = "3.9.0-RC4"
++  val scala       = "3.9.0"
+   val munit       = "1.1.1"
+   val scalaJs     = "1.22.0"
+   val scalaNative = "0.5.12"
+@@ -67,7 +67,9 @@ object flagged extends Module:
        def munitVersion = Versions.munit
  
    object jvm extends FlaggedModule, PublishSettings, JvmNativeSources:
