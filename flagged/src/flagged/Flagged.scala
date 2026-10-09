@@ -29,23 +29,28 @@ object Flagged:
     * reuses it — unlike the one-shot methods on [[Flagged]], which re-resolve the grammar per call.
     */
   final class EntryPoint[A] private[Flagged] (val parser: Parser[A]):
-    /** Parse `args`, reporting help and errors as values on the `Err` channel. */
-    def parse(args: Seq[String]): ParseResult[A] = parser.parse(args)
-
-    /** [[parse]] with `prog` as the program name shown in usage, help, and error messages, instead
-      * of one derived from the type, method, or object name.
+    /** Parse `args`, reporting help and errors as values on the `Err` channel. `prog` is the
+      * program name shown in usage, help, and error messages; empty (the default) derives it from
+      * the type, method, or object name.
       */
-    def parse(args: Seq[String], prog: String): ParseResult[A] = parser.parse(args, prog)
+    def parse(
+        args: Seq[String],
+        prog: String = "",
+        settings: ParserSettings = ParserSettings.default
+    ): ParseResult[A] = parser.parse(args, prog, settings)
 
     /** Parse `args`; on `--help` print the help screen and exit 0, on error print a message to
-      * stderr and exit 2. Intended for `@main` methods and scripts.
+      * stderr and exit 2. Intended for `@main` methods and scripts. `prog` is the program name
+      * shown in usage, help, and error messages; empty (the default) derives it from the type,
+      * method, or object name.
       */
-    def parseOrExit(args: Seq[String]): A = orExit(parser.parse(args), parser.typeName)
-
-    /** [[parseOrExit]] with `prog` as the program name shown in usage, help, and error messages,
-      * instead of one derived from the type, method, or object name.
-      */
-    def parseOrExit(args: Seq[String], prog: String): A = orExit(parser.parse(args, prog), prog)
+    def parseOrExit(
+        args: Seq[String],
+        prog: String = "",
+        settings: ParserSettings = ParserSettings.default
+    ): A =
+      val name = if prog.isEmpty then parser.typeName else prog
+      orExit(parser.parse(args, name, settings), name)
 
     /** The rendered top-level help screen, without parsing anything. */
     def help: String = parser.help
@@ -61,26 +66,27 @@ object Flagged:
 
   /** Parse `args`, reporting help and errors as values on the `Err` channel. The grammar comes from
     * implicit search — the [[Parser]] for `A` when one exists, otherwise `A`'s `@cmd` methods (see
-    * [[Entry]]) — so `A` may be a `derives` type or an object holding commands.
+    * [[Entry]]) — so `A` may be a `derives` type or an object holding commands. `prog` is the
+    * program name shown in usage, help, and error messages; empty (the default) derives it from the
+    * type, method, or object name.
     */
-  def parse[A](args: Seq[String])(using e: Entry[A]): ParseResult[e.Out] = entry[A].parse(args)
-
-  /** [[parse]] with `prog` as the program name shown in usage, help, and error messages, instead of
-    * one derived from the type, method, or object name.
-    */
-  def parse[A](args: Seq[String], prog: String)(using e: Entry[A]): ParseResult[e.Out] =
-    entry[A].parse(args, prog)
+  def parse[A](
+      args: Seq[String],
+      prog: String = "",
+      settings: ParserSettings = ParserSettings.default
+  )(using e: Entry[A]): ParseResult[e.Out] = entry[A].parse(args, prog, settings)
 
   /** Parse `args`, selecting the grammar like [[parse]]; on `--help` print the help screen and exit
     * 0, on error print a message to stderr and exit 2. Intended for `@main` methods and scripts.
+    * `prog` is the program name shown in usage, help, and error messages; empty (the default)
+    * derives it from the type, method, or object name.
     */
-  def parseOrExit[A](args: Seq[String])(using e: Entry[A]): e.Out = entry[A].parseOrExit(args)
-
-  /** [[parseOrExit]] with `prog` as the program name shown in usage, help, and error messages,
-    * instead of one derived from the type, method, or object name.
-    */
-  def parseOrExit[A](args: Seq[String], prog: String)(using e: Entry[A]): e.Out =
-    entry[A].parseOrExit(args, prog)
+  def parseOrExit[A](
+      args: Seq[String],
+      prog: String = "",
+      settings: ParserSettings = ParserSettings.default
+  )(using e: Entry[A]): e.Out =
+    entry[A].parseOrExit(args, prog, settings)
 
   private def orExit[A](result: ParseResult[A], prog: String): A = result match
     case Result.Ok(a)                      => a
